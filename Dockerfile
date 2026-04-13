@@ -20,7 +20,7 @@ RUN pip install uv --no-cache-dir
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies to local directory
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen
 
 # Copy source code
 COPY src/ ./src/
@@ -62,6 +62,7 @@ COPY --from=builder /app/scripts ./scripts
 # Use virtual environment python
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -69,7 +70,7 @@ USER appuser
 
 # Environment variables
 ENV WCM_DB_HOST=db
-ENV WCM_DB_PORT=5432
+ENV WCM_DB_PORT=5433
 ENV WCM_DB_NAME=facerec
 ENV WCM_DB_USER=postgres
 ENV WCM_DB_PASSWORD=postgres
