@@ -21,7 +21,7 @@ services:
     networks:
       - wcm-network
     volumes:
-      - /tmp/deepface_weights:/home/appuser/.deepface:ro
+      - /tmp/deepface_weights:/home/appuser/.deepface
 
   db:
     image: pgvector/pgvector:pg17
