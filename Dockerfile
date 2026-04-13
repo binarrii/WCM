@@ -22,6 +22,14 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies to local directory
 RUN uv sync --frozen --no-install-project
 
+# Clean venv in builder (before COPY to reduce stage-2 size)
+RUN find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*test*" -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*tests" -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv/lib/python3.12/site-packages/ -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv/lib/python3.12/site-packages/ -type f -name "*.pyc" -delete 2>/dev/null || true && \
+    find /app/.venv/lib/python3.12/site-packages/ -type f -name "*.pyo" -delete 2>/dev/null || true && \
+    rm -rf /app/.venv/lib/python3.12/site-packages/clang 2>/dev/null || true
+
 # Copy source code
 COPY src/ ./src/
 COPY api/ ./api/
@@ -51,7 +59,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder
+# Copy cleaned virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
@@ -70,7 +78,7 @@ USER appuser
 
 # Environment variables
 ENV WCM_DB_HOST=db
-ENV WCM_DB_PORT=5433
+ENV WCM_DB_PORT=5432
 ENV WCM_DB_NAME=facerec
 ENV WCM_DB_USER=postgres
 ENV WCM_DB_PASSWORD=postgres
