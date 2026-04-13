@@ -20,6 +20,7 @@ dependencies = [
     "opencv-python-headless>=4.10.0.20241230",
     "numpy<2.2.1",
     "tf-keras>=2.21.0",
+    "tensorflow-cpu>=2.21.0",
     "xlrd>=2.0.2",
 ]
 

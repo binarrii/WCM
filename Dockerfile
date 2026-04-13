@@ -22,13 +22,18 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies to local directory
 RUN uv sync --frozen --no-install-project
 
+# Force opencv-python-headless (remove opencv-python if present, install headless)
+RUN /app/.venv/bin/pip uninstall -y opencv-python 2>/dev/null || true && \
+    /app/.venv/bin/pip install --no-cache-dir opencv-python-headless
+
 # Clean venv in builder (before COPY to reduce stage-2 size)
 RUN find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*test*" -exec rm -rf {} + 2>/dev/null || true && \
     find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*tests" -exec rm -rf {} + 2>/dev/null || true && \
     find /app/.venv/lib/python3.12/site-packages/ -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
     find /app/.venv/lib/python3.12/site-packages/ -type f -name "*.pyc" -delete 2>/dev/null || true && \
     find /app/.venv/lib/python3.12/site-packages/ -type f -name "*.pyo" -delete 2>/dev/null || true && \
-    rm -rf /app/.venv/lib/python3.12/site-packages/clang 2>/dev/null || true
+    rm -rf /app/.venv/lib/python3.12/site-packages/clang 2>/dev/null || true && \
+    rm -rf /app/.venv/lib/python3.12/site-packages/opencv_python.libs 2>/dev/null || true
 
 # Copy source code
 COPY src/ ./src/
