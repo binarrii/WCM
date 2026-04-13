@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wcm-facerec-api
+    ports:
+      - "8000:8000"
+    environment:
+      - WCM_DB_HOST=db
+      - WCM_DB_PORT=5432
+      - WCM_DB_NAME=facerec
+      - WCM_DB_USER=postgres
+      - WCM_DB_PASSWORD=postgres
+      - WCM_API_HOST=0.0.0.0
+      - WCM_API_PORT=8000
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - wcm-network
+
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: wcm-facerec-db
+    environment:
+      - POSTGRES_DB=facerec
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - wcm-network
+
+networks:
+  wcm-network:
+    driver: bridge
+
+volumes:
+  pgdata:
