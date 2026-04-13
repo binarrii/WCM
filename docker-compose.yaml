@@ -8,7 +8,7 @@ services:
       - "8000:8000"
     environment:
       - WCM_DB_HOST=db
-      - WCM_DB_PORT=5433
+      - WCM_DB_PORT=5432
       - WCM_DB_NAME=facerec
       - WCM_DB_USER=postgres
       - WCM_DB_PASSWORD=postgres
@@ -20,6 +20,8 @@ services:
     restart: unless-stopped
     networks:
       - wcm-network
+    volumes:
+      - /tmp/deepface_weights:/home/appuser/.deepface:ro
 
   db:
     image: pgvector/pgvector:pg17
@@ -28,9 +30,8 @@ services:
       - POSTGRES_DB=facerec
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - PGPORT=5433
     ports:
-      - "5433:5433"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
