@@ -1,15 +1,6 @@
 # Stage 1: Build dependencies
 FROM python:3.12-slim AS builder
 
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG http_proxy
-ARG https_proxy
-
-ENV HTTP_PROXY=$HTTP_PROXY
-ENV HTTPS_PROXY=$HTTPS_PROXY
-ENV http_proxy=$http_proxy
-ENV https_proxy=$https_proxy
 
 WORKDIR /app
 
@@ -47,15 +38,6 @@ COPY scripts/ ./scripts/
 # Stage 2: Minimal runtime image
 FROM python:3.12-slim
 
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG http_proxy
-ARG https_proxy
-
-ENV HTTP_PROXY=$HTTP_PROXY
-ENV HTTPS_PROXY=$HTTPS_PROXY
-ENV http_proxy=$http_proxy
-ENV https_proxy=$https_proxy
 
 WORKDIR /app
 
