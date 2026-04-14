@@ -8,29 +8,29 @@ from typing import Optional, Union
 import cv2
 import httpx
 import numpy as np
-from flask import Blueprint, request, jsonify
+from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
 from PIL import Image
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 
-api_bp = Blueprint("api", __name__)
+api_bp = APIRouter()
 
 
-@api_bp.route("/health", methods=["GET"])
-def health_check():
+@api_bp.get("/health")
+async def health_check():
     """Health check endpoint."""
-    return jsonify({
+    return {
         "status": "healthy",
         "model": settings.deepface_model,
         "embedding_dim": settings.embedding_dim,
         "version": __version__,
-    })
+    }
 
 
-@api_bp.route("/detect", methods=["POST"])
-def detect_faces():
+@api_bp.post("/detect")
+async def detect_faces(request: Request):
     """Detect faces in an image.
 
     Accepts either an uploaded file or a URL via form data.
@@ -39,26 +39,42 @@ def detect_faces():
     img_source: Union[str, Path, bytes]
     image_source = "unknown"
 
-    # Get file upload or URL
-    if "file" in request.files:
-        file = request.files["file"]
-        if file.filename:
-            contents = file.read()
+    content_type = request.headers.get("content-type", "")
+
+    # Check if it's form data with file
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        file = form.get("file")
+        if file and file.filename:
+            contents = await file.read()
             if len(contents) > settings.max_file_size_mb * 1024 * 1024:
-                return jsonify({"error": "File too large"}), 413
+                raise HTTPException(status_code=413, detail="File too large")
             img_source = contents
             image_source = file.filename
-    elif request.form.get("url"):
-        url = request.form.get("url")
+        elif form.get("url"):
+            url = form.get("url")
+            try:
+                resp = httpx.get(url, timeout=60.0)
+                resp.raise_for_status()
+                img_source = resp.content
+                image_source = url
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+        else:
+            raise HTTPException(status_code=400, detail="Either file or url must be provided")
+    else:
+        # JSON body
+        data = await request.json()
+        url = data.get("url")
+        if not url:
+            raise HTTPException(status_code=400, detail="url is required")
         try:
             resp = httpx.get(url, timeout=60.0)
             resp.raise_for_status()
             img_source = resp.content
             image_source = url
         except Exception as e:
-            return jsonify({"error": f"Failed to fetch image: {str(e)}"}), 400
-    else:
-        return jsonify({"error": "Either file or url must be provided"}), 400
+            raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
 
     temp_path = None
     try:
@@ -79,68 +95,78 @@ def detect_faces():
                 "facial_area": face.get("facial_area", {}),
             })
 
-        return jsonify({
+        return {
             "faces": results,
             "image_source": image_source,
-        })
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        return jsonify({"error": f"Detection failed: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Detection failed: {str(e)}")
     finally:
         if temp_path and temp_path.exists():
             temp_path.unlink()
 
 
-@api_bp.route("/register", methods=["POST"])
-def register_face():
+@api_bp.post("/register")
+async def register_face(request: Request):
     """Register a face in the database.
 
     Accepts form data with name and either file or url.
     """
     engine = get_face_engine()
 
-    name = request.form.get("name")
-    if not name:
-        return jsonify({"error": "name is required"}), 400
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        name = form.get("name")
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
 
-    img_source: Union[str, Path, bytes]
+        if "file" in form:
+            file = form.get("file")
+            if file and file.filename:
+                contents = await file.read()
+                if len(contents) > settings.max_file_size_mb * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="File too large")
+                img_source = contents
+            else:
+                raise HTTPException(status_code=400, detail="Either file or url must be provided")
+        elif form.get("url"):
+            img_source = form.get("url")
+        else:
+            raise HTTPException(status_code=400, detail="Either file or url must be provided")
 
-    if "file" in request.files:
-        file = request.files["file"]
-        if file.filename:
-            contents = file.read()
-            if len(contents) > settings.max_file_size_mb * 1024 * 1024:
-                return jsonify({"error": "File too large"}), 413
-            img_source = contents
-    elif request.form.get("url"):
-        img_source = request.form.get("url")
+        try:
+            file_url = form.get("url") if "file" in form else None
+            record = engine.register_from_image(
+                name=name,
+                img_source=img_source,
+                file_url=file_url,
+            )
+            return {
+                "id": str(record.id),
+                "name": record.name,
+                "message": "Face registered successfully",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
     else:
-        return jsonify({"error": "Either file or url must be provided"}), 400
-
-    try:
-        record = engine.register_from_image(
-            name=name,
-            img_source=img_source,
-            file_url=request.form.get("url") if "file" in request.files else None,
-        )
-        return jsonify({
-            "id": str(record.id),
-            "name": record.name,
-            "message": "Face registered successfully",
-        })
-    except Exception as e:
-        return jsonify({"error": f"Registration failed: {str(e)}"}), 500
+        raise HTTPException(status_code=400, detail="Content-Type must be multipart/form-data")
 
 
-@api_bp.route("/search", methods=["POST"])
-def search_faces():
+@api_bp.post("/search")
+async def search_faces(request: Request):
     """Search for similar faces in the database."""
     engine = get_face_engine()
 
-    data = request.get_json() or {}
-    url = data.get("url")
+    data = request.get_json()
+    if not data:
+        raise HTTPException(status_code=400, detail="Request body required")
 
+    url = data.get("url")
     if not url:
-        return jsonify({"error": "url is required for search"}), 400
+        raise HTTPException(status_code=400, detail="url is required for search")
 
     name = data.get("name")
     top_k = data.get("top_k", 10)
@@ -157,56 +183,61 @@ def search_faces():
             threshold=threshold,
         )
 
-        return jsonify({
+        return {
             "results": results,
             "query_embedding_dim": settings.embedding_dim,
-        })
+        }
     except httpx.HTTPError as e:
-        return jsonify({"error": f"Failed to fetch image: {str(e)}"}), 400
+        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
     except Exception as e:
-        return jsonify({"error": f"Search failed: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
-@api_bp.route("/video/register", methods=["POST"])
-def register_video_faces():
+@api_bp.post("/video/register")
+async def register_video_faces(request: Request):
     """Register all faces from a video file.
 
     Samples frames at the specified interval and registers all detected faces.
     """
     engine = get_face_engine()
 
-    name = request.form.get("name")
-    if not name:
-        return jsonify({"error": "name is required"}), 400
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        raise HTTPException(status_code=400, detail="Content-Type must be multipart/form-data")
 
-    sample_interval = float(request.form.get("sample_interval", 1.0))
+    form = await request.form()
+    name = form.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    sample_interval = float(form.get("sample_interval", 1.0))
     if sample_interval < 0.1 or sample_interval > 10.0:
         sample_interval = 1.0
 
     video_path = None
     try:
-        if "file" in request.files:
-            file = request.files["file"]
-            if file.filename:
-                contents = file.read()
+        if "file" in form:
+            file = form.get("file")
+            if file and file.filename:
+                contents = await file.read()
                 if len(contents) > settings.max_file_size_mb * 1024 * 1024:
-                    return jsonify({"error": "File too large"}), 413
+                    raise HTTPException(status_code=413, detail="File too large")
                 video_path = Path(f"/tmp/facerec_video_{os.urandom(8).hex()}.mp4")
                 with open(video_path, "wb") as f:
                     f.write(contents)
-        elif request.form.get("url"):
-            url = request.form.get("url")
+        elif form.get("url"):
+            url = form.get("url")
             resp = httpx.get(url, timeout=120.0)
             resp.raise_for_status()
             video_path = Path(f"/tmp/facerec_video_{os.urandom(8).hex()}.mp4")
             with open(video_path, "wb") as f:
                 f.write(resp.content)
         else:
-            return jsonify({"error": "Either file or url must be provided"}), 400
+            raise HTTPException(status_code=400, detail="Either file or url must be provided")
 
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
-            return jsonify({"error": "Could not open video file"}), 400
+            raise HTTPException(status_code=400, detail="Could not open video file")
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_idx = 0
@@ -256,14 +287,16 @@ def register_video_faces():
             frame_idx += 1
 
         cap.release()
-        return jsonify({
+        return {
             "name": name,
             "total_frames_processed": frame_idx,
             "faces_registered": registered_count,
             "errors": errors if errors else None,
-        })
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        return jsonify({"error": f"Video processing failed: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Video processing failed: {str(e)}")
     finally:
         if video_path and video_path.exists():
             video_path.unlink()

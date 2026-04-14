@@ -5,8 +5,10 @@ description = "Large Scale Face Recognition with DeepFace + pgvector"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "flask>=3.0.0",
-    "flask-cors>=5.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "gunicorn>=23.0.0",
+    "pydantic>=2.10.0",
     "deepface>=0.0.89",
     "psycopg2-binary>=2.9.10",
     "sqlalchemy>=2.0.36",
@@ -17,7 +19,7 @@ dependencies = [
     "opencv-python-headless>=4.10.0.20241230",
     "numpy<2.2.1",
     "tf-keras>=2.21.0",
-    "tensorflow-cpu>=2.21.0",
+    "tensorflow>=2.21.0",
     "xlrd>=2.0.2",
 ]
 

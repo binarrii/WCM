@@ -13,12 +13,12 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies to local directory
 RUN uv sync --frozen --no-install-project
 
-# Force opencv-python-headless and tensorflow-cpu
-# Use uv pip for venv package management
+# Force opencv-python-headless (opencv-python may be installed as deepface dependency)
 RUN uv pip uninstall --python /app/.venv/bin/python opencv-python opencv-python-headless 2>/dev/null || true
 RUN uv pip install --python /app/.venv/bin/python --no-cache opencv-python-headless
-RUN uv pip uninstall --python /app/.venv/bin/python tensorflow 2>/dev/null || true
-RUN uv pip install --python /app/.venv/bin/python --no-cache tensorflow-cpu
+
+# Install tensorflow-cpu for x86_64 using pip (uv doesn't support --platform for this)
+RUN pip install --no-cache-dir --only-binary=:all: --platform manylinux_x86_64 --target /app/.venv/lib/python3.12/site-packages --python-version 3.12 tensorflow-cpu
 
 # Clean venv in builder (before COPY to reduce stage-2 size)
 RUN find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*test*" -exec rm -rf {} + 2>/dev/null || true && \
@@ -80,4 +80,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health 2>/dev/null || exit 1
 
-CMD ["python", "-m", "api.main"]
+CMD ["sh", "-c", "gunicorn api.main:app --workers 4 --bind 0.0.0.0:8000 --timeout 60 --worker-class uvicorn.workers.UvicornWorker"]
