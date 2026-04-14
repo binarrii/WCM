@@ -1,50 +1,46 @@
-"""FastAPI application for face recognition service."""
+"""Flask application for face recognition service."""
 
-import uvicorn
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
+from flask import Flask
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
 from wcm_facerec.database import init_db
 
-from .routes import router
-
-app = FastAPI(
-    title="WCM Face Recognition API",
-    description="Large Scale Face Recognition with DeepFace + pgvector",
-    version=__version__,
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include routes
-app.include_router(router, prefix="/api/v1", tags=["face-recognition"])
+from .routes import api_bp
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup."""
+def create_app():
+    """Create and configure the Flask application."""
+    app = Flask(__name__)
+
+    # Enable CORS
+    @app.after_request
+    def add_cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return response
+
+    # Register blueprints
+    app.register_blueprint(api_bp, url_prefix="/api/v1")
+
+    # Initialize database
     try:
         init_db()
     except Exception as e:
         print(f"Warning: Database initialization failed: {e}")
 
+    return app
+
+
+app = create_app()
+
 
 def main():
     """Run the application."""
-    uvicorn.run(
-        "api.main:app",
+    app.run(
         host=settings.api_host,
         port=settings.api_port,
-        reload=False,
+        debug=False,
     )
 
 

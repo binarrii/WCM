@@ -8,65 +8,59 @@ from typing import Optional, Union
 import cv2
 import httpx
 import numpy as np
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from flask import Blueprint, request, jsonify
 from PIL import Image
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 
-from .schemas import (
-    DetectFaceResponse,
-    FaceDetectionResult,
-    FaceSearchResult,
-    HealthResponse,
-    RegisterFaceRequest,
-    RegisterFaceResponse,
-    SearchFaceRequest,
-    SearchFaceResponse,
-)
-
-router = APIRouter()
+api_bp = Blueprint("api", __name__)
 
 
-@router.get("/health", response_model=HealthResponse)
-async def health_check():
+@api_bp.route("/health", methods=["GET"])
+def health_check():
     """Health check endpoint."""
-    return HealthResponse(
-        status="healthy",
-        model=settings.deepface_model,
-        embedding_dim=settings.embedding_dim,
-        version=__version__,
-    )
+    return jsonify({
+        "status": "healthy",
+        "model": settings.deepface_model,
+        "embedding_dim": settings.embedding_dim,
+        "version": __version__,
+    })
 
 
-@router.post("/detect", response_model=DetectFaceResponse)
-async def detect_faces(
-    file: UploadFile | None = File(None),
-    url: str | None = Query(None),
-):
+@api_bp.route("/detect", methods=["POST"])
+def detect_faces():
     """Detect faces in an image.
 
-    Accepts either an uploaded file or a URL.
+    Accepts either an uploaded file or a URL via form data.
     """
     engine = get_face_engine()
     img_source: Union[str, Path, bytes]
+    image_source = "unknown"
 
-    if file:
-        contents = await file.read()
-        if len(contents) > settings.max_file_size_mb * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File too large")
-        img_source = contents
-        image_source = file.filename or "uploaded_file"
-    elif url:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            img_source = response.content
+    # Get file upload or URL
+    if "file" in request.files:
+        file = request.files["file"]
+        if file.filename:
+            contents = file.read()
+            if len(contents) > settings.max_file_size_mb * 1024 * 1024:
+                return jsonify({"error": "File too large"}), 413
+            img_source = contents
+            image_source = file.filename
+    elif request.form.get("url"):
+        url = request.form.get("url")
+        try:
+            resp = httpx.get(url, timeout=60.0)
+            resp.raise_for_status()
+            img_source = resp.content
             image_source = url
+        except Exception as e:
+            return jsonify({"error": f"Failed to fetch image: {str(e)}"}), 400
     else:
-        raise HTTPException(status_code=400, detail="Either file or url must be provided")
+        return jsonify({"error": "Either file or url must be provided"}), 400
 
+    temp_path = None
     try:
         # Handle bytes - save temporarily
         if isinstance(img_source, bytes):
@@ -79,127 +73,142 @@ async def detect_faces(
 
         results = []
         for i, face in enumerate(faces):
-            results.append(FaceDetectionResult(
-                face_id=f"face_{i}",
-                confidence=face.get("confidence", 0.0),
-                facial_area=face.get("facial_area", {}),
-            ))
+            results.append({
+                "face_id": f"face_{i}",
+                "confidence": face.get("confidence", 0.0),
+                "facial_area": face.get("facial_area", {}),
+            })
 
-        return DetectFaceResponse(
-            faces=results,
-            image_source=image_source,
-        )
+        return jsonify({
+            "faces": results,
+            "image_source": image_source,
+        })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Detection failed: {str(e)}")
+        return jsonify({"error": f"Detection failed: {str(e)}"}), 500
     finally:
-        if isinstance(img_source, Path) and str(img_source).startswith("/tmp/facerec_"):
-            img_source.unlink(missing_ok=True)
+        if temp_path and temp_path.exists():
+            temp_path.unlink()
 
 
-@router.post("/register", response_model=RegisterFaceResponse)
-async def register_face(
-    name: str = Form(...),
-    file: UploadFile | None = File(None),
-    url: str | None = Form(None),
-):
+@api_bp.route("/register", methods=["POST"])
+def register_face():
     """Register a face in the database.
 
-    Accepts either an uploaded file or a URL.
+    Accepts form data with name and either file or url.
     """
     engine = get_face_engine()
+
+    name = request.form.get("name")
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
     img_source: Union[str, Path, bytes]
 
-    if file:
-        contents = await file.read()
-        if len(contents) > settings.max_file_size_mb * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File too large")
-        img_source = contents
-    elif url:
-        img_source = url
+    if "file" in request.files:
+        file = request.files["file"]
+        if file.filename:
+            contents = file.read()
+            if len(contents) > settings.max_file_size_mb * 1024 * 1024:
+                return jsonify({"error": "File too large"}), 413
+            img_source = contents
+    elif request.form.get("url"):
+        img_source = request.form.get("url")
     else:
-        raise HTTPException(status_code=400, detail="Either file or url must be provided")
+        return jsonify({"error": "Either file or url must be provided"}), 400
 
     try:
-        record = await engine.register_from_image(
+        record = engine.register_from_image(
             name=name,
             img_source=img_source,
-            file_url=url if file else None,
+            file_url=request.form.get("url") if "file" in request.files else None,
         )
-        return RegisterFaceResponse(
-            id=str(record.id),
-            name=record.name,
-            message="Face registered successfully",
-        )
+        return jsonify({
+            "id": str(record.id),
+            "name": record.name,
+            "message": "Face registered successfully",
+        })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        return jsonify({"error": f"Registration failed: {str(e)}"}), 500
 
 
-@router.post("/search", response_model=SearchFaceResponse)
-async def search_faces(request: SearchFaceRequest):
+@api_bp.route("/search", methods=["POST"])
+def search_faces():
     """Search for similar faces in the database."""
     engine = get_face_engine()
 
-    if not request.url:
-        raise HTTPException(status_code=400, detail="url is required for search")
+    data = request.get_json() or {}
+    url = data.get("url")
+
+    if not url:
+        return jsonify({"error": "url is required for search"}), 400
+
+    name = data.get("name")
+    top_k = data.get("top_k", 10)
+    threshold = data.get("threshold", 0.4)
 
     try:
-        # Generate embedding from URL
-        embedding = await engine.generate_embedding_async(request.url)
+        import asyncio
+        embedding = asyncio.run(engine.generate_embedding_async(url))
 
         results = engine.search(
             embedding=embedding,
-            name=request.name,
-            top_k=request.top_k,
-            threshold=request.threshold,
+            name=name,
+            top_k=top_k,
+            threshold=threshold,
         )
 
-        return SearchFaceResponse(
-            results=[FaceSearchResult(**r) for r in results],
-            query_embedding_dim=settings.embedding_dim,
-        )
+        return jsonify({
+            "results": results,
+            "query_embedding_dim": settings.embedding_dim,
+        })
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+        return jsonify({"error": f"Failed to fetch image: {str(e)}"}), 400
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        return jsonify({"error": f"Search failed: {str(e)}"}), 500
 
 
-@router.post("/video/register")
-async def register_video_faces(
-    name: str = Form(...),
-    file: UploadFile | None = File(None),
-    url: str | None = Form(None),
-    sample_interval: float = Form(1.0, ge=0.1, le=10.0, description="Seconds between frame samples"),
-):
+@api_bp.route("/video/register", methods=["POST"])
+def register_video_faces():
     """Register all faces from a video file.
 
     Samples frames at the specified interval and registers all detected faces.
     """
     engine = get_face_engine()
 
-    if file:
-        contents = await file.read()
-        if len(contents) > settings.max_file_size_mb * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File too large")
-        video_path = Path(f"/tmp/facerec_video_{os.urandom(8).hex()}.mp4")
-        with open(video_path, "wb") as f:
-            f.write(contents)
-    elif url:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
+    name = request.form.get("name")
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    sample_interval = float(request.form.get("sample_interval", 1.0))
+    if sample_interval < 0.1 or sample_interval > 10.0:
+        sample_interval = 1.0
+
+    video_path = None
+    try:
+        if "file" in request.files:
+            file = request.files["file"]
+            if file.filename:
+                contents = file.read()
+                if len(contents) > settings.max_file_size_mb * 1024 * 1024:
+                    return jsonify({"error": "File too large"}), 413
+                video_path = Path(f"/tmp/facerec_video_{os.urandom(8).hex()}.mp4")
+                with open(video_path, "wb") as f:
+                    f.write(contents)
+        elif request.form.get("url"):
+            url = request.form.get("url")
+            resp = httpx.get(url, timeout=120.0)
+            resp.raise_for_status()
             video_path = Path(f"/tmp/facerec_video_{os.urandom(8).hex()}.mp4")
             with open(video_path, "wb") as f:
-                f.write(response.content)
-    else:
-        raise HTTPException(status_code=400, detail="Either file or url must be provided")
+                f.write(resp.content)
+        else:
+            return jsonify({"error": "Either file or url must be provided"}), 400
 
-    try:
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="Could not open video file")
+            return jsonify({"error": "Could not open video file"}), 400
 
         fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_idx = 0
         registered_count = 0
         errors = []
@@ -247,13 +256,14 @@ async def register_video_faces(
             frame_idx += 1
 
         cap.release()
-        return {
+        return jsonify({
             "name": name,
             "total_frames_processed": frame_idx,
             "faces_registered": registered_count,
             "errors": errors if errors else None,
-        }
+        })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Video processing failed: {str(e)}")
+        return jsonify({"error": f"Video processing failed: {str(e)}"}), 500
     finally:
-        video_path.unlink(missing_ok=True)
+        if video_path and video_path.exists():
+            video_path.unlink()
