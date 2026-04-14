@@ -77,4 +77,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health 2>/dev/null || exit 1
 
-CMD ["sh", "-c", "gunicorn api.main:app --workers 4 --bind 0.0.0.0:8000 --timeout 60 --worker-class uvicorn.workers.UvicornWorker"]
+CMD ["sh", "-c", "gunicorn -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -t 60 api.main:app"]
