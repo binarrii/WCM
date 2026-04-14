@@ -333,6 +333,7 @@ async def websocket_search(websocket: WebSocket):
         name = payload.get("name")
         top_k = int(payload.get("top_k", 10))
         threshold = float(payload.get("threshold", 0.4))
+        sample_interval = float(payload.get("sample_interval", 1.0))
 
         # Send accepted response immediately
         await websocket.send_json({
@@ -342,27 +343,104 @@ async def websocket_search(websocket: WebSocket):
 
         # Perform async search
         engine = get_face_engine()
+        video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
+        is_video = any(url.lower().endswith(ext) for ext in video_extensions)
+
         try:
-            embedding = await engine.generate_embedding_async(url)
+            if is_video:
+                # Handle video: download and sample frames
+                video_path = Path(f"/tmp/ws_video_{os.urandom(8).hex()}.mp4")
+                try:
+                    resp = httpx.get(url, timeout=120.0)
+                    resp.raise_for_status()
+                    with open(video_path, "wb") as f:
+                        f.write(resp.content)
 
-            results = engine.search(
-                embedding=embedding,
-                name=name,
-                top_k=max(min(top_k, 10), 1),
-                threshold=max(min(threshold, 1.0), 0.0),
-            )
+                    cap = cv2.VideoCapture(str(video_path))
+                    if not cap.isOpened():
+                        raise Exception("Could not open video file")
 
-            await websocket.send_json({
-                "status": "completed",
-                "taskId": task_id,
-                "query_embedding_dim": settings.embedding_dim,
-                "results": results,
-            })
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    all_results = []
+                    frame_idx = 0
+
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+
+                        if frame_idx % int(fps * sample_interval) == 0:
+                            # Save frame temporarily
+                            temp_frame_path = Path(f"/tmp/ws_frame_{os.urandom(8).hex()}.jpg")
+                            cv2.imwrite(str(temp_frame_path), frame)
+
+                            try:
+                                faces = engine.detect_faces(temp_frame_path)
+                                for face_data in faces:
+                                    face_img = face_data.get("face")
+                                    if face_img is not None:
+                                        face_temp = Path(f"/tmp/ws_face_{os.urandom(8).hex()}.jpg")
+                                        cv2.imwrite(str(face_temp), face_img)
+                                        try:
+                                            embedding = engine.generate_embedding(face_temp)
+                                            results = engine.search(
+                                                embedding=embedding,
+                                                name=name,
+                                                top_k=top_k,
+                                                threshold=threshold,
+                                            )
+                                            all_results.extend(results)
+                                        finally:
+                                            face_temp.unlink(missing_ok=True)
+                            finally:
+                                temp_frame_path.unlink(missing_ok=True)
+
+                        frame_idx += 1
+
+                    cap.release()
+
+                    # Sort and dedupe results by distance
+                    all_results.sort(key=lambda x: x.get("distance", 1.0))
+                    seen = set()
+                    deduped = []
+                    for r in all_results:
+                        key = (r.get("name"), r.get("face_id"))
+                        if key not in seen:
+                            seen.add(key)
+                            deduped.append(r)
+
+                    await websocket.send_json({
+                        "status": "completed",
+                        "taskId": task_id,
+                        "query_embedding_dim": settings.embedding_dim,
+                        "frames_processed": frame_idx,
+                        "results": deduped[:top_k],
+                    })
+                finally:
+                    if video_path.exists():
+                        video_path.unlink()
+            else:
+                # Handle single image
+                embedding = await engine.generate_embedding_async(url)
+                results = engine.search(
+                    embedding=embedding,
+                    name=name,
+                    top_k=max(min(top_k, 10), 1),
+                    threshold=max(min(threshold, 1.0), 0.0),
+                )
+
+                await websocket.send_json({
+                    "status": "completed",
+                    "taskId": task_id,
+                    "query_embedding_dim": settings.embedding_dim,
+                    "results": results,
+                })
+
         except httpx.HTTPError as e:
             await websocket.send_json({
                 "status": "error",
                 "taskId": task_id,
-                "error": f"Failed to fetch image: {str(e)}",
+                "error": f"Failed to fetch: {str(e)}",
             })
         except Exception as e:
             await websocket.send_json({
