@@ -169,8 +169,8 @@ async def search_faces(request: Request):
         raise HTTPException(status_code=400, detail="url is required for search")
 
     name = data.get("name")
-    top_k = data.get("top_k", 10)
-    threshold = data.get("threshold", 0.4)
+    top_k = int(data.get("top_k", 10))
+    threshold = float(data.get("threshold", 0.4))
 
     try:
         import asyncio
@@ -179,8 +179,8 @@ async def search_faces(request: Request):
         results = engine.search(
             embedding=embedding,
             name=name,
-            top_k=top_k,
-            threshold=threshold,
+            top_k=max(min(top_k, 10), 1),
+            threshold=max(min(threshold, 1.0), 0.0),
         )
 
         return {
