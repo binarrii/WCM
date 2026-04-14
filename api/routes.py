@@ -1,14 +1,17 @@
 """API routes for face recognition service."""
 
+import asyncio
 import io
+import json
 import os
+import uuid
 from pathlib import Path
 from typing import Optional, Union
 
 import cv2
 import httpx
 import numpy as np
-from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
 from PIL import Image
 
 from wcm_facerec import __version__
@@ -300,3 +303,81 @@ async def register_video_faces(request: Request):
     finally:
         if video_path and video_path.exists():
             video_path.unlink()
+
+
+@api_bp.websocket("/ws/search")
+async def websocket_search(websocket: WebSocket):
+    """WebSocket endpoint for async face search.
+
+    Accepts: {"url": "https://example.com/xxx.mp4"} or {"url": "https://example.com/xxx.png"}
+    Responds immediately: {"status": "accepted", "taskId": "xxxxxxx"}
+    Then sends result: {"status": "completed", "taskId": "xxxxxxx", "query_embedding_dim": 4096, "results": [...]}
+    """
+    await websocket.accept()
+
+    try:
+        # Receive message
+        data = await websocket.receive_text()
+        payload = json.loads(data)
+
+        url = payload.get("url")
+        if not url:
+            await websocket.send_json({
+                "status": "error",
+                "error": "url is required",
+            })
+            await websocket.close()
+            return
+
+        task_id = str(uuid.uuid4())
+        name = payload.get("name")
+        top_k = int(payload.get("top_k", 10))
+        threshold = float(payload.get("threshold", 0.4))
+
+        # Send accepted response immediately
+        await websocket.send_json({
+            "status": "accepted",
+            "taskId": task_id,
+        })
+
+        # Perform async search
+        engine = get_face_engine()
+        try:
+            embedding = await engine.generate_embedding_async(url)
+
+            results = engine.search(
+                embedding=embedding,
+                name=name,
+                top_k=max(min(top_k, 10), 1),
+                threshold=max(min(threshold, 1.0), 0.0),
+            )
+
+            await websocket.send_json({
+                "status": "completed",
+                "taskId": task_id,
+                "query_embedding_dim": settings.embedding_dim,
+                "results": results,
+            })
+        except httpx.HTTPError as e:
+            await websocket.send_json({
+                "status": "error",
+                "taskId": task_id,
+                "error": f"Failed to fetch image: {str(e)}",
+            })
+        except Exception as e:
+            await websocket.send_json({
+                "status": "error",
+                "taskId": task_id,
+                "error": f"Search failed: {str(e)}",
+            })
+
+    except WebSocketDisconnect:
+        pass
+    except json.JSONDecodeError:
+        await websocket.send_json({"status": "error", "error": "Invalid JSON"})
+        await websocket.close()
+    except Exception as e:
+        try:
+            await websocket.send_json({"status": "error", "error": str(e)})
+        except:
+            pass
