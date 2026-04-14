@@ -22,9 +22,12 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies to local directory
 RUN uv sync --frozen --no-install-project
 
-# Force opencv-python-headless (remove opencv-python if present, install headless)
-RUN /app/.venv/bin/pip uninstall -y opencv-python 2>/dev/null || true && \
-    /app/.venv/bin/pip install --no-cache-dir opencv-python-headless
+# Force opencv-python-headless and tensorflow-cpu
+# Use uv pip for venv package management
+RUN uv pip uninstall --python /app/.venv/bin/python opencv-python opencv-python-headless 2>/dev/null || true
+RUN uv pip install --python /app/.venv/bin/python --no-cache opencv-python-headless
+RUN uv pip uninstall --python /app/.venv/bin/python tensorflow 2>/dev/null || true
+RUN uv pip install --python /app/.venv/bin/python --no-cache tensorflow-cpu
 
 # Clean venv in builder (before COPY to reduce stage-2 size)
 RUN find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*test*" -exec rm -rf {} + 2>/dev/null || true && \
