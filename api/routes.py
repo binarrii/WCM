@@ -342,7 +342,7 @@ def _search_video_frames(
                     for face_data in faces:
                         face_img = face_data.get("face")
                         if face_img is not None:
-                            _search_face_in_frame(engine, face_img, name, top_k, threshold, all_results)
+                            _search_face_in_image(engine, face_img, name, top_k, threshold, all_results)
                 finally:
                     temp_frame_path.unlink(missing_ok=True)
 
@@ -366,7 +366,7 @@ def _search_video_frames(
             video_path.unlink()
 
 
-def _search_face_in_frame(
+def _search_face_in_image(
     engine: FaceEngine,
     face_img,
     name: str | None,
