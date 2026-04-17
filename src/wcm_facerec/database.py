@@ -63,6 +63,24 @@ class FaceRecord(Base):
         return f"<FaceRecord(id={self.id}, name={self.name})>"
 
 
+class SensitiveWord(Base):
+    """Sensitive word model for content moderation."""
+
+    __tablename__ = "sensitive_words"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    word = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        {"schema": None},
+    )
+
+    def __repr__(self) -> str:
+        return f"<SensitiveWord(id={self.id}, word={self.word}, category={self.category})>"
+
+
 # Engine and session factory
 _engine = None
 _SessionLocal = None
