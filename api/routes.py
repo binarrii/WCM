@@ -354,7 +354,7 @@ def _search_video_frames(
         seen = set()
         deduped = []
         for r in all_results:
-            key = (r.get("name"), r.get("face_id"))
+            key = (r.get("name"), r.get("person_id"))
             if key not in seen:
                 seen.add(key)
                 deduped.append(r)
