@@ -177,7 +177,7 @@ async def search_faces(request: Request):
 
     try:
         import asyncio
-        embedding = asyncio.run(engine.generate_embedding_async(url))
+        embedding = await engine.generate_embedding_async(url)
 
         results = engine.search(
             embedding=embedding,
