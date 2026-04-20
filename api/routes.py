@@ -176,7 +176,6 @@ async def search_faces(request: Request):
     threshold = float(data.get("threshold", 0.4))
 
     try:
-        import asyncio
         embedding = await engine.generate_embedding_async(url)
 
         results = engine.search(
