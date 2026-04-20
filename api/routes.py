@@ -163,7 +163,7 @@ async def search_faces(request: Request):
     """Search for similar faces in the database."""
     engine = get_face_engine()
 
-    data = request.get_json()
+    data = await request.json()
     if not data:
         raise HTTPException(status_code=400, detail="Request body required")
 
