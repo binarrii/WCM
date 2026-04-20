@@ -14,7 +14,7 @@ from deepface import DeepFace
 from PIL import Image
 
 from .config import settings
-from .database import FaceRecord, get_session, register_vector_type
+from .database import FaceRecord, Person, get_session, register_vector_type
 
 
 class FaceEngine:
@@ -152,7 +152,7 @@ class FaceEngine:
 
         session = get_session()
 
-        query = session.query(FaceRecord)
+        query = session.query(FaceRecord, Person).outerjoin(Person, FaceRecord.person_id == Person.id)
         if name:
             query = query.filter(FaceRecord.name == name)
 
@@ -189,19 +189,27 @@ class FaceEngine:
         distances.sort(key=lambda x: x[0])
 
         matches = []
-        for dist, record in distances[:top_k]:
+        for dist, (record, person) in distances[:top_k]:
             if dist <= threshold:
-                matches.append({
+                match = {
                     "id": str(record.id),
                     "name": record.name,
                     "file_path": record.file_path,
                     "file_url": record.file_url,
                     "distance": float(dist),
                     "confidence": record.confidence,
-                    "face_id": record.face_id,
+                    "person_id": str(record.person_id) if record.person_id else None,
                     "frame_time": record.frame_time,
                     "created_at": record.created_at.isoformat() if record.created_at else None,
-                })
+                }
+                if person:
+                    match["person"] = {
+                        "name": person.name,
+                        "occupation": person.occupation,
+                        "type": person.type_,
+                        "remarks": person.remarks,
+                    }
+                matches.append(match)
 
         session.close()
         return matches
