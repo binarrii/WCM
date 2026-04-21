@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -94,21 +95,47 @@ class FaceEngine:
         Returns:
             Face embedding as numpy array
         """
-        if isinstance(img_source, bytes):
-            image = Image.open(io.BytesIO(img_source))
-            img_array = np.array(image)
-        elif img_source.startswith(("http://", "https://")):
-            img_array = await self._load_image_from_url(img_source)
-        else:
-            img_array = self._load_image_from_path(img_source)
+        temp_path = None
+        try:
+            if isinstance(img_source, bytes):
+                # Save bytes to temp file
+                temp_path = Path(tempfile.gettempdir()) / f"wcm_emb_{uuid.uuid4().hex[:12]}.jpg"
+                with open(temp_path, "wb") as f:
+                    f.write(img_source)
+            elif img_source.startswith(("http://", "https://")):
+                # Download and save to temp file
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(img_source)
+                    response.raise_for_status()
+                ext = self._get_ext_from_content_type(response.headers.get("content-type", ""))
+                temp_path = Path(tempfile.gettempdir()) / f"wcm_emb_{uuid.uuid4().hex[:12]}{ext}"
+                with open(temp_path, "wb") as f:
+                    f.write(response.content)
+            else:
+                # Local file - use as-is
+                temp_path = img_source
 
-        embedding = DeepFace.represent(
-            img_path=img_array,
-            model_name=self.model_name,
-            enforce_detection=False,
-            align=True,
-        )
-        return np.array(embedding[0]["embedding"])
+            embedding = DeepFace.represent(
+                img_path=str(temp_path),
+                model_name=self.model_name,
+                enforce_detection=False,
+                align=True,
+            )
+            return np.array(embedding[0]["embedding"])
+        finally:
+            if temp_path and str(img_source).startswith(("http://", "https://")) and temp_path.exists():
+                temp_path.unlink()
+
+    def _get_ext_from_content_type(self, content_type: str) -> str:
+        """Get file extension from content type."""
+        ext_map = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+            "image/gif": ".gif",
+            "image/bmp": ".bmp",
+        }
+        return ext_map.get(content_type.lower(), ".jpg")
 
     def detect_faces(self, img_source: Union[str, Path]) -> list[dict]:
         """Detect faces in an image.
