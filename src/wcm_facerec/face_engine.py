@@ -181,7 +181,7 @@ class FaceEngine:
                     stored_norm = stored_vec / np.linalg.norm(stored_vec)
                     dist = np.linalg.norm(emb_norm - stored_norm)
 
-                distances.append((dist, record))
+                distances.append((dist, record, person))
             except Exception:
                 continue
 
@@ -189,7 +189,7 @@ class FaceEngine:
         distances.sort(key=lambda x: x[0])
 
         matches = []
-        for dist, (record, person) in distances[:top_k]:
+        for dist, record, person in distances[:top_k]:
             if dist <= threshold:
                 match = {
                     "id": str(record.id),
