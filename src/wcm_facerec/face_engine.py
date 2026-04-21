@@ -161,7 +161,7 @@ class FaceEngine:
 
         # Calculate distances manually for JSON-stored embeddings
         distances = []
-        for record in results:
+        for record, person in results:
             try:
                 stored_embedding = json.loads(record.embedding) if isinstance(record.embedding, str) else record.embedding
                 stored_vec = np.array(stored_embedding)
