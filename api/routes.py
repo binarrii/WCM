@@ -403,6 +403,8 @@ async def websocket_search(websocket: WebSocket):
         while True:
             try:
                 data = await websocket.receive_text()
+                if not data:
+                    continue
                 payload = json.loads(data)
             except json.JSONDecodeError:
                 await websocket.send_json({"status": "error", "error": "Invalid JSON"})
