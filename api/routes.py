@@ -190,7 +190,16 @@ async def search_faces(request: Request):
                 "frames_processed": frames,
             }
         else:
-            embedding = await engine.generate_embedding_async(url)
+            # Detect and crop face before generating embedding
+            face_result = await _detect_and_crop_face(engine, url)
+            if face_result is None:
+                return {
+                    "results": [],
+                    "query_embedding_dim": settings.embedding_dim,
+                    "message": "No face detected in image",
+                }
+
+            embedding = face_result["embedding"]
 
             results = engine.search(
                 embedding=embedding,
@@ -316,6 +325,69 @@ async def register_video_faces(request: Request):
     finally:
         if video_path and video_path.exists():
             video_path.unlink()
+
+
+async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
+    """Download image, detect face, crop and return face embedding.
+
+    Returns dict with 'embedding' and 'confidence' if face found, None otherwise.
+    """
+    import tempfile
+
+    temp_path = Path(tempfile.gettempdir()) / f"wcm_search_{uuid.uuid4().hex[:12]}.jpg"
+    try:
+        # Download image
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+        content_type = response.headers.get("content-type", "image/jpeg")
+        ext = ".jpg"
+        if "png" in content_type:
+            ext = ".png"
+        elif "webp" in content_type:
+            ext = ".webp"
+
+        temp_path = Path(tempfile.gettempdir()) / f"wcm_search_{uuid.uuid4().hex[:12]}{ext}"
+        with open(temp_path, "wb") as f:
+            f.write(response.content)
+
+        # Detect faces
+        faces = engine.detect_faces(temp_path)
+        if not faces:
+            return None
+
+        # Use the largest face (by area)
+        best_face = max(faces, key=lambda f: f.get("facial_area", {}).get("area", 0))
+        face_img = best_face.get("face")
+        confidence = best_face.get("confidence", 0.0)
+
+        if face_img is None:
+            return None
+
+        # Convert RGB to BGR for cv2.imwrite, then save as JPEG
+        if face_img.dtype != np.uint8:
+            face_img = (face_img * 255).astype(np.uint8)
+        face_bgr = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
+
+        face_temp = Path(tempfile.gettempdir()) / f"wcm_face_{uuid.uuid4().hex[:12]}.jpg"
+        cv2.imwrite(str(face_temp), face_bgr)
+
+        try:
+            embedding = engine.generate_embedding(face_temp)
+            return {
+                "embedding": embedding,
+                "confidence": confidence,
+            }
+        finally:
+            if face_temp.exists():
+                face_temp.unlink()
+
+    except Exception:
+        return None
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def _search_video_frames(
