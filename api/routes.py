@@ -400,55 +400,55 @@ async def websocket_search(websocket: WebSocket):
     await websocket.accept()
 
     try:
-        data = await websocket.receive_text()
-        payload = json.loads(data)
+        while True:
+            data = await websocket.receive_text()
+            payload = json.loads(data)
 
-        url = payload.get("url")
-        if not url:
-            await websocket.send_json({"status": "error", "error": "url is required"})
-            await websocket.close()
-            return
+            url = payload.get("url")
+            if not url:
+                await websocket.send_json({"status": "error", "error": "url is required"})
+                continue
 
-        task_id = str(uuid.uuid4())
-        name = payload.get("name")
-        top_k = int(payload.get("top_k", 10))
-        threshold = float(payload.get("threshold", 0.4))
-        sample_interval = float(payload.get("sample_interval", 1.0))
+            task_id = str(uuid.uuid4())
+            name = payload.get("name")
+            top_k = int(payload.get("top_k", 10))
+            threshold = float(payload.get("threshold", 0.4))
+            sample_interval = float(payload.get("sample_interval", 1.0))
 
-        await websocket.send_json({"status": "accepted", "taskId": task_id})
+            await websocket.send_json({"status": "accepted", "taskId": task_id})
 
-        engine = get_face_engine()
-        is_video = any(url.lower().endswith(ext) for ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"})
+            engine = get_face_engine()
+            is_video = any(url.lower().endswith(ext) for ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"})
 
-        try:
-            if is_video:
-                frames, results = _search_video_frames(engine, url, name, top_k, threshold, sample_interval)
-                await websocket.send_json({
-                    "status": "completed",
-                    "taskId": task_id,
-                    "query_embedding_dim": settings.embedding_dim,
-                    "frames_processed": frames,
-                    "results": results,
-                })
-            else:
-                embedding = await engine.generate_embedding_async(url)
-                results = engine.search(
-                    embedding=embedding,
-                    name=name,
-                    top_k=max(min(top_k, 10), 1),
-                    threshold=max(min(threshold, 1.0), 0.0),
-                )
-                await websocket.send_json({
-                    "status": "completed",
-                    "taskId": task_id,
-                    "query_embedding_dim": settings.embedding_dim,
-                    "results": results,
-                })
+            try:
+                if is_video:
+                    frames, results = _search_video_frames(engine, url, name, top_k, threshold, sample_interval)
+                    await websocket.send_json({
+                        "status": "completed",
+                        "taskId": task_id,
+                        "query_embedding_dim": settings.embedding_dim,
+                        "frames_processed": frames,
+                        "results": results,
+                    })
+                else:
+                    embedding = await engine.generate_embedding_async(url)
+                    results = engine.search(
+                        embedding=embedding,
+                        name=name,
+                        top_k=max(min(top_k, 10), 1),
+                        threshold=max(min(threshold, 1.0), 0.0),
+                    )
+                    await websocket.send_json({
+                        "status": "completed",
+                        "taskId": task_id,
+                        "query_embedding_dim": settings.embedding_dim,
+                        "results": results,
+                    })
 
-        except httpx.HTTPError as e:
-            await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Failed to fetch: {str(e)}"})
-        except Exception as e:
-            await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Search failed: {str(e)}"})
+            except httpx.HTTPError as e:
+                await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Failed to fetch: {str(e)}"})
+            except Exception as e:
+                await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Search failed: {str(e)}"})
 
     except WebSocketDisconnect:
         pass
