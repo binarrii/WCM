@@ -357,8 +357,11 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
         if not faces:
             return None
 
-        # Use the largest face (by area)
-        best_face = max(faces, key=lambda f: f.get("facial_area", {}).get("area", 0))
+        # Use the largest face (by area = w * h)
+        def get_face_area(f):
+            fa = f.get("facial_area", {})
+            return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+        best_face = max(faces, key=get_face_area)
         face_img = best_face.get("face")
         confidence = best_face.get("confidence", 0.0)
 
