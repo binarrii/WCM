@@ -401,8 +401,14 @@ async def websocket_search(websocket: WebSocket):
 
     try:
         while True:
-            data = await websocket.receive_text()
-            payload = json.loads(data)
+            try:
+                data = await websocket.receive_text()
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"status": "error", "error": "Invalid JSON"})
+                continue
+            except WebSocketDisconnect:
+                break
 
             url = payload.get("url")
             if not url:
@@ -450,10 +456,6 @@ async def websocket_search(websocket: WebSocket):
             except Exception as e:
                 await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Search failed: {str(e)}"})
 
-    except WebSocketDisconnect:
-        pass
-    except json.JSONDecodeError:
-        await websocket.send_json({"status": "error", "error": "Invalid JSON"})
     except Exception as e:
         try:
             await websocket.send_json({"status": "error", "error": str(e)})
