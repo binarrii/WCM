@@ -454,7 +454,6 @@ async def websocket_search(websocket: WebSocket):
         pass
     except json.JSONDecodeError:
         await websocket.send_json({"status": "error", "error": "Invalid JSON"})
-        await websocket.close()
     except Exception as e:
         try:
             await websocket.send_json({"status": "error", "error": str(e)})
