@@ -176,19 +176,33 @@ async def search_faces(request: Request):
     threshold = float(data.get("threshold", 0.4))
 
     try:
-        embedding = await engine.generate_embedding_async(url)
+        is_video = any(url.lower().endswith(ext) for ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"})
 
-        results = engine.search(
-            embedding=embedding,
-            name=name,
-            top_k=max(min(top_k, 10), 1),
-            threshold=max(min(threshold, 1.0), 0.0),
-        )
+        if is_video:
+            sample_interval = float(data.get("sample_interval", 1.0))
+            frames, results = _search_video_frames(
+                engine, url, name, max(min(top_k, 10), 1),
+                max(min(threshold, 1.0), 0.0), sample_interval
+            )
+            return {
+                "results": results,
+                "query_embedding_dim": settings.embedding_dim,
+                "frames_processed": frames,
+            }
+        else:
+            embedding = await engine.generate_embedding_async(url)
 
-        return {
-            "results": results,
-            "query_embedding_dim": settings.embedding_dim,
-        }
+            results = engine.search(
+                embedding=embedding,
+                name=name,
+                top_k=max(min(top_k, 10), 1),
+                threshold=max(min(threshold, 1.0), 0.0),
+            )
+
+            return {
+                "results": results,
+                "query_embedding_dim": settings.embedding_dim,
+            }
     except httpx.HTTPError as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
     except Exception as e:
