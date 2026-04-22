@@ -276,22 +276,16 @@ async def register_video_faces(request: Request):
 
             if frame_idx % int(fps * sample_interval) == 0:
                 try:
-                    # Save frame temporarily
-                    temp_frame_path = Path(f"/tmp/frame_{os.urandom(8).hex()}.jpg")
-                    cv2.imwrite(str(temp_frame_path), frame)
-
-                    # Detect and register faces
-                    faces = engine.detect_faces(temp_frame_path)
+                    # Pass frame numpy array directly (no temp file)
+                    # cv2.VideoCapture returns BGR, which OpenCV backend handles correctly
+                    faces = engine.detect_faces(frame)
                     for i, face_data in enumerate(faces):
                         try:
                             face_img = face_data["face"]
                             face_confidence = face_data.get("confidence", 0.0)
 
-                            # Save face and get embedding
-                            face_temp = Path(f"/tmp/face_{os.urandom(8).hex()}.jpg")
-                            cv2.imwrite(str(face_temp), face_img)
-
-                            embedding = engine.generate_embedding(face_temp)
+                            # Pass face numpy array directly (no temp file)
+                            embedding = engine.generate_embedding(face_img)
                             engine.register_face(
                                 name=name,
                                 embedding=embedding,
@@ -301,11 +295,9 @@ async def register_video_faces(request: Request):
                                 frame_time=frame_idx / fps if fps > 0 else 0,
                             )
                             registered_count += 1
-                            face_temp.unlink(missing_ok=True)
                         except Exception as e:
                             errors.append(f"Frame {frame_idx}, face {i}: {str(e)}")
 
-                    temp_frame_path.unlink(missing_ok=True)
                 except Exception as e:
                     errors.append(f"Frame {frame_idx}: {str(e)}")
 
@@ -328,32 +320,22 @@ async def register_video_faces(request: Request):
 
 
 async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
-    """Download image, detect face, crop and return face embedding.
+    """Download image, detect face, crop and return face embedding (in-memory).
 
     Returns dict with 'embedding' and 'confidence' if face found, None otherwise.
     """
-    import tempfile
-
-    temp_path = Path(tempfile.gettempdir()) / f"wcm_search_{uuid.uuid4().hex[:12]}.jpg"
     try:
         # Download image
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url)
             response.raise_for_status()
 
-        content_type = response.headers.get("content-type", "image/jpeg")
-        ext = ".jpg"
-        if "png" in content_type:
-            ext = ".png"
-        elif "webp" in content_type:
-            ext = ".webp"
+        # Decode to numpy array directly (no temp file)
+        img = Image.open(io.BytesIO(response.content))
+        img_array = np.array(img)
 
-        temp_path = Path(tempfile.gettempdir()) / f"wcm_search_{uuid.uuid4().hex[:12]}{ext}"
-        with open(temp_path, "wb") as f:
-            f.write(response.content)
-
-        # Detect faces
-        faces = engine.detect_faces(temp_path)
+        # Detect faces using numpy array
+        faces = engine.detect_faces(img_array)
         if not faces:
             return None
 
@@ -368,29 +350,15 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
         if face_img is None:
             return None
 
-        # DeepFace returns RGB, save with PIL (keeps RGB for DeepFace.represent)
-        if face_img.dtype != np.uint8:
-            face_img = (face_img * 255).astype(np.uint8)
-        face_rgb = Image.fromarray(face_img, mode="RGB")
-
-        face_temp = Path(tempfile.gettempdir()) / f"wcm_face_{uuid.uuid4().hex[:12]}.jpg"
-        face_rgb.save(face_temp, "JPEG")
-
-        try:
-            embedding = engine.generate_embedding(face_temp)
-            return {
-                "embedding": embedding,
-                "confidence": confidence,
-            }
-        finally:
-            if face_temp.exists():
-                face_temp.unlink()
+        # Generate embedding directly from numpy array
+        embedding = engine.generate_embedding(face_img)
+        return {
+            "embedding": embedding,
+            "confidence": confidence,
+        }
 
     except Exception:
         return None
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
 
 
 def _search_video_frames(
@@ -423,17 +391,16 @@ def _search_video_frames(
                 break
 
             if frame_idx % int(fps * sample_interval) == 0:
-                temp_frame_path = Path(f"/tmp/ws_frame_{os.urandom(8).hex()}.jpg")
-                cv2.imwrite(str(temp_frame_path), frame)
                 current_frame_time = frame_idx / fps if fps > 0 else 0
+                # Pass frame numpy array directly (no temp file)
                 try:
-                    faces = engine.detect_faces(temp_frame_path)
+                    faces = engine.detect_faces(frame)
                     for face_data in faces:
                         face_img = face_data.get("face")
                         if face_img is not None:
                             _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
-                finally:
-                    temp_frame_path.unlink(missing_ok=True)
+                except Exception:
+                    pass  # Skip frames that fail detection
 
             frame_idx += 1
 
@@ -464,15 +431,9 @@ def _search_face_in_image(
     all_results: list,
     frame_time: float | None = None,
 ):
-    """Search a single face from a frame."""
-    face_temp = Path(f"/tmp/ws_face_{os.urandom(8).hex()}.jpg")
-    # DeepFace returns RGB, save with PIL (keeps RGB for DeepFace.represent)
-    if face_img.dtype != np.uint8:
-        face_img = (face_img * 255).astype(np.uint8)
-    face_rgb = Image.fromarray(face_img, mode="RGB")
-    face_rgb.save(face_temp, "JPEG")
+    """Search a single face from a frame (in-memory, no temp files)."""
     try:
-        embedding = engine.generate_embedding(face_temp)
+        embedding = engine.generate_embedding(face_img)
         results = engine.search(
             embedding=embedding,
             name=name,
@@ -482,8 +443,8 @@ def _search_face_in_image(
         for r in results:
             r["frame_time"] = frame_time
         all_results.extend(results)
-    finally:
-        face_temp.unlink(missing_ok=True)
+    except Exception:
+        pass  # Skip faces that fail embedding generation
 
 
 @api_bp.websocket("/ws/search")

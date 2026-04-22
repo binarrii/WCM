@@ -69,28 +69,37 @@ class FaceEngine:
         except Exception:
             return []
 
-    def generate_embedding(self, img_path: Union[str, Path]) -> np.ndarray:
-        """Generate face embedding from image path or URL.
+    def generate_embedding(self, img_source: Union[str, Path, np.ndarray]) -> np.ndarray:
+        """Generate face embedding from image path, URL, or numpy array.
 
         Args:
-            img_path: Path to image file or URL
+            img_source: Path to image file, URL, or numpy array
 
         Returns:
             Face embedding as numpy array
         """
-        embedding = DeepFace.represent(
-            img_path=str(img_path),
-            model_name=self.model_name,
-            enforce_detection=False,
-            align=True,
-        )
+        # Pass numpy array directly to avoid file I/O
+        if isinstance(img_source, np.ndarray):
+            embedding = DeepFace.represent(
+                img_path=img_source,
+                model_name=self.model_name,
+                enforce_detection=False,
+                align=True,
+            )
+        else:
+            embedding = DeepFace.represent(
+                img_path=str(img_source),
+                model_name=self.model_name,
+                enforce_detection=False,
+                align=True,
+            )
         return np.array(embedding[0]["embedding"])
 
-    async def generate_embedding_async(self, img_source: Union[str, Path, bytes]) -> np.ndarray:
-        """Generate face embedding asynchronously (supports URLs and bytes).
+    async def generate_embedding_async(self, img_source: Union[str, Path, bytes, np.ndarray]) -> np.ndarray:
+        """Generate face embedding asynchronously (supports URLs, bytes, and arrays).
 
         Args:
-            img_source: Path, URL, or image bytes
+            img_source: Path, URL, image bytes, or numpy array
 
         Returns:
             Face embedding as numpy array
@@ -137,22 +146,31 @@ class FaceEngine:
         }
         return ext_map.get(content_type.lower(), ".jpg")
 
-    def detect_faces(self, img_source: Union[str, Path]) -> list[dict]:
+    def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
         """Detect faces in an image.
 
         Args:
-            img_source: Path to image file or URL
+            img_source: Path to image file, URL, or numpy array
 
         Returns:
             List of detected face dictionaries with 'face', 'confidence', 'facial_area'
         """
         try:
-            faces = DeepFace.extract_faces(
-                img_path=str(img_source),
-                detector_backend="opencv",
-                enforce_detection=False,
-                align=True,
-            )
+            # Pass numpy array directly to avoid file I/O
+            if isinstance(img_source, np.ndarray):
+                faces = DeepFace.extract_faces(
+                    img_path=img_source,
+                    detector_backend="opencv",
+                    enforce_detection=False,
+                    align=True,
+                )
+            else:
+                faces = DeepFace.extract_faces(
+                    img_path=str(img_source),
+                    detector_backend="opencv",
+                    enforce_detection=False,
+                    align=True,
+                )
             return faces
         except Exception as e:
             raise RuntimeError(f"Face detection failed: {e}")
