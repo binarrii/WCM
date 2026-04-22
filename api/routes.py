@@ -425,12 +425,13 @@ def _search_video_frames(
             if frame_idx % int(fps * sample_interval) == 0:
                 temp_frame_path = Path(f"/tmp/ws_frame_{os.urandom(8).hex()}.jpg")
                 cv2.imwrite(str(temp_frame_path), frame)
+                current_frame_time = frame_idx / fps if fps > 0 else 0
                 try:
                     faces = engine.detect_faces(temp_frame_path)
                     for face_data in faces:
                         face_img = face_data.get("face")
                         if face_img is not None:
-                            _search_face_in_image(engine, face_img, name, top_k, threshold, all_results)
+                            _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
                 finally:
                     temp_frame_path.unlink(missing_ok=True)
 
@@ -461,6 +462,7 @@ def _search_face_in_image(
     top_k: int,
     threshold: float,
     all_results: list,
+    frame_time: float | None = None,
 ):
     """Search a single face from a frame."""
     face_temp = Path(f"/tmp/ws_face_{os.urandom(8).hex()}.jpg")
@@ -477,6 +479,8 @@ def _search_face_in_image(
             top_k=top_k,
             threshold=threshold,
         )
+        for r in results:
+            r["frame_time"] = frame_time
         all_results.extend(results)
     finally:
         face_temp.unlink(missing_ok=True)
