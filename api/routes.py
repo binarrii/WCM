@@ -368,13 +368,13 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
         if face_img is None:
             return None
 
-        # Convert RGB to BGR for cv2.imwrite, then save as JPEG
+        # DeepFace returns RGB, save with PIL (keeps RGB for DeepFace.represent)
         if face_img.dtype != np.uint8:
             face_img = (face_img * 255).astype(np.uint8)
-        face_bgr = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
+        face_rgb = Image.fromarray(face_img, mode="RGB")
 
         face_temp = Path(tempfile.gettempdir()) / f"wcm_face_{uuid.uuid4().hex[:12]}.jpg"
-        cv2.imwrite(str(face_temp), face_bgr)
+        face_rgb.save(face_temp, "JPEG")
 
         try:
             embedding = engine.generate_embedding(face_temp)
@@ -466,12 +466,11 @@ def _search_face_in_image(
 ):
     """Search a single face from a frame."""
     face_temp = Path(f"/tmp/ws_face_{os.urandom(8).hex()}.jpg")
-    # DeepFace returns RGB, cv2.imwrite expects BGR - convert
-    # if face_img.dtype != np.uint8:
-    #     face_img = (face_img * 255).astype(np.uint8)
-    # face_bgr = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
-    # cv2.imwrite(str(face_temp), face_bgr)
-    cv2.imwrite(str(face_temp), face_img)
+    # DeepFace returns RGB, save with PIL (keeps RGB for DeepFace.represent)
+    if face_img.dtype != np.uint8:
+        face_img = (face_img * 255).astype(np.uint8)
+    face_rgb = Image.fromarray(face_img, mode="RGB")
+    face_rgb.save(face_temp, "JPEG")
     try:
         embedding = engine.generate_embedding(face_temp)
         results = engine.search(
