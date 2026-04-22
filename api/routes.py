@@ -332,6 +332,9 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
 
         # Decode to numpy array directly (no temp file)
         img = Image.open(io.BytesIO(response.content))
+        # Convert RGBA to RGB if needed (some PNGs have alpha channel)
+        if img.mode == "RGBA":
+            img = img.convert("RGB")
         img_array = np.array(img)
 
         # Detect faces using numpy array
