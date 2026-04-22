@@ -467,10 +467,11 @@ def _search_face_in_image(
     """Search a single face from a frame."""
     face_temp = Path(f"/tmp/ws_face_{os.urandom(8).hex()}.jpg")
     # DeepFace returns RGB, cv2.imwrite expects BGR - convert
-    if face_img.dtype != np.uint8:
-        face_img = (face_img * 255).astype(np.uint8)
-    face_bgr = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(str(face_temp), face_bgr)
+    # if face_img.dtype != np.uint8:
+    #     face_img = (face_img * 255).astype(np.uint8)
+    # face_bgr = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
+    # cv2.imwrite(str(face_temp), face_bgr)
+    cv2.imwrite(str(face_temp), face_img)
     try:
         embedding = engine.generate_embedding(face_temp)
         results = engine.search(

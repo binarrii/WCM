@@ -21,6 +21,7 @@ dependencies = [
     "tf-keras>=2.21.0",
     "tensorflow>=2.21.0",
     "xlrd>=2.0.2",
+    "pydantic-settings>=2.13.1",
 ]
 
 [project.optional-dependencies]
