@@ -20,7 +20,7 @@ from wcm_facerec.config import settings
 
 def import_faces_from_directory(
     input_dir: str | Path,
-    category_default: str = "未知",
+    category_default: str = "其他",
     overwrite: bool = False,
 ) -> dict:
     """Import extracted faces into the database.
@@ -171,7 +171,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Import extracted faces into database")
     parser.add_argument("input_dir", help="Directory with extracted faces (category subdirs)")
-    parser.add_argument("--category-default", default="未知", help="Default category name")
+    parser.add_argument("--category-default", default="其他", help="Default category name")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing records")
 
     args = parser.parse_args()
