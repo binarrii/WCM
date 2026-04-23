@@ -53,7 +53,7 @@ class FaceEngine:
         try:
             faces = DeepFace.extract_faces(
                 img_path=frame,
-                detector_backend="yolov8",
+                detector_backend="retinaface",
                 enforce_detection=False,
                 align=True,
             )
@@ -160,14 +160,14 @@ class FaceEngine:
             if isinstance(img_source, np.ndarray):
                 faces = DeepFace.extract_faces(
                     img_path=img_source,
-                    detector_backend="yolov8",
+                    detector_backend="retinaface",
                     enforce_detection=False,
                     align=True,
                 )
             else:
                 faces = DeepFace.extract_faces(
                     img_path=str(img_source),
-                    detector_backend="yolov8",
+                    detector_backend="retinaface",
                     enforce_detection=False,
                     align=True,
                 )
