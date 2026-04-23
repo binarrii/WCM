@@ -163,17 +163,58 @@ def get_all_images(directory: Path) -> list[Path]:
     return sorted(images)
 
 
-def generate_embedding(image_path: Path, model_name: str) -> np.ndarray:
-    """Generate embedding using DeepFace."""
+def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, float]:
+    """Detect face, crop it, then generate embedding using DeepFace.
+
+    DeepFace doesn't support non-ASCII paths, so copy to a temp ASCII path first.
+
+    Returns:
+        Tuple of (embedding, confidence)
+    """
+    import shutil
+    import tempfile
+
     from deepface import DeepFace
 
-    embedding = DeepFace.represent(
-        img_path=str(image_path),
-        model_name=model_name,
-        enforce_detection=False,
-        align=True,
-    )
-    return np.array(embedding[0]["embedding"])
+    # Copy to temp path with ASCII characters for DeepFace
+    temp_path = Path(tempfile.gettempdir()) / f"wcm_emb_{uuid.uuid4().hex[:12]}{image_path.suffix}"
+    try:
+        shutil.copy2(image_path, temp_path)
+
+        # First extract faces to get cropped face
+        faces = DeepFace.extract_faces(
+            img_path=str(temp_path),
+            detector_backend="opencv",
+            enforce_detection=False,
+            align=True,
+        )
+
+        if not faces:
+            raise ValueError(f"No face detected in {image_path}")
+
+        # Use the largest face by area
+        def get_face_area(f):
+            fa = f.get("facial_area", {})
+            return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+        best_face = max(faces, key=get_face_area)
+        face_img = best_face["face"]
+        confidence = best_face.get("confidence", 0.0)
+
+        if face_img is None:
+            raise ValueError(f"Failed to extract face from {image_path}")
+
+        # Generate embedding from cropped face
+        embedding = DeepFace.represent(
+            img_path=face_img,
+            model_name=model_name,
+            enforce_detection=False,
+            align=True,
+        )
+        return np.array(embedding[0]["embedding"]), float(confidence)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def load_person_info(xls_path: Path) -> dict[str, dict]:
@@ -261,8 +302,8 @@ def process_directory(
                 stats["persons_created"] += 1
                 session.flush()  # Ensure person is persisted
 
-            # Generate embedding
-            embedding = generate_embedding(image_path, config.deepface_model)
+            # Detect and crop face, then generate embedding
+            embedding, confidence = generate_embedding(image_path, config.deepface_model)
 
             # Register face
             record = FaceRecord(
@@ -271,6 +312,7 @@ def process_directory(
                 file_path=str(image_path),
                 embedding=embedding.tolist(),  # List for VECTOR type
                 model=config.deepface_model,
+                confidence=confidence,
                 person_id=person.id if person else None,
             )
             session.add(record)
