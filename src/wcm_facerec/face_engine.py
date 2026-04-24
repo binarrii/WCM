@@ -326,14 +326,59 @@ class FaceEngine:
 
         Returns:
             Created FaceRecord
+
+        Raises:
+            ValueError: If no face is detected in the image
         """
-        embedding = self.generate_embedding(img_source)
-        return self.register_face(
-            name=name,
-            embedding=embedding,
-            file_path=str(img_source) if not str(img_source).startswith(("http://", "https://")) else None,
-            file_url=file_url,
-        )
+        import tempfile
+        import shutil
+
+        temp_path = None
+        try:
+            # Handle bytes - save to temp file
+            if isinstance(img_source, bytes):
+                temp_path = Path(tempfile.gettempdir()) / f"wcm_reg_{uuid.uuid4().hex[:12]}.jpg"
+                with open(temp_path, "wb") as f:
+                    f.write(img_source)
+                img_source = temp_path
+            elif isinstance(img_source, str) and img_source.startswith(("http://", "https://")):
+                # Download URL to temp file
+                temp_path = Path(tempfile.gettempdir()) / f"wcm_reg_{uuid.uuid4().hex[:12]}.jpg"
+                import httpx
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.get(img_source)
+                    response.raise_for_status()
+                with open(temp_path, "wb") as f:
+                    f.write(response.content)
+                img_source = temp_path
+
+            # Detect faces first
+            faces = self.detect_faces(img_source)
+            if not faces:
+                raise ValueError(f"No face detected in {img_source}")
+
+            # Sort by area and take top face
+            def get_face_area(f):
+                fa = f.get("facial_area", {})
+                return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+            sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+            best_face = sorted_faces[0]["face"]
+            confidence = sorted_faces[0].get("confidence")
+
+            # Generate embedding from cropped face
+            embedding = self.generate_embedding(best_face)
+
+            return self.register_face(
+                name=name,
+                embedding=embedding,
+                file_path=str(img_source) if not str(img_source).startswith(("http://", "https://")) else None,
+                file_url=file_url,
+                confidence=confidence,
+            )
+        finally:
+            if temp_path and temp_path.exists():
+                temp_path.unlink()
 
 
 # Global engine instance
