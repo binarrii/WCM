@@ -23,6 +23,7 @@ dependencies = [
     "xlrd>=2.0.2",
     "pydantic-settings>=2.13.1",
     "ultralytics>=8.4.41",
+    "python-multipart>=0.0.26",
 ]
 
 [project.optional-dependencies]
