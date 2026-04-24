@@ -111,8 +111,23 @@ def import_faces_from_directory(
                 shutil.copy2(face_file, temp_path)
 
                 try:
-                    # Generate embedding
-                    embedding = engine.generate_embedding(temp_path)
+                    # First detect faces - ensure there's a valid face before generating embedding
+                    faces = engine.detect_faces(temp_path)
+                    if not faces:
+                        print(f"  {name} ({category}): skipped (no face detected)")
+                        stats[category]["skipped"] += 1
+                        return
+
+                    # Sort by area and take top face
+                    def get_face_area(f):
+                        fa = f.get("facial_area", {})
+                        return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+                    sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+                    best_face = sorted_faces[0]["face"]
+
+                    # Generate embedding from cropped face
+                    embedding = engine.generate_embedding(best_face)
 
                     # Register face in database
                     session = get_session()
