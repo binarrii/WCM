@@ -57,8 +57,19 @@ class FaceEngine:
                 enforce_detection=False,
                 align=True,
             )
+            if not faces:
+                return []
+
+            # Sort by area and take top 3
+            def get_face_area(f):
+                fa = f.get("facial_area", {})
+                return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+            sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+            top_faces = sorted_faces[:3]
+
             results = []
-            for i, face in enumerate(faces):
+            for i, face in enumerate(top_faces):
                 results.append({
                     "face": face["face"],
                     "confidence": face["confidence"],

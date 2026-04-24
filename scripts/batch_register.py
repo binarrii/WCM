@@ -192,26 +192,35 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
         if not faces:
             raise ValueError(f"No face detected in {image_path}")
 
-        # Use the largest face by area
+        # Sort faces by area and take top 3
         def get_face_area(f):
             fa = f.get("facial_area", {})
             return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
 
-        best_face = max(faces, key=get_face_area)
-        face_img = best_face["face"]
-        confidence = best_face.get("confidence", 0.0)
+        sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+        top_faces = sorted_faces[:3]
 
-        if face_img is None:
+        results = []
+        for best_face in top_faces:
+            face_img = best_face.get("face")
+            confidence = best_face.get("confidence", 0.0)
+
+            if face_img is None:
+                continue
+
+            # Generate embedding from cropped face
+            embedding = DeepFace.represent(
+                img_path=face_img,
+                model_name=model_name,
+                enforce_detection=False,
+                align=True,
+            )
+            results.append((np.array(embedding[0]["embedding"]), float(confidence)))
+
+        if not results:
             raise ValueError(f"Failed to extract face from {image_path}")
 
-        # Generate embedding from cropped face
-        embedding = DeepFace.represent(
-            img_path=face_img,
-            model_name=model_name,
-            enforce_detection=False,
-            align=True,
-        )
-        return np.array(embedding[0]["embedding"]), float(confidence)
+        return results
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -302,22 +311,23 @@ def process_directory(
                 stats["persons_created"] += 1
                 session.flush()  # Ensure person is persisted
 
-            # Detect and crop face, then generate embedding
-            embedding, confidence = generate_embedding(image_path, config.deepface_model)
+            # Detect and crop faces, then generate embeddings for top 3
+            face_results = generate_embedding(image_path, config.deepface_model)
 
-            # Register face
-            record = FaceRecord(
-                id=uuid.uuid4(),
-                name=name,
-                file_path=str(image_path),
-                embedding=embedding.tolist(),  # List for VECTOR type
-                model=config.deepface_model,
-                confidence=confidence,
-                person_id=person.id if person else None,
-            )
-            session.add(record)
+            # Register each face
+            for embedding, confidence in face_results:
+                record = FaceRecord(
+                    id=uuid.uuid4(),
+                    name=name,
+                    file_path=str(image_path),
+                    embedding=embedding.tolist(),  # List for VECTOR type
+                    model=config.deepface_model,
+                    confidence=confidence,
+                    person_id=person.id if person else None,
+                )
+                session.add(record)
             session.commit()
-            stats["success"] += 1
+            stats["success"] += len(face_results)
 
         except Exception as e:
             stats["failed"] += 1
