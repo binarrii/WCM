@@ -382,9 +382,6 @@ class FaceEngine:
                 file_url=file_url,
                 confidence=confidence,
             )
-        finally:
-            if temp_path and temp_path.exists():
-                temp_path.unlink()
 
 
 # Global engine instance
