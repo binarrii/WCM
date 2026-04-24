@@ -252,7 +252,7 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
         if face_img is None:
             return None
 
-        # Generate embedding directly from numpy array
+        # Generate embedding from cropped face (numpy array)
         embedding = engine.generate_embedding(face_img)
         return {
             "embedding": embedding,

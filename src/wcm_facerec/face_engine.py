@@ -321,7 +321,7 @@ class FaceEngine:
 
         Args:
             name: Person name
-            img_source: Path or URL to image
+            img_source: Path, URL, or bytes to image
             file_url: Optional URL (if img_source is a local path)
 
         Returns:
@@ -330,32 +330,38 @@ class FaceEngine:
         Raises:
             ValueError: If no face is detected in the image
         """
-        import tempfile
-        import shutil
+        import io
+        import httpx
+        from PIL import Image
 
-        temp_path = None
         try:
-            # Handle bytes - save to temp file
+            # Convert to numpy array
             if isinstance(img_source, bytes):
-                temp_path = Path(tempfile.gettempdir()) / f"wcm_reg_{uuid.uuid4().hex[:12]}.jpg"
-                with open(temp_path, "wb") as f:
-                    f.write(img_source)
-                img_source = temp_path
+                # Bytes - convert directly
+                img = Image.open(io.BytesIO(img_source))
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+                img_array = np.array(img)
             elif isinstance(img_source, str) and img_source.startswith(("http://", "https://")):
-                # Download URL to temp file
-                temp_path = Path(tempfile.gettempdir()) / f"wcm_reg_{uuid.uuid4().hex[:12]}.jpg"
-                import httpx
+                # URL - download and convert
                 with httpx.Client(timeout=30.0) as client:
                     response = client.get(img_source)
                     response.raise_for_status()
-                with open(temp_path, "wb") as f:
-                    f.write(response.content)
-                img_source = temp_path
+                img = Image.open(io.BytesIO(response.content))
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+                img_array = np.array(img)
+            else:
+                # Local file path - load and convert
+                img = Image.open(str(img_source))
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+                img_array = np.array(img)
 
-            # Detect faces first
-            faces = self.detect_faces(img_source)
+            # Detect faces from numpy array
+            faces = self.detect_faces(img_array)
             if not faces:
-                raise ValueError(f"No face detected in {img_source}")
+                raise ValueError(f"No face detected in image")
 
             # Sort by area and take top face
             def get_face_area(f):
@@ -366,7 +372,7 @@ class FaceEngine:
             best_face = sorted_faces[0]["face"]
             confidence = sorted_faces[0].get("confidence")
 
-            # Generate embedding from cropped face
+            # Generate embedding from cropped face (numpy array)
             embedding = self.generate_embedding(best_face)
 
             return self.register_face(
