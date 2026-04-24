@@ -3,7 +3,6 @@
 
 import os
 import sys
-import shutil
 import cv2
 import numpy as np
 from pathlib import Path
@@ -81,18 +80,16 @@ def extract_faces_from_directory(
 
     def process_image(image_path: Path, category: str) -> int:
         """Process a single image, extract and save faces. Returns face count."""
-        import tempfile
-        import hashlib
+        import cv2
 
-        temp_path = None
         try:
-            # DeepFace doesn't support non-ASCII paths, copy to temp first
-            file_hash = hashlib.md5(str(image_path).encode()).hexdigest()[:12]
-            temp_path = Path(tempfile.gettempdir()) / f"wcm_extract_{file_hash}{image_path.suffix}"
-            shutil.copy2(image_path, temp_path)
+            # Load image as numpy array
+            img = cv2.imread(str(image_path))
+            if img is None:
+                return 0
 
-            # Detect faces using DeepFace (uses temp ASCII path)
-            faces = engine.detect_faces(temp_path)
+            # Detect faces using numpy array
+            faces = engine.detect_faces(img)
 
             face_count = 0
             for i, face_data in enumerate(faces):
@@ -112,9 +109,6 @@ def extract_faces_from_directory(
         except Exception as e:
             print(f"  Error processing {image_path}: {e}")
             return 0
-        finally:
-            if temp_path and temp_path.exists():
-                temp_path.unlink(missing_ok=True)
 
     # Process all images
     images = get_all_image_files(input_dir)

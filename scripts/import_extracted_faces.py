@@ -3,12 +3,13 @@
 
 import os
 import sys
-import shutil
 import hashlib
 import uuid
-import tempfile
 from pathlib import Path
 from collections import defaultdict
+
+import numpy as np
+from PIL import Image
 
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -106,63 +107,59 @@ def import_faces_from_directory(
                 # Get or create person
                 person = get_or_create_person(name, category)
 
-                # Copy to temp with ASCII path for DeepFace
-                temp_path = Path(tempfile.gettempdir()) / f"wcm_import_{uuid.uuid4().hex[:12]}{ext}"
-                shutil.copy2(face_file, temp_path)
+                # Load image as numpy array
+                img = Image.open(face_file)
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+                img_array = np.array(img)
 
+                # First detect faces - ensure there's a valid face before generating embedding
+                faces = engine.detect_faces(img_array)
+                if not faces:
+                    print(f"  {name} ({category}): skipped (no face detected)")
+                    stats[category]["skipped"] += 1
+                    continue
+
+                # Sort by area and take top face
+                def get_face_area(f):
+                    fa = f.get("facial_area", {})
+                    return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+                sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+                best_face = sorted_faces[0]["face"]
+
+                # Generate embedding from cropped face
+                embedding = engine.generate_embedding(best_face)
+
+                # Register face in database
+                session = get_session()
                 try:
-                    # First detect faces - ensure there's a valid face before generating embedding
-                    faces = engine.detect_faces(temp_path)
-                    if not faces:
-                        print(f"  {name} ({category}): skipped (no face detected)")
+                    record = FaceRecord(
+                        id=uuid.uuid4(),
+                        name=name,
+                        file_path=str(face_file),
+                        file_url=None,
+                        embedding=embedding.tolist(),
+                        model=settings.deepface_model,
+                        confidence=None,
+                        face_id=f"face_{hashlib.md5(str(face_file).encode()).hexdigest()[:8]}",
+                        frame_time=None,
+                        person_id=person.id,
+                    )
+                    session.add(record)
+                    session.commit()
+                    stats[category]["added"] += 1
+                    print(f"  {name} ({category}): added")
+                except Exception as e:
+                    session.rollback()
+                    if "duplicate" in str(e).lower() or "unique" in str(e).lower():
                         stats[category]["skipped"] += 1
-                        return
-
-                    # Sort by area and take top face
-                    def get_face_area(f):
-                        fa = f.get("facial_area", {})
-                        return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-
-                    sorted_faces = sorted(faces, key=get_face_area, reverse=True)
-                    best_face = sorted_faces[0]["face"]
-
-                    # Generate embedding from cropped face
-                    embedding = engine.generate_embedding(best_face)
-
-                    # Register face in database
-                    session = get_session()
-                    try:
-                        # Check if this face already exists (by embedding hash check would be expensive,
-                        # so we just insert and let the caller handle duplicates if needed)
-                        record = FaceRecord(
-                            id=uuid.uuid4(),
-                            name=name,
-                            file_path=str(face_file),
-                            file_url=None,
-                            embedding=embedding.tolist(),
-                            model=settings.deepface_model,
-                            confidence=None,
-                            face_id=f"face_{hashlib.md5(str(face_file).encode()).hexdigest()[:8]}",
-                            frame_time=None,
-                            person_id=person.id,
-                        )
-                        session.add(record)
-                        session.commit()
-                        stats[category]["added"] += 1
-                        print(f"  {name} ({category}): added")
-                    except Exception as e:
-                        session.rollback()
-                        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
-                            stats[category]["skipped"] += 1
-                            print(f"  {name} ({category}): skipped (duplicate)")
-                        else:
-                            stats[category]["errors"] += 1
-                            print(f"  {name} ({category}): error - {e}")
-                    finally:
-                        session.close()
+                        print(f"  {name} ({category}): skipped (duplicate)")
+                    else:
+                        stats[category]["errors"] += 1
+                        print(f"  {name} ({category}): error - {e}")
                 finally:
-                    if temp_path.exists():
-                        temp_path.unlink()
+                    session.close()
 
             except Exception as e:
                 stats[category]["errors"] += 1

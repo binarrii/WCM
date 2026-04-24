@@ -166,63 +166,57 @@ def get_all_images(directory: Path) -> list[Path]:
 def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, float]:
     """Detect face, crop it, then generate embedding using DeepFace.
 
-    DeepFace doesn't support non-ASCII paths, so copy to a temp ASCII path first.
-
     Returns:
         Tuple of (embedding, confidence)
     """
-    import shutil
-    import tempfile
-
     from deepface import DeepFace
+    from PIL import Image
 
-    # Copy to temp path with ASCII characters for DeepFace
-    temp_path = Path(tempfile.gettempdir()) / f"wcm_emb_{uuid.uuid4().hex[:12]}{image_path.suffix}"
-    try:
-        shutil.copy2(image_path, temp_path)
+    # Load image as numpy array
+    img = Image.open(image_path)
+    if img.mode == "RGBA":
+        img = img.convert("RGB")
+    img_array = np.array(img)
 
-        # First extract faces to get cropped face
-        faces = DeepFace.extract_faces(
-            img_path=str(temp_path),
+    # First extract faces to get cropped face
+    faces = DeepFace.extract_faces(
+        img_path=img_array,
+        enforce_detection=False,
+        align=True,
+    )
+
+    if not faces:
+        raise ValueError(f"No face detected in {image_path}")
+
+    # Sort faces by area and take top 3
+    def get_face_area(f):
+        fa = f.get("facial_area", {})
+        return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+    sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+    top_faces = sorted_faces[:3]
+
+    results = []
+    for best_face in top_faces:
+        face_img = best_face.get("face")
+        confidence = best_face.get("confidence", 0.0)
+
+        if face_img is None:
+            continue
+
+        # Generate embedding from cropped face
+        embedding = DeepFace.represent(
+            img_path=face_img,
+            model_name=model_name,
             enforce_detection=False,
             align=True,
         )
+        results.append((np.array(embedding[0]["embedding"]), float(confidence)))
 
-        if not faces:
-            raise ValueError(f"No face detected in {image_path}")
+    if not results:
+        raise ValueError(f"Failed to extract face from {image_path}")
 
-        # Sort faces by area and take top 3
-        def get_face_area(f):
-            fa = f.get("facial_area", {})
-            return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-
-        sorted_faces = sorted(faces, key=get_face_area, reverse=True)
-        top_faces = sorted_faces[:3]
-
-        results = []
-        for best_face in top_faces:
-            face_img = best_face.get("face")
-            confidence = best_face.get("confidence", 0.0)
-
-            if face_img is None:
-                continue
-
-            # Generate embedding from cropped face
-            embedding = DeepFace.represent(
-                img_path=face_img,
-                model_name=model_name,
-                enforce_detection=False,
-                align=True,
-            )
-            results.append((np.array(embedding[0]["embedding"]), float(confidence)))
-
-        if not results:
-            raise ValueError(f"Failed to extract face from {image_path}")
-
-        return results
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
+    return results
 
 
 def load_person_info(xls_path: Path) -> dict[str, dict]:
