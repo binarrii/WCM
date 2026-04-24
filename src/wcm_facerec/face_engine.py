@@ -334,54 +334,53 @@ class FaceEngine:
         import httpx
         from PIL import Image
 
-        try:
-            # Convert to numpy array
-            if isinstance(img_source, bytes):
-                # Bytes - convert directly
-                img = Image.open(io.BytesIO(img_source))
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                img_array = np.array(img)
-            elif isinstance(img_source, str) and img_source.startswith(("http://", "https://")):
-                # URL - download and convert
-                with httpx.Client(timeout=30.0) as client:
-                    response = client.get(img_source)
-                    response.raise_for_status()
-                img = Image.open(io.BytesIO(response.content))
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                img_array = np.array(img)
-            else:
-                # Local file path - load and convert
-                img = Image.open(str(img_source))
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                img_array = np.array(img)
+        # Convert to numpy array
+        if isinstance(img_source, bytes):
+            # Bytes - convert directly
+            img = Image.open(io.BytesIO(img_source))
+            if img.mode == "RGBA":
+                img = img.convert("RGB")
+            img_array = np.array(img)
+        elif isinstance(img_source, str) and img_source.startswith(("http://", "https://")):
+            # URL - download and convert
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(img_source)
+                response.raise_for_status()
+            img = Image.open(io.BytesIO(response.content))
+            if img.mode == "RGBA":
+                img = img.convert("RGB")
+            img_array = np.array(img)
+        else:
+            # Local file path - load and convert
+            img = Image.open(str(img_source))
+            if img.mode == "RGBA":
+                img = img.convert("RGB")
+            img_array = np.array(img)
 
-            # Detect faces from numpy array
-            faces = self.detect_faces(img_array)
-            if not faces:
-                raise ValueError(f"No face detected in image")
+        # Detect faces from numpy array
+        faces = self.detect_faces(img_array)
+        if not faces:
+            raise ValueError(f"No face detected in image")
 
-            # Sort by area and take top face
-            def get_face_area(f):
-                fa = f.get("facial_area", {})
-                return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+        # Sort by area and take top face
+        def get_face_area(f):
+            fa = f.get("facial_area", {})
+            return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
 
-            sorted_faces = sorted(faces, key=get_face_area, reverse=True)
-            best_face = sorted_faces[0]["face"]
-            confidence = sorted_faces[0].get("confidence")
+        sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+        best_face = sorted_faces[0]["face"]
+        confidence = sorted_faces[0].get("confidence")
 
-            # Generate embedding from cropped face (numpy array)
-            embedding = self.generate_embedding(best_face)
+        # Generate embedding from cropped face (numpy array)
+        embedding = self.generate_embedding(best_face)
 
-            return self.register_face(
-                name=name,
-                embedding=embedding,
-                file_path=str(img_source) if not str(img_source).startswith(("http://", "https://")) else None,
-                file_url=file_url,
-                confidence=confidence,
-            )
+        return self.register_face(
+            name=name,
+            embedding=embedding,
+            file_path=str(img_source) if not str(img_source).startswith(("http://", "https://")) else None,
+            file_url=file_url,
+            confidence=confidence,
+        )
 
 
 # Global engine instance
