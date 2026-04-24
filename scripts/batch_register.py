@@ -184,7 +184,6 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
         # First extract faces to get cropped face
         faces = DeepFace.extract_faces(
             img_path=str(temp_path),
-            detector_backend="yolov8n",
             enforce_detection=False,
             align=True,
         )
