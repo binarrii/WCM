@@ -301,7 +301,7 @@ def _search_video_frames(
                         conf = face_data.get("confidence") or 0
                         frame_area = frame.shape[0] * frame.shape[1]
                         # Skip if confidence is very low or face covers most of frame (detection failed)
-                        if conf < 0.5 or area > frame_area * 0.8:
+                        if conf < 0.6 or area > frame_area * 0.8:
                             continue
                         _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
                 except Exception:
