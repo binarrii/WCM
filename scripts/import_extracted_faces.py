@@ -14,7 +14,7 @@ import cv2
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from wcm_facerec.face_engine import FaceEngine
+from wcm_facerec.face_engine import FaceEngine, MIN_FACE_PIXELS
 from wcm_facerec.database import FaceRecord, Person, get_session
 from wcm_facerec.config import settings
 
@@ -117,12 +117,18 @@ def import_faces_from_directory(
                     stats[category]["skipped"] += 1
                     continue
 
-                # Sort by area and take top face
+                # Filter faces by minimum area and take top face
                 def get_face_area(f):
                     fa = f.get("facial_area", {})
                     return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
 
-                sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+                valid_faces = [f for f in faces if get_face_area(f) >= MIN_FACE_PIXELS]
+                if not valid_faces:
+                    print(f"  {name} ({category}): skipped (face too small)")
+                    stats[category]["skipped"] += 1
+                    continue
+
+                sorted_faces = sorted(valid_faces, key=get_face_area, reverse=True)
                 best_face = sorted_faces[0]["face"]
 
                 # Generate embedding from cropped face

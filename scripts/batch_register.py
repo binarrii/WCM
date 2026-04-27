@@ -55,6 +55,10 @@ class Config:
         return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
 
 
+# Minimum face area in pixels (128x128)
+MIN_FACE_PIXELS = 128 * 128
+
+
 class Base(DeclarativeBase):
     """SQLAlchemy base."""
     pass
@@ -185,12 +189,16 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
     if not faces:
         raise ValueError(f"No face detected in {image_path}")
 
-    # Sort faces by area and take top 3
+    # Filter faces by minimum area and sort by area
     def get_face_area(f):
         fa = f.get("facial_area", {})
         return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
 
-    sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+    valid_faces = [f for f in faces if get_face_area(f) >= MIN_FACE_PIXELS]
+    if not valid_faces:
+        raise ValueError(f"No face with area >= {MIN_FACE_PIXELS} detected in {image_path}")
+
+    sorted_faces = sorted(valid_faces, key=get_face_area, reverse=True)
     top_faces = sorted_faces[:3]
 
     results = []
