@@ -231,10 +231,11 @@ class FaceEngine:
                 FROM face_records fr
                 LEFT JOIN persons p ON fr.person_id = p.id
                 WHERE fr.name = :name
+                  AND fr.embedding {op} :embedding <= :threshold
                 ORDER BY fr.embedding {op} :embedding
                 LIMIT :top_k
             """)
-            result = session.execute(sql, {"embedding": embedding_str, "name": name, "top_k": top_k * 3})
+            result = session.execute(sql, {"embedding": embedding_str, "name": name, "threshold": threshold, "top_k": top_k})
         else:
             sql = text(f"""
                 SELECT
@@ -244,37 +245,33 @@ class FaceEngine:
                     p.name as person_name, p.occupation, p.type, p.remarks
                 FROM face_records fr
                 LEFT JOIN persons p ON fr.person_id = p.id
+                WHERE fr.embedding {op} :embedding <= :threshold
                 ORDER BY fr.embedding {op} :embedding
                 LIMIT :top_k
             """)
-            result = session.execute(sql, {"embedding": embedding_str, "top_k": top_k * 3})
+            result = session.execute(sql, {"embedding": embedding_str, "threshold": threshold, "top_k": top_k})
 
         matches = []
         for row in result:
-            dist = float(row.distance)
-            if dist <= threshold:
-                match = {
-                    "id": str(row.id),
-                    "name": row.name,
-                    "file_path": row.file_path,
-                    "file_url": row.file_url,
-                    "distance": dist,
-                    "confidence": row.confidence,
-                    "person_id": str(row.person_id) if row.person_id else None,
-                    "frame_time": row.frame_time,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
+            match = {
+                "id": str(row.id),
+                "name": row.name,
+                "file_path": row.file_path,
+                "file_url": row.file_url,
+                "distance": float(row.distance),
+                "confidence": row.confidence,
+                "person_id": str(row.person_id) if row.person_id else None,
+                "frame_time": row.frame_time,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            if row.person_name:
+                match["person"] = {
+                    "name": row.person_name,
+                    "occupation": row.occupation,
+                    "type": row.type,
+                    "remarks": row.remarks,
                 }
-                if row.person_name:
-                    match["person"] = {
-                        "name": row.person_name,
-                        "occupation": row.occupation,
-                        "type": row.type,
-                        "remarks": row.remarks,
-                    }
-                matches.append(match)
-
-            if len(matches) >= top_k:
-                break
+            matches.append(match)
 
         session.close()
         return matches
