@@ -289,13 +289,21 @@ def _search_video_frames(
 
             if frame_idx % int(fps * sample_interval) == 0:
                 current_frame_time = frame_idx / fps if fps > 0 else 0
-                # Pass frame numpy array directly (no temp file)
                 try:
                     faces = engine.detect_faces(frame)
                     for face_data in faces:
                         face_img = face_data.get("face")
-                        if face_img is not None:
-                            _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
+                        if face_img is None:
+                            continue
+                        # Filter out bad detections
+                        fa = face_data.get("facial_area", {})
+                        area = (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+                        conf = face_data.get("confidence") or 0
+                        frame_area = frame.shape[0] * frame.shape[1]
+                        # Skip if confidence is very low or face covers most of frame (detection failed)
+                        if conf < 0.5 or area > frame_area * 0.8:
+                            continue
+                        _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
                 except Exception:
                     pass  # Skip frames that fail detection
 
