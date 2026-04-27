@@ -209,8 +209,8 @@ class FaceEngine:
         if name:
             query = query.filter(FaceRecord.name == name)
 
-        # Fetch all matching records (limit to 1000 for performance)
-        results = query.limit(1000).all()
+        # Fetch all matching records (limit to 25000 for performance)
+        results = query.limit(25000).all()
 
         # Calculate distances manually for JSON-stored embeddings
         distances = []
