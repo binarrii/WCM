@@ -9,7 +9,7 @@ from pathlib import Path
 from collections import defaultdict
 
 import numpy as np
-from PIL import Image
+import cv2
 
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -107,11 +107,8 @@ def import_faces_from_directory(
                 # Get or create person
                 person = get_or_create_person(name, category)
 
-                # Load image as numpy array
-                img = Image.open(face_file)
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                img_array = np.array(img)
+                # Load image as numpy array via cv2
+                img_array = cv2.imread(str(face_file))
 
                 # First detect faces - ensure there's a valid face before generating embedding
                 faces = engine.detect_faces(img_array)

@@ -169,14 +169,11 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
     Returns:
         Tuple of (embedding, confidence)
     """
+    import cv2
     from deepface import DeepFace
-    from PIL import Image
 
-    # Load image as numpy array
-    img = Image.open(image_path)
-    if img.mode == "RGBA":
-        img = img.convert("RGB")
-    img_array = np.array(img)
+    # Load image as numpy array via cv2
+    img_array = cv2.imread(str(image_path))
 
     # First extract faces to get cropped face
     faces = DeepFace.extract_faces(

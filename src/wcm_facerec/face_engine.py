@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import io
 import os
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Literal, Optional, Union
 
+import cv2
 import httpx
 import numpy as np
 from deepface import DeepFace
-from PIL import Image
 
 from .config import settings
 from .database import FaceRecord, Person, get_session, register_vector_type
@@ -35,18 +33,6 @@ class FaceEngine:
         self.model_name = model_name or settings.deepface_model
         self.distance_metric = distance_metric or settings.deepface_distance_metric
         self.embedding_dim = settings.embedding_dim
-
-    def _load_image_from_path(self, path: str) -> np.ndarray:
-        """Load image from disk path."""
-        return np.array(Image.open(path))
-
-    async def _load_image_from_url(self, url: str) -> np.ndarray:
-        """Load image from URL."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            image = Image.open(io.BytesIO(response.content))
-            return np.array(image)
 
     def _extract_faces_from_video_frame(self, frame: np.ndarray, frame_idx: int, fps: float) -> list[dict]:
         """Extract faces from a video frame."""
@@ -114,47 +100,31 @@ class FaceEngine:
         Returns:
             Face embedding as numpy array
         """
-        temp_path = None
-        try:
-            if isinstance(img_source, bytes):
-                # Save bytes to temp file
-                temp_path = Path(tempfile.gettempdir()) / f"wcm_emb_{uuid.uuid4().hex[:12]}.jpg"
-                with open(temp_path, "wb") as f:
-                    f.write(img_source)
-            elif img_source.startswith(("http://", "https://")):
-                # Download and save to temp file
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(img_source)
-                    response.raise_for_status()
-                ext = self._get_ext_from_content_type(response.headers.get("content-type", ""))
-                temp_path = Path(tempfile.gettempdir()) / f"wcm_emb_{uuid.uuid4().hex[:12]}{ext}"
-                with open(temp_path, "wb") as f:
-                    f.write(response.content)
-            else:
-                # Local file - use as-is
-                temp_path = img_source
+        if isinstance(img_source, np.ndarray):
+            # Already a numpy array - use directly
+            img_array = img_source
+        elif isinstance(img_source, bytes):
+            # Bytes - decode to numpy array via cv2
+            nparr = np.frombuffer(img_source, np.uint8)
+            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        elif img_source.startswith(("http://", "https://")):
+            # URL - download and decode to numpy array
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(img_source)
+                response.raise_for_status()
+            nparr = np.frombuffer(response.content, np.uint8)
+            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        else:
+            # Local file - load via cv2
+            img_array = cv2.imread(str(img_source))
 
-            embedding = DeepFace.represent(
-                img_path=str(temp_path),
-                model_name=self.model_name,
-                enforce_detection=False,
-                align=True,
-            )
-            return np.array(embedding[0]["embedding"])
-        finally:
-            if temp_path and str(img_source).startswith(("http://", "https://")) and temp_path.exists():
-                temp_path.unlink()
-
-    def _get_ext_from_content_type(self, content_type: str) -> str:
-        """Get file extension from content type."""
-        ext_map = {
-            "image/jpeg": ".jpg",
-            "image/png": ".png",
-            "image/webp": ".webp",
-            "image/gif": ".gif",
-            "image/bmp": ".bmp",
-        }
-        return ext_map.get(content_type.lower(), ".jpg")
+        embedding = DeepFace.represent(
+            img_path=img_array,
+            model_name=self.model_name,
+            enforce_detection=False,
+            align=True,
+        )
+        return np.array(embedding[0]["embedding"])
 
     def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
         """Detect faces in an image.
@@ -339,32 +309,23 @@ class FaceEngine:
         Raises:
             ValueError: If no face is detected in the image
         """
-        import io
         import httpx
-        from PIL import Image
 
-        # Convert to numpy array
+        # Convert to numpy array via cv2
         if isinstance(img_source, bytes):
-            # Bytes - convert directly
-            img = Image.open(io.BytesIO(img_source))
-            if img.mode == "RGBA":
-                img = img.convert("RGB")
-            img_array = np.array(img)
+            # Bytes - decode via cv2
+            nparr = np.frombuffer(img_source, np.uint8)
+            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         elif isinstance(img_source, str) and img_source.startswith(("http://", "https://")):
-            # URL - download and convert
+            # URL - download and decode
             with httpx.Client(timeout=30.0) as client:
                 response = client.get(img_source)
                 response.raise_for_status()
-            img = Image.open(io.BytesIO(response.content))
-            if img.mode == "RGBA":
-                img = img.convert("RGB")
-            img_array = np.array(img)
+            nparr = np.frombuffer(response.content, np.uint8)
+            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         else:
-            # Local file path - load and convert
-            img = Image.open(str(img_source))
-            if img.mode == "RGBA":
-                img = img.convert("RGB")
-            img_array = np.array(img)
+            # Local file path - load via cv2
+            img_array = cv2.imread(str(img_source))
 
         # Detect faces from numpy array
         faces = self.detect_faces(img_array)

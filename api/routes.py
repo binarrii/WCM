@@ -1,7 +1,6 @@
 """API routes for face recognition service."""
 
 import asyncio
-import io
 import json
 import os
 import uuid
@@ -12,7 +11,6 @@ import cv2
 import httpx
 import numpy as np
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
-from PIL import Image
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
@@ -229,12 +227,9 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
             response = await client.get(url)
             response.raise_for_status()
 
-        # Decode to numpy array directly (no temp file)
-        img = Image.open(io.BytesIO(response.content))
-        # Convert RGBA to RGB if needed (some PNGs have alpha channel)
-        if img.mode == "RGBA":
-            img = img.convert("RGB")
-        img_array = np.array(img)
+        # Decode to numpy array via cv2 (no temp file, no PIL)
+        nparr = np.frombuffer(response.content, np.uint8)
+        img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         # Detect faces using numpy array
         faces = engine.detect_faces(img_array)
