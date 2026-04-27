@@ -190,7 +190,7 @@ class FaceEngine:
         top_k: int = 10,
         threshold: float = 0.4,
     ) -> list[dict]:
-        """Search for similar faces in the database.
+        """Search for similar faces using pgvector's SQL operators.
 
         Args:
             embedding: Query embedding
@@ -201,68 +201,80 @@ class FaceEngine:
         Returns:
             List of matching face records with distance
         """
-        import json
+        from sqlalchemy import text
 
         session = get_session()
+        register_vector_type(session.connection())
 
-        query = session.query(FaceRecord, Person).outerjoin(Person, FaceRecord.person_id == Person.id)
+        # pgvector distance operators:
+        # <-> = Euclidean distance
+        # <=> = Cosine distance
+        if self.distance_metric == "cosine":
+            op = "<=>"
+        elif self.distance_metric == "euclidean":
+            op = "<->"
+        else:
+            # euclidean_l2 - vectors are already normalized in DeepFace
+            op = "<=>"
+
+        # Convert numpy array to pgvector format [x,y,z]
+        embedding_str = "[" + ",".join(str(x) for x in embedding.tolist()) + "]"
+
+        # Build parameterized SQL with optional name filter
         if name:
-            query = query.filter(FaceRecord.name == name)
-
-        # Fetch all matching records (limit to 25000 for performance)
-        results = query.limit(25000).all()
-
-        # Calculate distances manually for JSON-stored embeddings
-        distances = []
-        for record, person in results:
-            try:
-                stored_embedding = json.loads(record.embedding) if isinstance(record.embedding, str) else record.embedding
-                stored_vec = np.array(stored_embedding)
-
-                if self.distance_metric == "cosine":
-                    # Cosine distance
-                    dot = np.dot(embedding, stored_vec)
-                    norm_emb = np.linalg.norm(embedding)
-                    norm_stored = np.linalg.norm(stored_vec)
-                    dist = 1 - dot / (norm_emb * norm_stored)
-                elif self.distance_metric == "euclidean":
-                    # Euclidean distance
-                    dist = np.linalg.norm(embedding - stored_vec)
-                else:
-                    # Euclidean L2 normalized
-                    emb_norm = embedding / np.linalg.norm(embedding)
-                    stored_norm = stored_vec / np.linalg.norm(stored_vec)
-                    dist = np.linalg.norm(emb_norm - stored_norm)
-
-                distances.append((dist, record, person))
-            except Exception:
-                continue
-
-        # Sort by distance and take top_k
-        distances.sort(key=lambda x: x[0])
+            sql = text(f"""
+                SELECT
+                    fr.id, fr.name, fr.file_path, fr.file_url, fr.confidence,
+                    fr.person_id, fr.frame_time, fr.created_at,
+                    fr.embedding {op} :embedding AS distance,
+                    p.name as person_name, p.occupation, p.type, p.remarks
+                FROM face_records fr
+                LEFT JOIN persons p ON fr.person_id = p.id
+                WHERE fr.name = :name
+                ORDER BY fr.embedding {op} :embedding
+                LIMIT :top_k
+            """)
+            result = session.execute(sql, {"embedding": embedding_str, "name": name, "top_k": top_k * 3})
+        else:
+            sql = text(f"""
+                SELECT
+                    fr.id, fr.name, fr.file_path, fr.file_url, fr.confidence,
+                    fr.person_id, fr.frame_time, fr.created_at,
+                    fr.embedding {op} :embedding AS distance,
+                    p.name as person_name, p.occupation, p.type, p.remarks
+                FROM face_records fr
+                LEFT JOIN persons p ON fr.person_id = p.id
+                ORDER BY fr.embedding {op} :embedding
+                LIMIT :top_k
+            """)
+            result = session.execute(sql, {"embedding": embedding_str, "top_k": top_k * 3})
 
         matches = []
-        for dist, record, person in distances[:top_k]:
+        for row in result:
+            dist = float(row.distance)
             if dist <= threshold:
                 match = {
-                    "id": str(record.id),
-                    "name": record.name,
-                    "file_path": record.file_path,
-                    "file_url": record.file_url,
-                    "distance": float(dist),
-                    "confidence": record.confidence,
-                    "person_id": str(record.person_id) if record.person_id else None,
-                    "frame_time": record.frame_time,
-                    "created_at": record.created_at.isoformat() if record.created_at else None,
+                    "id": str(row.id),
+                    "name": row.name,
+                    "file_path": row.file_path,
+                    "file_url": row.file_url,
+                    "distance": dist,
+                    "confidence": row.confidence,
+                    "person_id": str(row.person_id) if row.person_id else None,
+                    "frame_time": row.frame_time,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
                 }
-                if person:
+                if row.person_name:
                     match["person"] = {
-                        "name": person.name,
-                        "occupation": person.occupation,
-                        "type": person.type_,
-                        "remarks": person.remarks,
+                        "name": row.person_name,
+                        "occupation": row.occupation,
+                        "type": row.type,
+                        "remarks": row.remarks,
                     }
                 matches.append(match)
+
+            if len(matches) >= top_k:
+                break
 
         session.close()
         return matches
