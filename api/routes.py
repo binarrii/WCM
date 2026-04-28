@@ -222,6 +222,17 @@ async def search_faces(request: Request):
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
+async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
+    """Download image, detect face, crop and return face embedding (in-memory)."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+        return _detect_and_crop_face_from_bytes(engine, response.content)
+    except Exception:
+        return None
+
+
 def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> dict | None:
     """Detect face from image bytes, crop and return face embedding (in-memory).
 
