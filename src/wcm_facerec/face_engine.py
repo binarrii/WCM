@@ -288,7 +288,7 @@ class FaceEngine:
     def register_from_image(
         self,
         name: str,
-        img_source: Union[str, Path],
+        img_source: Union[str, Path, bytes],
         file_url: Optional[str] = None,
     ) -> FaceRecord:
         """Register a face from an image file or bytes.
@@ -337,7 +337,7 @@ class FaceEngine:
         return self.register_face(
             name=name,
             embedding=embedding,
-            file_path=str(img_source) if not str(img_source).startswith(("http://", "https://")) else None,
+            file_path=str(img_source) if isinstance(img_source, (str, Path)) else None,
             file_url=file_url,
             confidence=confidence,
         )
