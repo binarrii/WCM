@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Literal, Optional, Union
 
 import cv2
-import httpx
 import numpy as np
 from deepface import DeepFace
 
@@ -95,10 +94,10 @@ class FaceEngine:
         return np.array(embedding[0]["embedding"])
 
     async def generate_embedding_async(self, img_source: Union[str, Path, bytes, np.ndarray]) -> np.ndarray:
-        """Generate face embedding asynchronously (supports URLs, bytes, and arrays).
+        """Generate face embedding asynchronously (supports bytes and arrays).
 
         Args:
-            img_source: Path, URL, image bytes, or numpy array
+            img_source: Path to local file, image bytes, or numpy array
 
         Returns:
             Face embedding as numpy array
@@ -109,13 +108,6 @@ class FaceEngine:
         elif isinstance(img_source, bytes):
             # Bytes - decode to numpy array via cv2
             nparr = np.frombuffer(img_source, np.uint8)
-            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        elif img_source.startswith(("http://", "https://")):
-            # URL - download and decode to numpy array
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(img_source)
-                response.raise_for_status()
-            nparr = np.frombuffer(response.content, np.uint8)
             img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         else:
             # Local file - load via cv2
@@ -299,12 +291,12 @@ class FaceEngine:
         img_source: Union[str, Path],
         file_url: Optional[str] = None,
     ) -> FaceRecord:
-        """Register a face from an image file or URL.
+        """Register a face from an image file or bytes.
 
         Args:
             name: Person name
-            img_source: Path, URL, or bytes to image
-            file_url: Optional URL (if img_source is a local path)
+            img_source: Path to local image file, or image bytes
+            file_url: Optional URL (stored but not used for loading)
 
         Returns:
             Created FaceRecord
@@ -312,19 +304,10 @@ class FaceEngine:
         Raises:
             ValueError: If no face is detected in the image
         """
-        import httpx
-
         # Convert to numpy array via cv2
         if isinstance(img_source, bytes):
             # Bytes - decode via cv2
             nparr = np.frombuffer(img_source, np.uint8)
-            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        elif isinstance(img_source, str) and img_source.startswith(("http://", "https://")):
-            # URL - download and decode
-            with httpx.Client(timeout=30.0) as client:
-                response = client.get(img_source)
-                response.raise_for_status()
-            nparr = np.frombuffer(response.content, np.uint8)
             img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         else:
             # Local file path - load via cv2
