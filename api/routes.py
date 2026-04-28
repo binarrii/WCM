@@ -134,7 +134,13 @@ async def register_face(request: Request):
             else:
                 raise HTTPException(status_code=400, detail="Either file or url must be provided")
         elif form.get("url"):
-            img_source = form.get("url")
+            url = form.get("url")
+            try:
+                resp = httpx.get(url, timeout=60.0)
+                resp.raise_for_status()
+                img_source = resp.content
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
         else:
             raise HTTPException(status_code=400, detail="Either file or url must be provided")
 
@@ -402,7 +408,10 @@ async def websocket_search(websocket: WebSocket):
                         "results": results,
                     })
                 else:
-                    embedding = await engine.generate_embedding_async(url)
+                    resp = httpx.get(url, timeout=60.0)
+                    resp.raise_for_status()
+                    img_bytes = resp.content
+                    embedding = await engine.generate_embedding_async(img_bytes)
                     results = engine.search(
                         embedding=embedding,
                         name=name,
