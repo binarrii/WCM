@@ -22,7 +22,7 @@ from wcm_facerec.config import settings
 def import_faces_from_directory(
     input_dir: str | Path,
     category_default: str = "其他",
-    overwrite: bool = False,
+    overwrite: bool = True,
 ) -> dict:
     """Import extracted faces into the database.
 
