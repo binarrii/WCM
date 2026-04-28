@@ -375,7 +375,7 @@ async def websocket_search(websocket: WebSocket):
         while True:
             try:
                 data = await websocket.receive_text()
-                if not data:
+                if not data or len(data) < 2:  # Empty or single bracket
                     continue
                 payload = json.loads(data)
             except json.JSONDecodeError:
