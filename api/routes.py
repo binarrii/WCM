@@ -222,27 +222,21 @@ async def search_faces(request: Request):
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
-async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
-    """Download image, detect face, crop and return face embedding (in-memory).
+def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> dict | None:
+    """Detect face from image bytes, crop and return face embedding (in-memory).
 
     Returns dict with 'embedding' and 'confidence' if face found, None otherwise.
     """
     try:
-        # Download image
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-
-        # Decode to numpy array via cv2 (no temp file, no PIL)
-        nparr = np.frombuffer(response.content, np.uint8)
+        nparr = np.frombuffer(img_bytes, np.uint8)
         img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img_array is None:
+            return None
 
-        # Detect faces using numpy array
         faces = engine.detect_faces(img_array)
         if not faces:
             return None
 
-        # Use the largest face (by area = w * h)
         def get_face_area(f):
             fa = f.get("facial_area", {})
             return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
@@ -253,13 +247,11 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
         if face_img is None:
             return None
 
-        # Generate embedding from cropped face (numpy array)
         embedding = engine.generate_embedding(face_img)
         return {
             "embedding": embedding,
             "confidence": confidence,
         }
-
     except Exception:
         return None
 
@@ -411,7 +403,17 @@ async def websocket_search(websocket: WebSocket):
                     resp = httpx.get(url, timeout=60.0)
                     resp.raise_for_status()
                     img_bytes = resp.content
-                    embedding = await engine.generate_embedding_async(img_bytes)
+                    face_result = _detect_and_crop_face_from_bytes(engine, img_bytes)
+                    if face_result is None:
+                        await websocket.send_json({
+                            "status": "completed",
+                            "taskId": task_id,
+                            "query_embedding_dim": settings.embedding_dim,
+                            "results": [],
+                            "message": "No face detected in image",
+                        })
+                        continue
+                    embedding = face_result["embedding"]
                     results = engine.search(
                         embedding=embedding,
                         name=name,
@@ -424,6 +426,7 @@ async def websocket_search(websocket: WebSocket):
                         "query_embedding_dim": settings.embedding_dim,
                         "results": results,
                     })
+                    continue
 
             except httpx.HTTPError as e:
                 await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Failed to fetch: {str(e)}"})
