@@ -57,13 +57,13 @@ COPY --from=builder /app/scripts ./scripts
 # Use virtual environment python
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
-ENV PYTHONPATH="/app/src:$PYTHONPATH"
+ENV PYTHONPATH="/app/src"
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Environment variables
+# Default environment variables (override with -e at runtime)
 ENV WCM_DB_HOST=db
 ENV WCM_DB_PORT=5432
 ENV WCM_DB_NAME=facerec
