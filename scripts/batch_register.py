@@ -177,13 +177,14 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
     from deepface import DeepFace
 
     # Load image as numpy array via cv2
-    img_array = cv2.imread(str(image_path))
+    img_array = cv2.imread(str(image_path), cv2.IMREAD_COLOR_BGR)
 
     # First extract faces to get cropped face
     faces = DeepFace.extract_faces(
         img_path=img_array,
         enforce_detection=False,
         align=True,
+        color_face="bgr",
     )
 
     if not faces:

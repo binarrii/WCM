@@ -84,7 +84,7 @@ def extract_faces_from_directory(
 
         try:
             # Load image as numpy array
-            img = cv2.imread(str(image_path))
+            img = cv2.imread(str(image_path), cv2.IMREAD_COLOR_BGR)
             if img is None:
                 return 0
 

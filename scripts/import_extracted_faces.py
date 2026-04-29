@@ -108,7 +108,7 @@ def import_faces_from_directory(
                 person = get_or_create_person(name, category)
 
                 # Load image as numpy array via cv2
-                img_array = cv2.imread(str(face_file))
+                img_array = cv2.imread(str(face_file), cv2.IMREAD_COLOR_BGR)
 
                 # First detect faces - ensure there's a valid face before generating embedding
                 faces = engine.detect_faces(img_array)

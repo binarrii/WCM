@@ -79,14 +79,17 @@ async def detect_faces(request: Request):
 
     temp_path = None
     try:
-        # Handle bytes - save temporarily
+        # Handle bytes - decode to numpy array directly (no temp file needed)
         if isinstance(img_source, bytes):
-            temp_path = Path(f"/tmp/facerec_{os.urandom(8).hex()}.jpg")
-            with open(temp_path, "wb") as f:
-                f.write(img_source)
-            img_source = temp_path
-
-        faces = engine.detect_faces(img_source)
+            nparr = np.frombuffer(img_source, np.uint8)
+            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            faces = engine.detect_faces(img_array)
+        elif isinstance(img_source, (str, Path)):
+            # Local file - decode to numpy array so OpenCV fallback works
+            img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR)
+            faces = engine.detect_faces(img_array)
+        else:
+            faces = engine.detect_faces(img_source)
 
         results = []
         for i, face in enumerate(faces):
@@ -240,7 +243,7 @@ def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> di
     """
     try:
         nparr = np.frombuffer(img_bytes, np.uint8)
-        img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
         if img_array is None:
             return None
 
@@ -255,7 +258,7 @@ def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> di
         face_img = best_face.get("face")
         confidence = best_face.get("confidence", 0.0)
 
-        if face_img is None:
+        if face_img is None or confidence < 0.6:
             return None
 
         embedding = engine.generate_embedding(face_img)
