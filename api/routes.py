@@ -380,7 +380,7 @@ async def websocket_search(websocket: WebSocket):
 
     Accepts: {"url": "https://example.com/xxx.mp4"} or {"url": "https://example.com/xxx.png"}
     Responds immediately: {"status": "accepted", "taskId": "xxxxxxx"}
-    Then sends result: {"status": "completed", "taskId": "xxxxxxx", "query_embedding_dim": 4096, "results": [...]}
+    Then sends result: {"status": "completed", "taskId": "xxxxxxx", "query_embedding_dim": 512, "results": [...]}
     """
     await websocket.accept()
 

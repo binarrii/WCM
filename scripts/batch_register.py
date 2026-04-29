@@ -48,7 +48,7 @@ class Config:
     db_user: str = os.getenv("DB_USER", "postgres")
     db_password: str = os.getenv("DB_PASSWORD", "postgres")
     deepface_model: str = os.getenv("DEEPFACE_MODEL", "Facenet512")
-    embedding_dim: int = 4096  # VGG-Face
+    embedding_dim: int = 512  # Facenet512
 
     @property
     def database_url(self) -> str:
@@ -89,7 +89,7 @@ class FaceRecord(Base):
     name = Column(String, nullable=False, index=True)
     file_path = Column(String, nullable=True)
     file_url = Column(String, nullable=True)
-    embedding = Column(VECTOR(4096), nullable=False)  # VGG-Face dimension
+    embedding = Column(VECTOR(512), nullable=False)  # Facenet512 dimension
     model = Column(String, nullable=False)
     detector = Column(String, nullable=True)
     confidence = Column(Float, nullable=True)
@@ -113,7 +113,7 @@ def get_embedding_dim(model_name: str) -> int:
         "Dlib": 128,
         "SFace": 128,
     }
-    return dims.get(model_name, 4096)
+    return dims.get(model_name, 512)
 
 
 def init_db(config: Config):

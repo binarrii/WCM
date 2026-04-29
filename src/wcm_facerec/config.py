@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     @property
     def embedding_dim(self) -> int:
         """Get embedding dimension based on model."""
-        return _EMBEDDING_DIMS.get(self.deepface_model, 4096)
+        return _EMBEDDING_DIMS.get(self.deepface_model, 512)
 
 
 settings = Settings()
