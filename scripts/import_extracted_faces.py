@@ -122,13 +122,13 @@ def import_faces_from_directory(
                     fa = f.get("facial_area", {})
                     return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
 
-                valid_faces = [f for f in faces if get_face_area(f) >= MIN_FACE_PIXELS]
-                if not valid_faces:
-                    print(f"  {name} ({category}): skipped (face too small)")
-                    stats[category]["skipped"] += 1
-                    continue
+                # valid_faces = [f for f in faces if get_face_area(f) >= MIN_FACE_PIXELS]
+                # if not valid_faces:
+                #     print(f"  {name} ({category}): skipped (face too small)")
+                #     stats[category]["skipped"] += 1
+                #     continue
 
-                sorted_faces = sorted(valid_faces, key=get_face_area, reverse=True)
+                sorted_faces = sorted(faces, key=get_face_area, reverse=True)
                 best_face = sorted_faces[0]["face"]
 
                 # Generate embedding from cropped face
