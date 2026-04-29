@@ -316,14 +316,14 @@ def _search_video_frames(
                         if conf < 0.5 or area > frame_area * 0.8:
                             continue
 
-                        # --- DEBUG: save cropped face to temp dir ---
-                        import tempfile as _debug_tmp
-                        _debug_dir = _debug_tmp.mkdtemp(prefix="debug/face_search_debug_")
-                        _debug_fname = _debug_dir + f"/frame{frame_idx:06d}_t{current_frame_time:.2f}_conf{conf:.2f}_area{area}.png"
-                        _debug_face = (np.clip(face_img, 0, 1) * 255).astype(np.uint8) if face_img.dtype != np.uint8 else face_img
-                        cv2.imwrite(_debug_fname, _debug_face)
-                        print(f"[DEBUG FACE] frame={frame_idx} time={current_frame_time:.2f}s conf={conf:.2f} area={area} saved={_debug_fname}")
-                        # --- END DEBUG ---
+                        # # --- DEBUG: save cropped face to temp dir ---
+                        # import tempfile as _debug_tmp
+                        # _debug_dir = _debug_tmp.mkdtemp(prefix="debug/face_search_debug_")
+                        # _debug_fname = _debug_dir + f"/frame{frame_idx:06d}_t{current_frame_time:.2f}_conf{conf:.2f}_area{area}.png"
+                        # _debug_face = (np.clip(face_img, 0, 1) * 255).astype(np.uint8) if face_img.dtype != np.uint8 else face_img
+                        # cv2.imwrite(_debug_fname, _debug_face)
+                        # print(f"[DEBUG FACE] frame={frame_idx} time={current_frame_time:.2f}s conf={conf:.2f} area={area} saved={_debug_fname}")
+                        # # --- END DEBUG ---
 
                         _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
                 except Exception:
