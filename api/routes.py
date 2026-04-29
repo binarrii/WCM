@@ -310,7 +310,7 @@ def _search_video_frames(
                         conf = face_data.get("confidence") or 0
                         frame_area = frame.shape[0] * frame.shape[1]
                         # Skip if confidence is very low or face covers most of frame (detection failed)
-                        if conf < 0.6 or area > frame_area * 0.8:
+                        if conf < 0.5 or area > frame_area * 0.8:
                             continue
 
                         # --- DEBUG: save cropped face to temp dir ---
