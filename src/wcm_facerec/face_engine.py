@@ -41,6 +41,7 @@ class FaceEngine:
         try:
             faces = DeepFace.extract_faces(
                 img_path=frame,
+                detector_backend="retinaface",
                 enforce_detection=False,
                 align=True,
                 color_face="bgr",
@@ -138,50 +139,19 @@ class FaceEngine:
             if isinstance(img_source, np.ndarray):
                 faces = DeepFace.extract_faces(
                     img_path=img_source,
+                    detector_backend="retinaface",
                     enforce_detection=False,
                     align=True,
                     color_face="bgr",
                 )
-                frame_area = img_source.shape[0] * img_source.shape[1]
-                frame_h, frame_w = img_source.shape[:2]
             else:
                 faces = DeepFace.extract_faces(
                     img_path=str(img_source),
+                    detector_backend="retinaface",
                     enforce_detection=False,
                     align=True,
                     color_face="bgr",
                 )
-                frame_area = None
-                frame_h, frame_w = None, None
-
-            # Check if DeepFace gave a failed detection (conf=0 and area covers >=80% of frame)
-            if frame_area is not None and faces:
-                fa = faces[0].get("facial_area", {})
-                area = (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-                conf = faces[0].get("confidence") or 0
-                if conf == 0.0 and area >= frame_area * 0.8:
-                    faces = []  # Force fallback to OpenCV
-
-            if not faces:
-                # Fallback: use OpenCV Haar cascade
-                if isinstance(img_source, np.ndarray):
-                    gray = cv2.cvtColor(img_source, cv2.COLOR_BGR2GRAY)
-                    cascade = cv2.CascadeClassifier(
-                        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-                    )
-                    opencv_faces = cascade.detectMultiScale(
-                        gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
-                    )
-                    for x, y, w, h in opencv_faces:
-                        face_crop = img_source[y:y + h, x:x + w]
-                        face_resized = cv2.resize(face_crop, (224, 224))
-                        face_float = face_resized.astype(np.float64) / 255.0
-                        faces.append({
-                            "face": face_float,
-                            "confidence": 1.0,
-                            "facial_area": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)},
-                        })
-
             return faces
         except Exception as e:
             raise RuntimeError(f"Face detection failed: {e}")

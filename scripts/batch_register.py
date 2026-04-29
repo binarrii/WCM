@@ -182,6 +182,7 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
     # First extract faces to get cropped face
     faces = DeepFace.extract_faces(
         img_path=img_array,
+        detector_backend="retinaface",
         enforce_detection=False,
         align=True,
         color_face="bgr",
