@@ -186,7 +186,7 @@ async def search_faces(request: Request):
         is_video = any(url.lower().endswith(ext) for ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"})
 
         if is_video:
-            sample_interval = float(data.get("sample_interval", 0.5))
+            sample_interval = float(data.get("sample_interval", 1.0))
             frames, results = _search_video_frames(
                 engine, url, name, max(min(top_k, 10), 1),
                 max(min(threshold, 1.0), 0.0), sample_interval
