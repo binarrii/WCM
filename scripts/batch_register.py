@@ -213,6 +213,7 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
         embedding = DeepFace.represent(
             img_path=face_img,
             model_name=model_name,
+            detector_backend="skip",
             enforce_detection=False,
             align=True,
         )

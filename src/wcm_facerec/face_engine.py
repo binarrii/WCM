@@ -81,6 +81,7 @@ class FaceEngine:
             embedding = DeepFace.represent(
                 img_path=img_source,
                 model_name=self.model_name,
+                detector_backend="skip",
                 enforce_detection=False,
                 align=True,
             )
@@ -88,6 +89,7 @@ class FaceEngine:
             embedding = DeepFace.represent(
                 img_path=str(img_source),
                 model_name=self.model_name,
+                detector_backend="skip",
                 enforce_detection=False,
                 align=True,
             )
@@ -116,6 +118,7 @@ class FaceEngine:
         embedding = DeepFace.represent(
             img_path=img_array,
             model_name=self.model_name,
+            detector_backend="skip",
             enforce_detection=False,
             align=True,
         )
