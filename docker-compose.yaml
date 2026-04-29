@@ -7,6 +7,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - GUNICORN_WORKERS=4
       - WCM_DB_HOST=db
       - WCM_DB_PORT=5432
       - WCM_DB_NAME=facerec

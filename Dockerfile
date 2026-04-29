@@ -76,4 +76,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health 2>/dev/null || exit 1
 
-CMD ["sh", "-c", "gunicorn -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -t 60 api.main:app"]
+# Dynamic worker count: GUNICORN_WORKERS env var (default: CPU cores * 2 + 1, min 4)
+# Override with: docker run -e GUNICORN_WORKERS=8
+# CMD ["sh", "-c", "cpus=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2); workers=${GUNICORN_WORKERS:-$((cpus * 2 + 1))}; workers=$((workers < 4 ? 4 : workers)); echo \"Starting gunicorn with $workers workers\"; gunicorn -w $workers -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -t 60 api.main:app"]
+CMD ["sh", "-c", "cpus=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2); workers=${GUNICORN_WORKERS:-$((cpus - 1))}; workers=$((workers < 4 ? 4 : workers)); echo \"Starting gunicorn with $workers workers\"; gunicorn -w $workers -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -t 60 api.main:app"]
