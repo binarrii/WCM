@@ -194,11 +194,11 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
         fa = f.get("facial_area", {})
         return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
 
-    valid_faces = [f for f in faces if get_face_area(f) >= MIN_FACE_PIXELS]
-    if not valid_faces:
-        raise ValueError(f"No face with area >= {MIN_FACE_PIXELS} detected in {image_path}")
+    # valid_faces = [f for f in faces if get_face_area(f) >= MIN_FACE_PIXELS]
+    # if not valid_faces:
+    #     raise ValueError(f"No face with area >= {MIN_FACE_PIXELS} detected in {image_path}")
 
-    sorted_faces = sorted(valid_faces, key=get_face_area, reverse=True)
+    sorted_faces = sorted(faces, key=get_face_area, reverse=True)
     top_faces = sorted_faces[:3]
 
     results = []
