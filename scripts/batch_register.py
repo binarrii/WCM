@@ -47,7 +47,7 @@ class Config:
     db_name: str = os.getenv("DB_NAME", "facerec")
     db_user: str = os.getenv("DB_USER", "postgres")
     db_password: str = os.getenv("DB_PASSWORD", "postgres")
-    deepface_model: str = os.getenv("DEEPFACE_MODEL", "VGG-Face")
+    deepface_model: str = os.getenv("DEEPFACE_MODEL", "Facenet512")
     embedding_dim: int = 4096  # VGG-Face
 
     @property
@@ -217,7 +217,7 @@ def generate_embedding(image_path: Path, model_name: str) -> tuple[np.ndarray, f
             model_name=model_name,
             detector_backend="skip",
             enforce_detection=False,
-            align=True,
+            align=False,
         )
         results.append((np.array(embedding[0]["embedding"]), float(confidence)))
 
@@ -396,9 +396,9 @@ Examples:
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("DEEPFACE_MODEL", "VGG-Face"),
+        default=os.getenv("DEEPFACE_MODEL", "Facenet512"),
         choices=["VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace", "DeepID", "ArcFace", "Dlib", "SFace"],
-        help="DeepFace model to use (default: VGG-Face)",
+        help="DeepFace model to use (default: Facenet512)",
     )
     parser.add_argument(
         "--dry-run",

@@ -85,7 +85,7 @@ class FaceEngine:
                 model_name=self.model_name,
                 detector_backend="skip",
                 enforce_detection=False,
-                align=True,
+                align=False,
             )
         else:
             embedding = DeepFace.represent(
@@ -93,7 +93,7 @@ class FaceEngine:
                 model_name=self.model_name,
                 detector_backend="skip",
                 enforce_detection=False,
-                align=True,
+                align=False,
             )
         return np.array(embedding[0]["embedding"])
 
@@ -122,7 +122,7 @@ class FaceEngine:
             model_name=self.model_name,
             detector_backend="skip",
             enforce_detection=False,
-            align=True,
+            align=False,
         )
         return np.array(embedding[0]["embedding"])
 

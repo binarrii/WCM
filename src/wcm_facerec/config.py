@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     db_password: str = "postgres"
 
     # DeepFace
-    deepface_model: Literal["VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace", "DeepID", "ArcFace", "Dlib", "SFace"] = "VGG-Face"
+    deepface_model: Literal["VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace", "DeepID", "ArcFace", "Dlib", "SFace"] = "Facenet512"
     deepface_distance_metric: Literal["cosine", "euclidean", "euclidean_l2"] = "cosine"
 
     # API
