@@ -16,3 +16,10 @@ docker compose -f docker-compose.yaml -f docker-compose.cuda.yaml up --build
 
 The CUDA override installs `tensorflow[and-cuda]`, exposes all NVIDIA GPUs to
 the API container, and enables TensorFlow GPU memory growth.
+
+Check whether TensorFlow can see the GPU:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.cuda.yaml exec api \
+  python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```

@@ -21,7 +21,9 @@ RUN if [ "$INSTALL_CUDA" = "true" ]; then \
 # Make TensorFlow see CUDA libraries installed by the tensorflow[and-cuda] extra.
 RUN if [ "$INSTALL_CUDA" = "true" ]; then \
         tf_dir="$(/app/.venv/bin/python -c 'import os, tensorflow; print(os.path.dirname(tensorflow.__file__))')" && \
+        mkdir -p /app/.venv/lib/cuda /app/.venv/bin && \
         find /app/.venv/lib/python3.12/site-packages/nvidia -path "*/lib/*.so*" -exec ln -svf {} "$tf_dir" \; && \
+        find /app/.venv/lib/python3.12/site-packages/nvidia -path "*/lib/*.so*" -exec ln -svf {} /app/.venv/lib/cuda/ \; && \
         ptxas="$(find /app/.venv/lib/python3.12/site-packages/nvidia -name ptxas -type f | head -n 1)" && \
         if [ -n "$ptxas" ]; then ln -svf "$ptxas" /app/.venv/bin/ptxas; fi; \
     fi
@@ -71,6 +73,7 @@ COPY --from=builder /app/scripts ./scripts
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
 ENV PYTHONPATH="/app/src"
+ENV LD_LIBRARY_PATH="/app/.venv/lib/cuda:${LD_LIBRARY_PATH}"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
