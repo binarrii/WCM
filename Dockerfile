@@ -11,7 +11,20 @@ RUN pip install uv --no-cache-dir
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies to local directory
-RUN uv sync --frozen --no-install-project
+ARG INSTALL_CUDA=false
+RUN if [ "$INSTALL_CUDA" = "true" ]; then \
+        uv sync --frozen --extra cuda --no-install-project; \
+    else \
+        uv sync --frozen --no-install-project; \
+    fi
+
+# Make TensorFlow see CUDA libraries installed by the tensorflow[and-cuda] extra.
+RUN if [ "$INSTALL_CUDA" = "true" ]; then \
+        tf_dir="$(/app/.venv/bin/python -c 'import os, tensorflow; print(os.path.dirname(tensorflow.__file__))')" && \
+        find /app/.venv/lib/python3.12/site-packages/nvidia -path "*/lib/*.so*" -exec ln -svf {} "$tf_dir" \; && \
+        ptxas="$(find /app/.venv/lib/python3.12/site-packages/nvidia -name ptxas -type f | head -n 1)" && \
+        if [ -n "$ptxas" ]; then ln -svf "$ptxas" /app/.venv/bin/ptxas; fi; \
+    fi
 
 # Force opencv-python-headless (opencv-python may be installed as deepface dependency)
 RUN uv pip uninstall --python /app/.venv/bin/python opencv-python opencv-python-headless 2>/dev/null || true
@@ -58,6 +71,9 @@ COPY --from=builder /app/scripts ./scripts
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
 ENV PYTHONPATH="/app/src"
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV TF_FORCE_GPU_ALLOW_GROWTH=true
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
