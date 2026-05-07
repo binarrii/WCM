@@ -18,6 +18,14 @@ from .database import FaceRecord, Person, get_session, register_vector_type
 MIN_FACE_PIXELS = 128 * 128
 
 
+def _l2_normalize_embedding(embedding: np.ndarray) -> np.ndarray:
+    """Return a L2-normalized copy of an embedding."""
+    norm = np.linalg.norm(embedding)
+    if norm == 0:
+        return embedding
+    return embedding / norm
+
+
 class FaceEngine:
     """Face recognition engine using DeepFace."""
 
@@ -95,7 +103,10 @@ class FaceEngine:
                 enforce_detection=False,
                 align=False,
             )
-        return np.array(embedding[0]["embedding"])
+        embedding_array = np.array(embedding[0]["embedding"])
+        if self.distance_metric == "euclidean_l2":
+            embedding_array = _l2_normalize_embedding(embedding_array)
+        return embedding_array
 
     async def generate_embedding_async(self, img_source: Union[str, Path, bytes, np.ndarray]) -> np.ndarray:
         """Generate face embedding asynchronously (supports bytes and arrays).
@@ -124,7 +135,10 @@ class FaceEngine:
             enforce_detection=False,
             align=False,
         )
-        return np.array(embedding[0]["embedding"])
+        embedding_array = np.array(embedding[0]["embedding"])
+        if self.distance_metric == "euclidean_l2":
+            embedding_array = _l2_normalize_embedding(embedding_array)
+        return embedding_array
 
     def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
         """Detect faces in an image.
@@ -187,8 +201,8 @@ class FaceEngine:
         elif self.distance_metric == "euclidean":
             op = "<->"
         else:
-            # euclidean_l2 - vectors are already normalized in DeepFace
-            op = "<=>"
+            embedding = _l2_normalize_embedding(embedding)
+            op = "<->"
 
         # Convert numpy array to pgvector format [x,y,z]
         embedding_str = "[" + ",".join(str(x) for x in embedding.tolist()) + "]"
@@ -275,6 +289,9 @@ class FaceEngine:
         """
         session = get_session()
         register_vector_type(session.connection())
+
+        if self.distance_metric == "euclidean_l2":
+            embedding = _l2_normalize_embedding(embedding)
 
         record = FaceRecord(
             id=uuid.uuid4(),
