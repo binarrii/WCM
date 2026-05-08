@@ -82,11 +82,11 @@ async def detect_faces(request: Request):
         # Handle bytes - decode to numpy array directly (no temp file needed)
         if isinstance(img_source, bytes):
             nparr = np.frombuffer(img_source, np.uint8)
-            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
             faces = engine.detect_faces(img_array)
         elif isinstance(img_source, (str, Path)):
             # Local file - decode to numpy array so OpenCV fallback works
-            img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR)
+            img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR_BGR)
             faces = engine.detect_faces(img_array)
         else:
             faces = engine.detect_faces(img_source)

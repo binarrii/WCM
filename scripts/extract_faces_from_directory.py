@@ -72,10 +72,8 @@ def extract_faces_from_directory(
         if face_img.dtype != np.uint8:
             face_img = (face_img * 255).astype(np.uint8)
 
-        # DeepFace returns RGB, cv2.imwrite expects BGR - convert
-        face_bgr = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
-
-        cv2.imwrite(str(output_path), face_bgr)
+        # FaceEngine requests BGR crops from DeepFace, matching cv2.imwrite.
+        cv2.imwrite(str(output_path), face_img)
         return True
 
     def process_image(image_path: Path, category: str) -> int:
