@@ -348,7 +348,8 @@ def _search_video_frames(
                 seen.add(key)
                 deduped.append(r)
 
-        return frame_idx, deduped[:top_k]
+        return frame_idx, deduped
+        # return frame_idx, deduped[:top_k]
     finally:
         if video_path.exists():
             video_path.unlink()
@@ -374,7 +375,7 @@ def _search_face_in_image(
         )
         for r in results:
             r["frame_time"] = frame_time
-        all_results.extend(results)
+        all_results.extend(results[:1])
     except Exception:
         pass  # Skip faces that fail embedding generation
 
