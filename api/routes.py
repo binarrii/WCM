@@ -187,7 +187,8 @@ async def search_faces(request: Request):
 
         if is_video:
             sample_interval = float(data.get("sample_interval", 1.0))
-            frames, results = _search_video_frames(
+            frames, results = await asyncio.to_thread(
+                _search_video_frames,
                 engine, url, name, max(min(top_k, 10), 1),
                 max(min(threshold, 1.0), 0.0), sample_interval
             )
@@ -208,7 +209,8 @@ async def search_faces(request: Request):
 
             embedding = face_result["embedding"]
 
-            results = engine.search(
+            results = await asyncio.to_thread(
+                engine.search,
                 embedding=embedding,
                 name=name,
                 top_k=max(min(top_k, 10), 1),
@@ -415,7 +417,9 @@ async def websocket_search(websocket: WebSocket):
 
             try:
                 if is_video:
-                    frames, results = _search_video_frames(engine, url, name, top_k, threshold, sample_interval)
+                    frames, results = await asyncio.to_thread(
+                        _search_video_frames, engine, url, name, top_k, threshold, sample_interval
+                    )
                     await websocket.send_json({
                         "status": "completed",
                         "taskId": task_id,
@@ -427,7 +431,7 @@ async def websocket_search(websocket: WebSocket):
                     resp = httpx.get(url, timeout=60.0)
                     resp.raise_for_status()
                     img_bytes = resp.content
-                    face_result = _detect_and_crop_face_from_bytes(engine, img_bytes)
+                    face_result = await asyncio.to_thread(_detect_and_crop_face_from_bytes, engine, img_bytes)
                     if face_result is None:
                         await websocket.send_json({
                             "status": "completed",
@@ -438,7 +442,8 @@ async def websocket_search(websocket: WebSocket):
                         })
                         continue
                     embedding = face_result["embedding"]
-                    results = engine.search(
+                    results = await asyncio.to_thread(
+                        engine.search,
                         embedding=embedding,
                         name=name,
                         top_k=max(min(top_k, 10), 1),
