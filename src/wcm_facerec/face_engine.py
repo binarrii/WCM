@@ -166,6 +166,13 @@ class FaceEngine:
                     align=True,
                     color_face="bgr",
                 )
+
+            # Sort by area descending, keep top 3
+            def get_face_area(f):
+                fa = f.get("facial_area", {})
+                return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+            faces = sorted(faces, key=get_face_area, reverse=True)[:3]
             return faces
         except Exception as e:
             raise RuntimeError(f"Face detection failed: {e}")
