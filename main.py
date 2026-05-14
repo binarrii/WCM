@@ -117,7 +117,12 @@ def main():
     passed = sum(1 for f in faces if (f.get("facial_area", {}).get("w", 0) or 0) * (f.get("facial_area", {}).get("h", 0) or 0) >= MIN_FACE_PIXELS)
     print(f"Faces passing area filter ({MIN_FACE_PIXELS}): {passed}/{len(faces)}")
 
-    output_path = args.output or "/tmp/face_detection_result.png"
+    if args.output:
+        output_path = args.output
+    else:
+        import datetime
+        timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]
+        output_path = f"/tmp/face_detection_result_{timestamp}.png"
     cv2.imwrite(output_path, result)
     print(f"Saved: {output_path}")
 
