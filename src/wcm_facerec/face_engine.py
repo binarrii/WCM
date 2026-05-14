@@ -179,9 +179,7 @@ class FaceEngine:
                 return all(fa.get(lm) is not None for lm in landmarks)
 
             complete_faces = [f for f in faces if is_complete(f)]
-            # If no complete faces, fall back to all detected faces
-            candidates = complete_faces if complete_faces else faces
-            faces = sorted(candidates, key=get_face_area, reverse=True)[:3]
+            faces = sorted(complete_faces, key=get_face_area, reverse=True)[:3]
             return faces
         except Exception as e:
             raise RuntimeError(f"Face detection failed: {e}")
