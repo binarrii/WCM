@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Optional, Union
 
 import cv2
 import numpy as np
@@ -13,7 +12,7 @@ from deepface import DeepFace
 from sqlalchemy import text
 
 from .config import settings
-from .database import FaceRecord, Person, get_session, register_vector_type
+from .database import FaceRecord, get_session, register_vector_type
 
 # Minimum face area in pixels (128x128)
 MIN_FACE_PIXELS = 128 * 128

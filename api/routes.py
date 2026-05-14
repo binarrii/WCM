@@ -5,12 +5,12 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 import cv2
 import httpx
 import numpy as np
-from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, HTTPException, WebSocket, WebSocketDisconnect
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
