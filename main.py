@@ -59,11 +59,10 @@ def draw_faces(img: np.ndarray, faces: list[dict], min_area: int) -> np.ndarray:
         area = w * h
         conf = face.get("confidence", 0)
 
+        label = f"#{i+1} {w}x{h} a={area} c={conf:.3f}"
         if area < min_area:
-            label = f"#{i+1} too small ({area})"
             color = (128, 128, 128)  # gray for filtered
         else:
-            label = f"#{i+1} area={area} conf={conf:.2f}"
             color = (0, 0, 255)  # red
 
         # Draw rectangle
@@ -83,9 +82,9 @@ def draw_faces(img: np.ndarray, faces: list[dict], min_area: int) -> np.ndarray:
 def main():
     parser = argparse.ArgumentParser(description="Detect faces and draw boxes on image")
     parser.add_argument("image", help="Image file path or URL")
-    parser.add_argument("--output", "-o", help="Output image path (default: show with cv2)")
+    parser.add_argument("--output", "-o", help="Output image path")
     parser.add_argument("--min-area", type=int, default=0, help="Minimum face area to draw box")
-    parser.add_argument("--no-show", action="store_true", help="Don't display image (save only)")
+    parser.add_argument("--no-show", action="store_true", help="Don't display image")
     args = parser.parse_args()
 
     print(f"Loading: {args.image}")
@@ -104,7 +103,7 @@ def main():
         conf = f.get("confidence", 0)
         print(f"Face #{i}:")
         print(f"  bbox: x={fa.get('x')}, y={fa.get('y')}, w={fa.get('w')}, h={fa.get('h')}, area={area}")
-        print(f"  confidence: {conf:.4f}")
+        print(f"  confidence: {conf:.3f}")
         print(f"  landmarks:")
         print(f"    left_eye:  {fa.get('left_eye')}")
         print(f"    right_eye: {fa.get('right_eye')}")
@@ -118,14 +117,23 @@ def main():
     passed = sum(1 for f in faces if (f.get("facial_area", {}).get("w", 0) or 0) * (f.get("facial_area", {}).get("h", 0) or 0) >= MIN_FACE_PIXELS)
     print(f"Faces passing area filter ({MIN_FACE_PIXELS}): {passed}/{len(faces)}")
 
-    if args.output:
-        cv2.imwrite(args.output, result)
-        print(f"Saved: {args.output}")
-    else:
-        cv2.imshow("Face Detection", result)
-        print("Press any key to close...")
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+    output_path = args.output or "/tmp/face_detection_result.png"
+    cv2.imwrite(output_path, result)
+    print(f"Saved: {output_path}")
+
+    if not args.no_show:
+        try:
+            cv2.imshow("Face Detection", result)
+            print("Press 'Ctrl+C' to quit...")
+            try:
+                while True:
+                    cv2.waitKey(1)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                cv2.destroyAllWindows()
+        except Exception as e:
+            print(f"Display error: {e}")
 
 
 if __name__ == "__main__":
