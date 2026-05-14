@@ -10,6 +10,7 @@ from typing import Literal, Optional, Union
 import cv2
 import numpy as np
 from deepface import DeepFace
+from sqlalchemy import text
 
 from .config import settings
 from .database import FaceRecord, Person, get_session, register_vector_type
@@ -209,7 +210,6 @@ class FaceEngine:
         Returns:
             List of matching face records with distance
         """
-        from sqlalchemy import text
 
         session = get_session()
         register_vector_type(session.connection())
