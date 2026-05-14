@@ -178,7 +178,14 @@ class FaceEngine:
                 landmarks = ["left_eye", "right_eye", "nose", "mouth_left", "mouth_right"]
                 return all(fa.get(lm) is not None for lm in landmarks)
 
-            complete_faces = [f for f in faces if is_complete(f)]
+            # Filter: short side (min of w/h) must be >= 80 pixels
+            def has_min_side(f):
+                fa = f.get("facial_area", {})
+                w = fa.get("w", 0) or 0
+                h = fa.get("h", 0) or 0
+                return min(w, h) >= 80
+
+            complete_faces = [f for f in faces if is_complete(f) and has_min_side(f)]
             faces = sorted(complete_faces, key=get_face_area, reverse=True)[:3]
             return faces
         except Exception as e:
