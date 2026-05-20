@@ -22,6 +22,41 @@ MIN_FACE_PIXELS = 64 * 64
 api_bp = APIRouter()
 
 
+async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:
+    """Download a URL safely, enforcing a maximum file size in bytes to prevent OOM."""
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > max_size:
+                raise ValueError(f"File too large. Max allowed: {max_size} bytes")
+            
+            chunks = bytearray()
+            async for chunk in response.aiter_bytes():
+                chunks.extend(chunk)
+                if len(chunks) > max_size:
+                    raise ValueError(f"File too large. Max allowed: {max_size} bytes")
+            return bytes(chunks)
+
+
+def _download_video_safe_sync(url: str, file_path: Path, max_size: int, timeout: float = 120.0):
+    """Synchronously download a video to disk safely, enforcing max size."""
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        with client.stream("GET", url) as response:
+            response.raise_for_status()
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > max_size:
+                raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
+                
+            downloaded = 0
+            with open(file_path, "wb") as f:
+                for chunk in response.iter_bytes():
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded > max_size:
+                        raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
+
+
 @api_bp.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -58,9 +93,7 @@ async def detect_faces(request: Request):
         elif form.get("url"):
             url = form.get("url")
             try:
-                resp = httpx.get(url, timeout=60.0)
-                resp.raise_for_status()
-                img_source = resp.content
+                img_source = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
                 image_source = url
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
@@ -73,9 +106,7 @@ async def detect_faces(request: Request):
         if not url:
             raise HTTPException(status_code=400, detail="url is required")
         try:
-            resp = httpx.get(url, timeout=60.0)
-            resp.raise_for_status()
-            img_source = resp.content
+            img_source = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
             image_source = url
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
@@ -86,13 +117,13 @@ async def detect_faces(request: Request):
         if isinstance(img_source, bytes):
             nparr = np.frombuffer(img_source, np.uint8)
             img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-            faces = engine.detect_faces(img_array)
+            faces = await asyncio.to_thread(engine.detect_faces, img_array)
         elif isinstance(img_source, (str, Path)):
             # Local file - decode to numpy array so OpenCV fallback works
             img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR_BGR)
-            faces = engine.detect_faces(img_array)
+            faces = await asyncio.to_thread(engine.detect_faces, img_array)
         else:
-            faces = engine.detect_faces(img_source)
+            faces = await asyncio.to_thread(engine.detect_faces, img_source)
 
         results = []
         for i, face in enumerate(faces):
@@ -142,9 +173,7 @@ async def register_face(request: Request):
         elif form.get("url"):
             url = form.get("url")
             try:
-                resp = httpx.get(url, timeout=60.0)
-                resp.raise_for_status()
-                img_source = resp.content
+                img_source = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
         else:
@@ -152,7 +181,8 @@ async def register_face(request: Request):
 
         try:
             file_url = form.get("url") if "file" in form else None
-            record = engine.register_from_image(
+            record = await asyncio.to_thread(
+                engine.register_from_image,
                 name=name,
                 img_source=img_source,
                 file_url=file_url,
@@ -233,10 +263,8 @@ async def search_faces(request: Request):
 async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
     """Download image, detect face, crop and return face embedding (in-memory)."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-        return _detect_and_crop_face_from_bytes(engine, response.content)
+        img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024, timeout=30.0)
+        return _detect_and_crop_face_from_bytes(engine, img_bytes)
     except Exception:
         return None
 
@@ -286,10 +314,7 @@ def _search_video_frames(
     """Search faces from video by sampling frames."""
     video_path = Path(f"/tmp/ws_video_{os.urandom(8).hex()}.mp4")
     try:
-        resp = httpx.get(url, timeout=120.0)
-        resp.raise_for_status()
-        with open(video_path, "wb") as f:
-            f.write(resp.content)
+        _download_video_safe_sync(url, video_path, settings.max_file_size_mb * 100 * 1024 * 1024, timeout=900.0)
 
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -432,9 +457,7 @@ async def websocket_search(websocket: WebSocket):
                         "results": results,
                     })
                 else:
-                    resp = httpx.get(url, timeout=60.0)
-                    resp.raise_for_status()
-                    img_bytes = resp.content
+                    img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
                     face_result = await asyncio.to_thread(_detect_and_crop_face_from_bytes, engine, img_bytes)
                     if face_result is None:
                         await websocket.send_json({

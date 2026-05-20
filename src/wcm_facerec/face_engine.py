@@ -188,8 +188,8 @@ class FaceEngine:
             complete_faces = [f for f in faces if is_complete(f) and has_min_side(f)]
             faces = sorted(complete_faces, key=get_face_area, reverse=True)[:3]
             return faces
-        except Exception as e:
-            raise RuntimeError(f"Face detection failed: {e}")
+        except Exception:
+            return []
 
     def search(
         self,
@@ -234,7 +234,7 @@ class FaceEngine:
                     fr.id, fr.name, fr.file_path, fr.file_url, fr.confidence,
                     fr.person_id, fr.frame_time, fr.created_at,
                     fr.embedding {op} :embedding AS distance,
-                    p.name as person_name, p.occupation, p.type, p.remarks
+                    p.name as person_name, p.occupation, p."type", p.remarks
                 FROM face_records fr
                 LEFT JOIN persons p ON fr.person_id = p.id
                 WHERE fr.name = :name
@@ -249,7 +249,7 @@ class FaceEngine:
                     fr.id, fr.name, fr.file_path, fr.file_url, fr.confidence,
                     fr.person_id, fr.frame_time, fr.created_at,
                     fr.embedding {op} :embedding AS distance,
-                    p.name as person_name, p.occupation, p.type, p.remarks
+                    p.name as person_name, p.occupation, p."type", p.remarks
                 FROM face_records fr
                 LEFT JOIN persons p ON fr.person_id = p.id
                 WHERE fr.embedding {op} :embedding <= :threshold
