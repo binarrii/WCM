@@ -6,6 +6,8 @@ import os
 import uuid
 from pathlib import Path
 from typing import Union
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 import cv2
 import httpx
@@ -20,6 +22,17 @@ from wcm_facerec.face_engine import FaceEngine, get_face_engine
 MIN_FACE_PIXELS = 64 * 64
 
 api_bp = APIRouter()
+
+
+# Dedicated single-thread pool for CUDA/DeepFace inference
+inference_executor = ThreadPoolExecutor(max_workers=1)
+
+async def run_in_inference_thread(func, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        inference_executor,
+        partial(func, *args, **kwargs)
+    )
 
 
 async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:
@@ -117,13 +130,13 @@ async def detect_faces(request: Request):
         if isinstance(img_source, bytes):
             nparr = np.frombuffer(img_source, np.uint8)
             img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-            faces = await asyncio.to_thread(engine.detect_faces, img_array)
+            faces = await run_in_inference_thread(engine.detect_faces, img_array)
         elif isinstance(img_source, (str, Path)):
             # Local file - decode to numpy array so OpenCV fallback works
             img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR_BGR)
-            faces = await asyncio.to_thread(engine.detect_faces, img_array)
+            faces = await run_in_inference_thread(engine.detect_faces, img_array)
         else:
-            faces = await asyncio.to_thread(engine.detect_faces, img_source)
+            faces = await run_in_inference_thread(engine.detect_faces, img_source)
 
         results = []
         for i, face in enumerate(faces):
@@ -181,7 +194,7 @@ async def register_face(request: Request):
 
         try:
             file_url = form.get("url") if "file" in form else None
-            record = await asyncio.to_thread(
+            record = await run_in_inference_thread(
                 engine.register_from_image,
                 name=name,
                 img_source=img_source,
@@ -458,7 +471,7 @@ async def websocket_search(websocket: WebSocket):
                     })
                 else:
                     img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-                    face_result = await asyncio.to_thread(_detect_and_crop_face_from_bytes, engine, img_bytes)
+                    face_result = await run_in_inference_thread(_detect_and_crop_face_from_bytes, engine, img_bytes)
                     if face_result is None:
                         await websocket.send_json({
                             "status": "completed",
