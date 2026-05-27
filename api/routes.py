@@ -194,15 +194,19 @@ async def register_face(request: Request):
 
         try:
             file_url = form.get("url") if "file" in form else None
+            category = form.get("category") or None
             record = await run_in_inference_thread(
                 engine.register_from_image,
                 name=name,
                 img_source=img_source,
                 file_url=file_url,
+                category=category,
             )
             return {
                 "id": str(record.id),
                 "name": record.name,
+                "file_path": record.file_path,
+                "category": category or settings.default_category,
                 "message": "Face registered successfully",
             }
         except Exception as e:
@@ -233,13 +237,14 @@ async def search_faces(request: Request):
 
         if is_video:
             sample_interval = float(data.get("sample_interval", 1.0))
-            frames, results = await asyncio.to_thread(
+            frames, results = await run_in_inference_thread(
                 _search_video_frames,
                 engine, url, name, max(min(top_k, 10), 1),
                 max(min(threshold, 1.0), 0.0), sample_interval
             )
+            verified_results = await _verify_candidates(engine, results)
             return {
-                "results": results,
+                "results": verified_results,
                 "query_embedding_dim": settings.embedding_dim,
                 "frames_processed": frames,
             }
@@ -262,15 +267,92 @@ async def search_faces(request: Request):
                 top_k=max(min(top_k, 10), 1),
                 threshold=max(min(threshold, 1.0), 0.0),
             )
+            
+            verified_results = await _verify_candidates(engine, results, face_result["face"])
 
             return {
-                "results": results,
+                "results": verified_results,
                 "query_embedding_dim": settings.embedding_dim,
             }
     except httpx.HTTPError as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+async def _verify_candidates(engine: FaceEngine, candidates: list[dict], default_source_img: Union[bytes, np.ndarray, str] = None) -> list[dict]:
+    """Verify vector search candidates with DeepFace.verify."""
+    verified_results = []
+    for cand in candidates:
+        source_img = cand.pop("source_face", default_source_img)
+        if source_img is None:
+            continue
+
+        # source_img is a cropped face from detect_faces (float64 [0,1]); convert
+        # to uint8 [0,255] for the same reason as db_face below — see
+        # _crop_largest_face. db images are read fresh as uint8 already.
+        if isinstance(source_img, np.ndarray) and source_img.dtype != np.uint8:
+            source_img = (np.clip(source_img, 0, 1) * 255).astype(np.uint8)
+
+        file_path = cand.get("file_path")
+        file_url = cand.get("file_url")
+
+        db_img = None
+        try:
+            if file_path and os.path.exists(file_path):
+                db_img = cv2.imread(file_path, cv2.IMREAD_COLOR_BGR)
+            elif file_url:
+                img_bytes = await _download_url_safe(file_url, settings.max_file_size_mb * 1024 * 1024, timeout=10.0)
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                db_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
+        except Exception:
+            pass
+
+        if db_img is None:
+            # "if no file path (or url, or invalid) skip this step"
+            continue
+
+        # Pre-crop the DB image's face so verify_faces receives two already-cropped
+        # faces. verify_faces still uses retinaface+align, which is well-behaved on
+        # cropped faces (it skips re-detection and treats them as-is). Without this
+        # step, passing a full DB image to verify produces garbage embeddings.
+        db_face = await run_in_inference_thread(_crop_largest_face, engine, db_img)
+        if db_face is None:
+            continue
+
+        verified = await run_in_inference_thread(engine.verify_faces, source_img, db_face)
+        if verified:
+            cand["verified"] = True
+            verified_results.append(cand)
+
+    return verified_results
+
+
+def _crop_largest_face(engine: FaceEngine, img: np.ndarray) -> np.ndarray | None:
+    """Detect faces in ``img`` and return the largest cropped face, or None.
+
+    Reuses ``FaceEngine.detect_faces`` (the same crop function used by
+    register/search) so the crop is consistent with the embedding pipeline.
+
+    The returned face is converted to uint8 [0,255]. DeepFace.extract_faces
+    yields float64 [0,1] crops, but DeepFace.verify's preprocessing assumes
+    uint8 [0,255]; feeding it float64 [0,1] collapses the embedding so that
+    any two faces score distance ~0, making verification meaningless.
+    """
+    faces = engine.detect_faces(img)
+    if not faces:
+        return None
+
+    def get_face_area(f):
+        fa = f.get("facial_area", {})
+        return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
+
+    face = max(faces, key=get_face_area).get("face")
+    if face is None:
+        return None
+    if face.dtype != np.uint8:
+        face = (np.clip(face, 0, 1) * 255).astype(np.uint8)
+    return face
 
 
 async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
@@ -311,6 +393,7 @@ def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> di
         return {
             "embedding": embedding,
             "confidence": confidence,
+            "face": face_img,
         }
     except Exception:
         return None
@@ -413,6 +496,7 @@ def _search_face_in_image(
         )
         for r in results:
             r["frame_time"] = frame_time
+            r["source_face"] = face_img
         all_results.extend(results[:1])
     except Exception:
         pass  # Skip faces that fail embedding generation
@@ -459,15 +543,16 @@ async def websocket_search(websocket: WebSocket):
 
             try:
                 if is_video:
-                    frames, results = await asyncio.to_thread(
+                    frames, results = await run_in_inference_thread(
                         _search_video_frames, engine, url, name, top_k, threshold, sample_interval
                     )
+                    verified_results = await _verify_candidates(engine, results)
                     await websocket.send_json({
                         "status": "completed",
                         "taskId": task_id,
                         "query_embedding_dim": settings.embedding_dim,
                         "frames_processed": frames,
-                        "results": results,
+                        "results": verified_results,
                     })
                 else:
                     img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
@@ -489,11 +574,12 @@ async def websocket_search(websocket: WebSocket):
                         top_k=max(min(top_k, 10), 1),
                         threshold=max(min(threshold, 1.0), 0.0),
                     )
+                    verified_results = await _verify_candidates(engine, results, face_result["face"])
                     await websocket.send_json({
                         "status": "completed",
                         "taskId": task_id,
                         "query_embedding_dim": settings.embedding_dim,
-                        "results": results,
+                        "results": verified_results,
                     })
                     continue
 

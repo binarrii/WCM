@@ -34,11 +34,19 @@ class Settings(BaseSettings):
     # DeepFace
     deepface_model: Literal["VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace", "DeepID", "ArcFace", "Dlib", "SFace"] = "Facenet512"
     deepface_distance_metric: Literal["cosine", "euclidean", "euclidean_l2"] = "cosine"
+    # Max distance for the verify step to accept a candidate as the same person.
+    # Tighter than DeepFace's built-in threshold (~0.30 for Facenet512+cosine) to
+    # reject borderline look-alikes.
+    verify_distance_threshold: float = 0.10
 
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     max_file_size_mb: int = 100
+
+    # Filesystem
+    data_root: str = "/data/wcm"
+    default_category: str = "落马官员"
 
     @property
     def database_url(self) -> str:

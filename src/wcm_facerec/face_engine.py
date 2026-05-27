@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from pathlib import Path
 from typing import Optional, Union
@@ -16,6 +17,42 @@ from .database import FaceRecord, get_session, register_vector_type
 
 # Minimum face area in pixels (128x128)
 MIN_FACE_PIXELS = 128 * 128
+
+
+def _detect_image_ext(image_bytes: bytes) -> str:
+    """Detect image file extension from magic bytes. Defaults to .jpg."""
+    if len(image_bytes) >= 3 and image_bytes[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if len(image_bytes) >= 8 and image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if len(image_bytes) >= 6 and image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        return ".webp"
+    if len(image_bytes) >= 2 and image_bytes[:2] == b"BM":
+        return ".bmp"
+    return ".jpg"
+
+
+def _persist_image(
+    image_bytes: bytes,
+    name: str,
+    category: str,
+    ext: Optional[str] = None,
+) -> str:
+    """Save image bytes under ``<data_root>/<category>/<name>_<md5><ext>``.
+
+    Returns the absolute file path. Reuses the existing file if the hash
+    already exists (idempotent), so re-registering the same image does
+    not create duplicates.
+    """
+    safe_name = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name) or "unknown"
+    content_hash = hashlib.md5(image_bytes).hexdigest()
+    final_ext = ext or _detect_image_ext(image_bytes)
+    target_dir = Path(settings.data_root) / category
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / f"{safe_name}_{content_hash}{final_ext}"
+    if not target_path.exists():
+        target_path.write_bytes(image_bytes)
+    return str(target_path)
 
 
 def _l2_normalize_embedding(embedding: np.ndarray) -> np.ndarray:
@@ -335,13 +372,21 @@ class FaceEngine:
         name: str,
         img_source: Union[str, Path, bytes],
         file_url: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> FaceRecord:
         """Register a face from an image file or bytes.
+
+        The image is persisted under ``<data_root>/<category>/`` with a
+        content-hashed filename, and the resulting absolute path is stored
+        in the database record as ``file_path``. Re-registering the same
+        image is a no-op for the file (the existing file is reused).
 
         Args:
             name: Person name
             img_source: Path to local image file, or image bytes
             file_url: Optional URL (stored but not used for loading)
+            category: Subdirectory under data_root. Defaults to
+                ``settings.default_category``.
 
         Returns:
             Created FaceRecord
@@ -349,14 +394,27 @@ class FaceEngine:
         Raises:
             ValueError: If no face is detected in the image
         """
-        # Convert to numpy array via cv2
-        if isinstance(img_source, bytes):
-            # Bytes - decode via cv2
-            nparr = np.frombuffer(img_source, np.uint8)
-            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
+        # Resolve raw bytes + extension + source path
+        cat = category or settings.default_category
+        source_path: Optional[Path] = None
+        if isinstance(img_source, (str, Path)):
+            source_path = Path(img_source)
+            if not source_path.exists():
+                raise ValueError(f"Image file not found: {source_path}")
+            image_bytes = source_path.read_bytes()
+            ext = source_path.suffix.lower() or None
         else:
-            # Local file path - load via cv2
-            img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR_BGR)
+            image_bytes = bytes(img_source)
+            ext = None
+
+        # Persist to /data/wcm/<category>/<name>_<md5><ext>
+        persisted_path = _persist_image(image_bytes, name, cat, ext=ext)
+
+        # Decode for face detection
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
+        if img_array is None:
+            raise ValueError("Failed to decode image")
 
         # Detect faces from numpy array
         faces = self.detect_faces(img_array)
@@ -382,10 +440,41 @@ class FaceEngine:
         return self.register_face(
             name=name,
             embedding=embedding,
-            file_path=str(img_source) if isinstance(img_source, (str, Path)) else None,
+            file_path=persisted_path,
             file_url=file_url,
             confidence=confidence,
         )
+
+    def verify_faces(self, img1: Union[str, Path, np.ndarray], img2: Union[str, Path, np.ndarray]) -> bool:
+        """Verify if two faces are the same using DeepFace.verify.
+
+        Applies a tighter distance threshold than DeepFace's built-in one
+        (``settings.verify_distance_threshold``) to reject borderline
+        look-alikes that the default ~0.30 cutoff would let through.
+
+        Args:
+            img1: First image path, url or numpy array.
+            img2: Second image path, url or numpy array.
+
+        Returns:
+            True if verified, False otherwise.
+        """
+        try:
+            result = DeepFace.verify(
+                img1_path=img1 if isinstance(img1, np.ndarray) else str(img1),
+                img2_path=img2 if isinstance(img2, np.ndarray) else str(img2),
+                model_name=self.model_name,
+                distance_metric=self.distance_metric,
+                detector_backend="retinaface",
+                enforce_detection=False,
+                align=True,
+            )
+            distance = result.get("distance")
+            if distance is None:
+                return False
+            return float(distance) <= settings.verify_distance_threshold
+        except Exception:
+            return False
 
 
 # Global engine instance
