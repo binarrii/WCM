@@ -268,7 +268,7 @@ class FaceEngine:
         if name:
             sql = text(f"""
                 SELECT
-                    fr.id, fr.name, fr.file_path, fr.file_url, fr.confidence,
+                    fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
                     fr.person_id, fr.frame_time, fr.created_at,
                     fr.embedding {op} :embedding AS distance,
                     p.name as person_name, p.occupation, p."type", p.remarks
@@ -283,7 +283,7 @@ class FaceEngine:
         else:
             sql = text(f"""
                 SELECT
-                    fr.id, fr.name, fr.file_path, fr.file_url, fr.confidence,
+                    fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
                     fr.person_id, fr.frame_time, fr.created_at,
                     fr.embedding {op} :embedding AS distance,
                     p.name as person_name, p.occupation, p."type", p.remarks
@@ -301,6 +301,7 @@ class FaceEngine:
                 "id": str(row.id),
                 "name": row.name,
                 "file_path": row.file_path,
+                "face_file_path": row.face_file_path,
                 "file_url": row.file_url,
                 "distance": float(row.distance),
                 "confidence": row.confidence,
@@ -325,6 +326,7 @@ class FaceEngine:
         name: str,
         embedding: np.ndarray,
         file_path: Optional[str] = None,
+        face_file_path: Optional[str] = None,
         file_url: Optional[str] = None,
         confidence: Optional[float] = None,
         face_id: Optional[str] = None,
@@ -336,6 +338,7 @@ class FaceEngine:
             name: Person name
             embedding: Face embedding vector
             file_path: Optional local file path
+            face_file_path: Optional cropped face file path
             file_url: Optional URL
             confidence: Detection confidence
             face_id: For video: which face identifier
@@ -355,6 +358,7 @@ class FaceEngine:
             name=name,
             embedding=embedding.tolist(),
             file_path=file_path,
+            face_file_path=face_file_path,
             file_url=file_url,
             model=self.model_name,
             confidence=confidence,
@@ -437,10 +441,19 @@ class FaceEngine:
         # Generate embedding from cropped face (numpy array)
         embedding = self.generate_embedding(best_face)
 
+        # Encode face to bytes and save to disk
+        face_uint8 = best_face
+        if face_uint8.dtype != np.uint8:
+            face_uint8 = (np.clip(face_uint8, 0, 1) * 255).astype(np.uint8)
+        _, buffer = cv2.imencode(".png", face_uint8)
+        face_bytes = buffer.tobytes()
+        persisted_face_path = _persist_image(face_bytes, name + "_face", cat, ext=".png")
+
         return self.register_face(
             name=name,
             embedding=embedding,
             file_path=persisted_path,
+            face_file_path=persisted_face_path,
             file_url=file_url,
             confidence=confidence,
         )

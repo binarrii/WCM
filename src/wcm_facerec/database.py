@@ -46,6 +46,7 @@ class FaceRecord(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False, index=True)
     file_path = Column(String, nullable=True)
+    face_file_path = Column(String, nullable=True)
     file_url = Column(String, nullable=True)
     embedding = Column(VECTOR(settings.embedding_dim), nullable=False)
     model = Column(String, nullable=False)

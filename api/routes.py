@@ -206,6 +206,7 @@ async def register_face(request: Request):
                 "id": str(record.id),
                 "name": record.name,
                 "file_path": record.file_path,
+                "face_file_path": record.face_file_path,
                 "category": category or settings.default_category,
                 "message": "Face registered successfully",
             }
@@ -497,7 +498,7 @@ def _search_face_in_image(
         for r in results:
             r["frame_time"] = frame_time
             r["source_face"] = face_img
-        all_results.extend(results[:1])
+        all_results.extend(results)
     except Exception:
         pass  # Skip faces that fail embedding generation
 
