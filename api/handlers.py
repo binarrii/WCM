@@ -323,8 +323,16 @@ async def _call_llm_guard(text: str) -> dict:
 
 async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
-    extracted_texts = []
+    unsafe_text_frames = []
     
+    async def _analyze_text(timestamp, b64_img):
+        text = await _call_ocr_api(b64_img)
+        if text:
+            guard = await _call_llm_guard(text)
+            if not guard.get("safe", True):
+                return {"timestamp": timestamp, "description": guard.get("analysis", "")}
+        return None
+        
     if is_video:
         video_path = Path(f"/tmp/guard_video_{os.urandom(8).hex()}.mp4")
         try:
@@ -333,26 +341,25 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
             )
             frames_data = await asyncio.to_thread(_extract_video_frames_for_ocr, video_path, sample_interval)
             
-            for timestamp, b64_img in frames_data:
-                text = await _call_ocr_api(b64_img)
-                if text:
-                    extracted_texts.append(f"[Frame {timestamp:.1f}s]:\n{text}")
+            tasks = [_analyze_text(ts, b64) for ts, b64 in frames_data]
+            results = await asyncio.gather(*tasks)
+            for res in results:
+                if res:
+                    unsafe_text_frames.append(res)
         finally:
             if video_path.exists():
                 video_path.unlink()
     else:
         img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
         b64_img = base64.b64encode(img_bytes).decode('utf-8')
-        text = await _call_ocr_api(b64_img)
-        if text:
-            extracted_texts.append(text)
+        res = await _analyze_text(None, b64_img)
+        if res:
+            res["type"] = "image"
+            res.pop("timestamp", None)
+            unsafe_text_frames.append(res)
 
-    full_text = "\n\n".join(extracted_texts)
-    guard_result = await _call_llm_guard(full_text)
-    
     return {
-        "extracted_text": full_text,
-        "guard_result": guard_result
+        "unsafe_text_frames": unsafe_text_frames
     }
 
 
@@ -412,10 +419,21 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     engine = get_face_engine()
     
-    extracted_texts = []
+    unsafe_text_frames = []
     nsfw_visual_results = []
     face_search_results = []
     
+    async def _analyze_frame(timestamp, b64_img):
+        img_bytes = base64.b64decode(b64_img)
+        visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+        
+        text = await _call_ocr_api(b64_img)
+        text_guard = None
+        if text:
+            text_guard = await _call_llm_guard(text)
+            
+        return timestamp, visual_result, text_guard
+
     if is_video:
         frames_processed, face_results = await run_in_inference_thread(
             _search_video_frames,
@@ -431,17 +449,19 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             )
             frames_data = await asyncio.to_thread(_extract_video_frames_for_ocr, video_path, sample_interval)
             
-            for timestamp, b64_img in frames_data:
-                img_bytes = base64.b64decode(b64_img)
-                visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+            tasks = [_analyze_frame(ts, b64) for ts, b64 in frames_data]
+            frame_results = await asyncio.gather(*tasks)
+            
+            for timestamp, visual_result, text_guard in frame_results:
                 nsfw_visual_results.append({
                     "timestamp": timestamp,
                     "result": visual_result
                 })
-                
-                text = await _call_ocr_api(b64_img)
-                if text:
-                    extracted_texts.append(f"[Frame {timestamp:.1f}s]:\n{text}")
+                if text_guard and not text_guard.get("safe", True):
+                    unsafe_text_frames.append({
+                        "timestamp": timestamp,
+                        "description": text_guard.get("analysis", "")
+                    })
         finally:
             if video_path.exists():
                 video_path.unlink()
@@ -456,19 +476,17 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             )
             face_search_results = await _verify_candidates(engine, search_res)
 
-        visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+        _, visual_result, text_guard = await _analyze_frame(None, b64_img)
         nsfw_visual_results.append({
             "type": "image",
             "result": visual_result
         })
-        
-        text = await _call_ocr_api(b64_img)
-        if text:
-            extracted_texts.append(text)
+        if text_guard and not text_guard.get("safe", True):
+            unsafe_text_frames.append({
+                "type": "image",
+                "description": text_guard.get("analysis", "")
+            })
 
-    full_text = "\n\n".join(extracted_texts)
-    text_guard_result = await _call_llm_guard(full_text)
-    
     is_nsfw = False
     high_confidence_nsfw_frames = []
     for res in nsfw_visual_results:
@@ -487,16 +505,26 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
         "face_search_results": face_search_results,
         "is_nsfw": is_nsfw,
         "visual_analysis": high_confidence_nsfw_frames,
-        "extracted_text": full_text,
-        "text_analysis": text_guard_result
+        "unsafe_text_frames": unsafe_text_frames
     }
 
 async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     
-    extracted_texts = []
+    unsafe_text_frames = []
     nsfw_visual_results = []
     
+    async def _analyze_frame(timestamp, b64_img):
+        img_bytes = base64.b64decode(b64_img)
+        visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+        
+        text = await _call_ocr_api(b64_img)
+        text_guard = None
+        if text:
+            text_guard = await _call_qwen_nsfw(text)
+            
+        return timestamp, visual_result, text_guard
+        
     if is_video:
         video_path = Path(f"/tmp/nsfw_video_{os.urandom(8).hex()}.mp4")
         try:
@@ -505,17 +533,19 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
             )
             frames_data = await asyncio.to_thread(_extract_video_frames_for_ocr, video_path, sample_interval)
             
-            for timestamp, b64_img in frames_data:
-                img_bytes = base64.b64decode(b64_img)
-                visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+            tasks = [_analyze_frame(ts, b64) for ts, b64 in frames_data]
+            frame_results = await asyncio.gather(*tasks)
+            
+            for timestamp, visual_result, text_guard in frame_results:
                 nsfw_visual_results.append({
                     "timestamp": timestamp,
                     "result": visual_result
                 })
-                
-                text = await _call_ocr_api(b64_img)
-                if text:
-                    extracted_texts.append(f"[Frame {timestamp:.1f}s]:\n{text}")
+                if text_guard and not text_guard.get("safe", True):
+                    unsafe_text_frames.append({
+                        "timestamp": timestamp,
+                        "description": text_guard.get("analysis", "")
+                    })
         finally:
             if video_path.exists():
                 video_path.unlink()
@@ -523,19 +553,17 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
         img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
         b64_img = base64.b64encode(img_bytes).decode('utf-8')
         
-        visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+        _, visual_result, text_guard = await _analyze_frame(None, b64_img)
         nsfw_visual_results.append({
             "type": "image",
             "result": visual_result
         })
-        
-        text = await _call_ocr_api(b64_img)
-        if text:
-            extracted_texts.append(text)
+        if text_guard and not text_guard.get("safe", True):
+            unsafe_text_frames.append({
+                "type": "image",
+                "description": text_guard.get("analysis", "")
+            })
 
-    full_text = "\n\n".join(extracted_texts)
-    text_guard_result = await _call_qwen_nsfw(full_text)
-    
     is_nsfw = False
     high_confidence_nsfw_frames = []
     for res in nsfw_visual_results:
@@ -553,8 +581,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     return {
         "is_nsfw": is_nsfw,
         "visual_analysis": high_confidence_nsfw_frames,
-        "extracted_text": full_text,
-        "text_analysis": text_guard_result
+        "unsafe_text_frames": unsafe_text_frames
     }
 
 
