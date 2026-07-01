@@ -1,5 +1,7 @@
 """FastAPI application for face recognition service."""
 
+import torch
+import torchvision # Must import torchvision before deepface/tensorflow to avoid CUDA segfaults
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

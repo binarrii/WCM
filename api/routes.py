@@ -1,74 +1,34 @@
 """API routes for face recognition service."""
-
-import asyncio
-import json
-import os
 import uuid
+import json
 from pathlib import Path
 from typing import Union
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
-
-import cv2
+import asyncio
 import httpx
+import cv2
 import numpy as np
+
 from fastapi import APIRouter, Request, HTTPException, WebSocket, WebSocketDisconnect
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
-from wcm_facerec.face_engine import FaceEngine, get_face_engine
-
-
-MIN_FACE_PIXELS = 64 * 64
+from wcm_facerec.face_engine import get_face_engine
+from .utils import (
+    run_in_inference_thread,
+    _download_url_safe,
+    VIDEO_EXTENSIONS
+)
+from .handlers import (
+    _verify_candidates,
+    _detect_and_crop_face_from_bytes,
+    _detect_and_crop_face,
+    _search_video_frames,
+    _process_detect_sensitive,
+    _process_detect_nsfw,
+    _process_analyze_media
+)
 
 api_bp = APIRouter()
-
-
-# Dedicated single-thread pool for CUDA/DeepFace inference
-inference_executor = ThreadPoolExecutor(max_workers=1)
-
-async def run_in_inference_thread(func, *args, **kwargs):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        inference_executor,
-        partial(func, *args, **kwargs)
-    )
-
-
-async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:
-    """Download a URL safely, enforcing a maximum file size in bytes to prevent OOM."""
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
-            content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > max_size:
-                raise ValueError(f"File too large. Max allowed: {max_size} bytes")
-            
-            chunks = bytearray()
-            async for chunk in response.aiter_bytes():
-                chunks.extend(chunk)
-                if len(chunks) > max_size:
-                    raise ValueError(f"File too large. Max allowed: {max_size} bytes")
-            return bytes(chunks)
-
-
-def _download_video_safe_sync(url: str, file_path: Path, max_size: int, timeout: float = 120.0):
-    """Synchronously download a video to disk safely, enforcing max size."""
-    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-        with client.stream("GET", url) as response:
-            response.raise_for_status()
-            content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > max_size:
-                raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
-                
-            downloaded = 0
-            with open(file_path, "wb") as f:
-                for chunk in response.iter_bytes():
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if downloaded > max_size:
-                        raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
-
 
 @api_bp.get("/health")
 async def health_check():
@@ -234,7 +194,7 @@ async def search_faces(request: Request):
     threshold = float(data.get("threshold", 0.4))
 
     try:
-        is_video = any(url.lower().endswith(ext) for ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"})
+        is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
 
         if is_video:
             sample_interval = float(data.get("sample_interval", 1.0))
@@ -281,228 +241,6 @@ async def search_faces(request: Request):
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
-async def _verify_candidates(engine: FaceEngine, candidates: list[dict], default_source_img: Union[bytes, np.ndarray, str] = None) -> list[dict]:
-    """Verify vector search candidates with DeepFace.verify."""
-    verified_results = []
-    for cand in candidates:
-        source_img = cand.pop("source_face", default_source_img)
-        if source_img is None:
-            continue
-
-        # source_img is a cropped face from detect_faces (float64 [0,1]); convert
-        # to uint8 [0,255] for the same reason as db_face below — see
-        # _crop_largest_face. db images are read fresh as uint8 already.
-        if isinstance(source_img, np.ndarray) and source_img.dtype != np.uint8:
-            source_img = (np.clip(source_img, 0, 1) * 255).astype(np.uint8)
-
-        file_path = cand.get("file_path")
-        file_url = cand.get("file_url")
-
-        db_img = None
-        try:
-            if file_path and os.path.exists(file_path):
-                db_img = cv2.imread(file_path, cv2.IMREAD_COLOR_BGR)
-            elif file_url:
-                img_bytes = await _download_url_safe(file_url, settings.max_file_size_mb * 1024 * 1024, timeout=10.0)
-                nparr = np.frombuffer(img_bytes, np.uint8)
-                db_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-        except Exception:
-            pass
-
-        if db_img is None:
-            # "if no file path (or url, or invalid) skip this step"
-            continue
-
-        # Pre-crop the DB image's face so verify_faces receives two already-cropped
-        # faces. verify_faces still uses retinaface+align, which is well-behaved on
-        # cropped faces (it skips re-detection and treats them as-is). Without this
-        # step, passing a full DB image to verify produces garbage embeddings.
-        db_face = await run_in_inference_thread(_crop_largest_face, engine, db_img)
-        if db_face is None:
-            continue
-
-        verified = await run_in_inference_thread(engine.verify_faces, source_img, db_face)
-        if verified:
-            cand["verified"] = True
-            verified_results.append(cand)
-
-    return verified_results
-
-
-def _crop_largest_face(engine: FaceEngine, img: np.ndarray) -> np.ndarray | None:
-    """Detect faces in ``img`` and return the largest cropped face, or None.
-
-    Reuses ``FaceEngine.detect_faces`` (the same crop function used by
-    register/search) so the crop is consistent with the embedding pipeline.
-
-    The returned face is converted to uint8 [0,255]. DeepFace.extract_faces
-    yields float64 [0,1] crops, but DeepFace.verify's preprocessing assumes
-    uint8 [0,255]; feeding it float64 [0,1] collapses the embedding so that
-    any two faces score distance ~0, making verification meaningless.
-    """
-    faces = engine.detect_faces(img)
-    if not faces:
-        return None
-
-    def get_face_area(f):
-        fa = f.get("facial_area", {})
-        return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-
-    face = max(faces, key=get_face_area).get("face")
-    if face is None:
-        return None
-    if face.dtype != np.uint8:
-        face = (np.clip(face, 0, 1) * 255).astype(np.uint8)
-    return face
-
-
-async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
-    """Download image, detect face, crop and return face embedding (in-memory)."""
-    try:
-        img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024, timeout=30.0)
-        return _detect_and_crop_face_from_bytes(engine, img_bytes)
-    except Exception:
-        return None
-
-
-def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> dict | None:
-    """Detect face from image bytes, crop and return face embedding (in-memory).
-
-    Returns dict with 'embedding' and 'confidence' if face found, None otherwise.
-    """
-    try:
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-        if img_array is None:
-            return None
-
-        faces = engine.detect_faces(img_array)
-        if not faces:
-            return None
-
-        def get_face_area(f):
-            fa = f.get("facial_area", {})
-            return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-        best_face = max(faces, key=get_face_area)
-        face_img = best_face.get("face")
-        confidence = best_face.get("confidence", 0.0)
-
-        if face_img is None or confidence < 0.6:
-            return None
-
-        embedding = engine.generate_embedding(face_img)
-        return {
-            "embedding": embedding,
-            "confidence": confidence,
-            "face": face_img,
-        }
-    except Exception:
-        return None
-
-
-def _search_video_frames(
-    engine: FaceEngine,
-    url: str,
-    name: str | None,
-    top_k: int,
-    threshold: float,
-    sample_interval: float,
-) -> tuple[int, list[dict]]:
-    """Search faces from video by sampling frames."""
-    video_path = Path(f"/tmp/ws_video_{os.urandom(8).hex()}.mp4")
-    try:
-        _download_video_safe_sync(url, video_path, settings.max_file_size_mb * 100 * 1024 * 1024, timeout=900.0)
-
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            raise Exception("Could not open video file")
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        all_results = []
-        frame_idx = 0
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            if frame_idx % int(fps * sample_interval) == 0:
-                current_frame_time = frame_idx / fps if fps > 0 else 0
-                try:
-                    faces = engine.detect_faces(frame)
-                    for face_data in faces:
-                        face_img = face_data.get("face")
-                        if face_img is None:
-                            continue
-                        # Filter out bad detections
-                        fa = face_data.get("facial_area", {})
-                        area = (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-                        conf = face_data.get("confidence") or 0
-                        frame_area = frame.shape[0] * frame.shape[1]
-                        # Skip if confidence is very low or face covers most of frame (detection failed)
-                        if conf < 0.5 or area < MIN_FACE_PIXELS or area > frame_area * 0.8:
-                            continue
-
-                        # # --- DEBUG: save cropped face to temp dir ---
-                        # import tempfile as _debug_tmp
-                        # _debug_dir = _debug_tmp.mkdtemp(prefix="debug/face_search_debug_")
-                        # _debug_fname = _debug_dir + f"/frame{frame_idx:06d}_t{current_frame_time:.2f}_conf{conf:.2f}_area{area}.png"
-                        # _debug_face = (np.clip(face_img, 0, 1) * 255).astype(np.uint8) if face_img.dtype != np.uint8 else face_img
-                        # cv2.imwrite(_debug_fname, _debug_face)
-                        # print(f"[DEBUG FACE] frame={frame_idx} time={current_frame_time:.2f}s conf={conf:.2f} area={area} saved={_debug_fname}")
-                        # # --- END DEBUG ---
-
-                        _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
-                except Exception:
-                    pass  # Skip frames that fail detection
-
-            frame_idx += 1
-
-        cap.release()
-
-        # Sort and dedupe results by distance
-        all_results.sort(key=lambda x: x.get("distance", 1.0))
-        seen = set()
-        deduped = []
-        for r in all_results:
-            key = (r.get("name"), r.get("person_id"))
-            if key not in seen:
-                seen.add(key)
-                deduped.append(r)
-
-        return frame_idx, deduped
-        # return frame_idx, deduped[:top_k]
-    finally:
-        if video_path.exists():
-            video_path.unlink()
-
-
-def _search_face_in_image(
-    engine: FaceEngine,
-    face_img,
-    name: str | None,
-    top_k: int,
-    threshold: float,
-    all_results: list,
-    frame_time: float | None = None,
-):
-    """Search a single face from a frame (in-memory, no temp files)."""
-    try:
-        embedding = engine.generate_embedding(face_img)
-        results = engine.search(
-            embedding=embedding,
-            name=name,
-            top_k=top_k,
-            threshold=threshold,
-        )
-        for r in results:
-            r["frame_time"] = frame_time
-            r["source_face"] = face_img
-        all_results.extend(results)
-    except Exception:
-        pass  # Skip faces that fail embedding generation
-
-
 @api_bp.websocket("/ws/search")
 async def websocket_search(websocket: WebSocket):
     """WebSocket endpoint for async face search.
@@ -540,7 +278,7 @@ async def websocket_search(websocket: WebSocket):
             await websocket.send_json({"status": "accepted", "taskId": task_id})
 
             engine = get_face_engine()
-            is_video = any(url.lower().endswith(ext) for ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"})
+            is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
 
             try:
                 if is_video:
@@ -589,6 +327,188 @@ async def websocket_search(websocket: WebSocket):
             except Exception as e:
                 await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Search failed: {str(e)}"})
 
+    except Exception as e:
+        try:
+            await websocket.send_json({"status": "error", "error": str(e)})
+        except:
+            pass
+
+
+@api_bp.post("/detect_sensitive")
+async def detect_sensitive(request: Request):
+    """
+    Extract text via OCR from an image/video URL and check for sensitive info using WasuGuard.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        
+    url = data.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+        
+    sample_interval = float(data.get("sample_interval", 1.0))
+    
+    try:
+        return await _process_detect_sensitive(url, sample_interval)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process media: {str(e)}")
+
+
+@api_bp.websocket("/ws/detect_sensitive")
+async def websocket_detect_sensitive(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            try:
+                data = await websocket.receive_text()
+                if not data or len(data) < 2: continue
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"status": "error", "error": "Invalid JSON"})
+                continue
+            except WebSocketDisconnect:
+                break
+                
+            url = payload.get("url")
+            if not url:
+                await websocket.send_json({"status": "error", "error": "url is required"})
+                continue
+                
+            task_id = str(uuid.uuid4())
+            sample_interval = float(payload.get("sample_interval", 1.0))
+            await websocket.send_json({"status": "accepted", "taskId": task_id})
+            
+            try:
+                result = await _process_detect_sensitive(url, sample_interval)
+                result["status"] = "completed"
+                result["taskId"] = task_id
+                await websocket.send_json(result)
+            except Exception as e:
+                await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
+    except Exception as e:
+        try:
+            await websocket.send_json({"status": "error", "error": str(e)})
+        except:
+            pass
+
+nsfw_pipeline = None
+
+
+
+
+@api_bp.post("/detect_nsfw")
+async def detect_nsfw(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        
+    url = body.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+        
+    sample_interval = float(body.get("sample_interval", 1.0))
+    
+    try:
+        return await _process_detect_nsfw(url, sample_interval)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process media: {str(e)}")
+
+@api_bp.websocket("/ws/detect_nsfw")
+async def websocket_detect_nsfw(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            try:
+                data = await websocket.receive_text()
+                if not data or len(data) < 2: continue
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"status": "error", "error": "Invalid JSON"})
+                continue
+            except WebSocketDisconnect:
+                break
+                
+            url = payload.get("url")
+            if not url:
+                await websocket.send_json({"status": "error", "error": "url is required"})
+                continue
+                
+            task_id = str(uuid.uuid4())
+            sample_interval = float(payload.get("sample_interval", 1.0))
+            await websocket.send_json({"status": "accepted", "taskId": task_id})
+            
+            try:
+                result = await _process_detect_nsfw(url, sample_interval)
+                result["status"] = "completed"
+                result["taskId"] = task_id
+                await websocket.send_json(result)
+            except Exception as e:
+                await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
+    except Exception as e:
+        try:
+            await websocket.send_json({"status": "error", "error": str(e)})
+        except:
+            pass
+
+
+@api_bp.post("/analyze_media")
+async def analyze_media(request: Request):
+    """Analyze a single media file for faces, sensitive text, and NSFW content."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        
+    url = body.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+        
+    sample_interval = float(body.get("sample_interval", 1.0))
+    top_k = int(body.get("top_k", 10))
+    threshold = float(body.get("threshold", 0.4))
+    
+    try:
+        return await _process_analyze_media(url, sample_interval, top_k, threshold)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process media: {str(e)}")
+
+@api_bp.websocket("/ws/analyze_media")
+async def websocket_analyze_media(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            try:
+                data = await websocket.receive_text()
+                if not data or len(data) < 2: continue
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"status": "error", "error": "Invalid JSON"})
+                continue
+            except WebSocketDisconnect:
+                break
+                
+            url = payload.get("url")
+            if not url:
+                await websocket.send_json({"status": "error", "error": "url is required"})
+                continue
+                
+            task_id = str(uuid.uuid4())
+            sample_interval = float(payload.get("sample_interval", 1.0))
+            top_k = int(payload.get("top_k", 10))
+            threshold = float(payload.get("threshold", 0.4))
+            
+            await websocket.send_json({"status": "accepted", "taskId": task_id})
+            
+            try:
+                result = await _process_analyze_media(url, sample_interval, top_k, threshold)
+                result["status"] = "completed"
+                result["taskId"] = task_id
+                await websocket.send_json(result)
+            except Exception as e:
+                await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
     except Exception as e:
         try:
             await websocket.send_json({"status": "error", "error": str(e)})

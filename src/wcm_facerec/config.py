@@ -43,10 +43,12 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     max_file_size_mb: int = 100
+    model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
+    model_api_key: str = "sk-o8EGlzXqMQi8Ba06E2B1BcF8217c45B6Bb70Ce5765B70c42"
 
     # Filesystem
     data_root: str = "/data/wcm"
-    default_category: str = "落马官员"
+    default_category: str = "未分类"
 
     @property
     def database_url(self) -> str:

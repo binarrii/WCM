@@ -23,6 +23,9 @@ dependencies = [
     "xlrd>=2.0.2",
     "pydantic-settings>=2.13.1",
     "python-multipart>=0.0.26",
+    "transformers>=5.12.1",
+    "torch>=2.12.1",
+    "torchvision>=0.27.1",
 ]
 
 [project.optional-dependencies]

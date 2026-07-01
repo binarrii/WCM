@@ -1,0 +1,18 @@
+services:
+  deepseek-ocr:
+    image: vllm/vllm-openai:v0.7.3
+    container_name: deepseek-ocr
+    runtime: nvidia
+    ports:
+      - "8080:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    command: --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 4096
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
