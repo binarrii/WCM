@@ -405,36 +405,7 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
     return {
         "unsafe_text_frames": unsafe_text_frames
     }
-        return None
-        
-    if is_video:
-        video_path = Path(f"/tmp/guard_video_{os.urandom(8).hex()}.mp4")
-        try:
-            await asyncio.to_thread(
-                _download_video_safe_sync, url, video_path, settings.max_file_size_mb * 100 * 1024 * 1024
-            )
-            frames_data = await asyncio.to_thread(_extract_video_frames_for_ocr, video_path, sample_interval)
-            
-            tasks = [_analyze_text(ts, b64) for ts, b64 in frames_data]
-            results = await asyncio.gather(*tasks)
-            for res in results:
-                if res:
-                    unsafe_text_frames.append(res)
-        finally:
-            if video_path.exists():
-                video_path.unlink()
-    else:
-        img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-        b64_img = base64.b64encode(img_bytes).decode('utf-8')
-        res = await _analyze_text(None, b64_img)
-        if res:
-            res["type"] = "image"
-            res.pop("timestamp", None)
-            unsafe_text_frames.append(res)
 
-    return {
-        "unsafe_text_frames": unsafe_text_frames
-    }
 
 
 def get_nsfw_pipeline():
