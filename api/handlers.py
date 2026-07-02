@@ -349,9 +349,10 @@ async def _call_llm_guard(text: str) -> dict:
                 "Personally Identifiable Information": "个人隐私信息",
                 "Suicide & Self-Harm": "自杀与自残",
                 "Unethical Acts": "不道德行为",
-                "Politically Sensitive Topics": "政治敏感",
+                "Politically Sensitive": "政治敏感内容",
+                "Politically Sensitive Topics": "政治敏感内容",
                 "Copyright Violation": "侵犯版权",
-                "Jailbreak": "越狱/绕过安全限制"
+                "Jailbreak": "越狱/绕过安全限制",
             }
             
             # The model might output multiple categories comma-separated, or just one.
