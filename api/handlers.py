@@ -435,8 +435,8 @@ async def _call_qwen_image_analysis(b64_img: str) -> str:
         ],
         "max_tokens": 64,
         "temperature": 0.3,
-        "reasoning_effort":"none",
-        "chat_template_kwargs":{"enable_thinking": False}
+        "reasoning_effort": "none",
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -496,7 +496,6 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
 def get_nsfw_pipeline():
     global nsfw_pipeline
     if nsfw_pipeline is None:
-        import torch
         from transformers import pipeline
         device = -1 # Force CPU to avoid CUDA conflicts with TensorFlow
         nsfw_pipeline = pipeline("image-classification", model="Falconsai/nsfw_image_detection", device=device)
