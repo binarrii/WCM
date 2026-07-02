@@ -152,11 +152,18 @@ def _search_video_frames(
     top_k: int,
     threshold: float,
     sample_interval: float,
+    local_video_path: Path | None = None,
 ) -> tuple[int, list[dict]]:
     """Search faces from video by sampling frames."""
-    video_path = Path(f"/tmp/ws_video_{os.urandom(8).hex()}.mp4")
-    try:
+    if local_video_path is not None:
+        video_path = local_video_path
+        should_unlink = False
+    else:
+        video_path = Path(f"/tmp/ws_video_{os.urandom(8).hex()}.mp4")
         _download_video_safe_sync(url, video_path, settings.max_file_size_mb * 100 * 1024 * 1024, timeout=900.0)
+        should_unlink = True
+
+    try:
 
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -218,7 +225,7 @@ def _search_video_frames(
         return frame_idx, deduped
         # return frame_idx, deduped[:top_k]
     finally:
-        if video_path.exists():
+        if should_unlink and video_path.exists():
             video_path.unlink()
 
 
@@ -492,19 +499,6 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
 
 
 
-def detect_visual_nsfw(image_bytes: bytes) -> list:
-    import requests
-    try:
-        url = settings.nsfw_api_url
-        files = {"image": ("frame.jpg", image_bytes, "image/jpeg")}
-        response = requests.post(url, files=files, timeout=10)
-        response.raise_for_status()
-        return response.json().get("predictions", [])
-    except Exception as e:
-        print(f"Error calling NSFW BentoML API: {e}")
-        return [{"label": "normal", "score": 1.0}]
-
-
 async def _process_analyze_media(url: str, sample_interval: float, top_k: int, threshold: float) -> dict:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     engine = get_face_engine()
@@ -514,48 +508,41 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     face_search_results = []
     
     async def _analyze_frame(timestamp, b64_img):
-        img_bytes = base64.b64decode(b64_img)
-        visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+        visual_desc = await _call_qwen_image_analysis(b64_img)
+        is_nsfw = visual_desc and "正常" not in visual_desc and "无法获取描述" not in visual_desc
         
-        visual_desc = None
-        for label_score in visual_result:
-            if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
-                visual_desc = await _call_qwen_image_analysis(b64_img)
-                break
-                
         text = await _call_ocr_api(b64_img)
         text_guard = None
         if text:
             text_guard = await _call_llm_guard(text)
             
-        return timestamp, visual_result, visual_desc, text_guard, text
+        return timestamp, is_nsfw, visual_desc, text_guard, text
 
     if is_video:
-        frames_processed, face_results = await run_in_inference_thread(
-            _search_video_frames,
-            engine, url, None, max(min(top_k, 10), 1),
-            max(min(threshold, 1.0), 0.0), sample_interval
-        )
-        face_search_results = await _verify_candidates(engine, face_results)
-        
         video_path = Path(f"/tmp/analyze_video_{os.urandom(8).hex()}.mp4")
         try:
             await asyncio.to_thread(
-                _download_video_safe_sync, url, video_path, settings.max_file_size_mb * 100 * 1024 * 1024
+                _download_video_safe_sync, url, video_path, settings.max_file_size_mb * 100 * 1024 * 1024, timeout=900.0
             )
+            frames_processed, face_results = await run_in_inference_thread(
+                _search_video_frames,
+                engine, url, None, max(min(top_k, 10), 1),
+                max(min(threshold, 1.0), 0.0), sample_interval, video_path
+            )
+            face_search_results = await _verify_candidates(engine, face_results)
+            
             frames_data = await asyncio.to_thread(_extract_video_frames_for_ocr, video_path, sample_interval)
             
             tasks = [_analyze_frame(ts, b64) for ts, b64 in frames_data]
             frame_results = await asyncio.gather(*tasks)
             
-            for timestamp, visual_result, visual_desc, text_guard, frame_text in frame_results:
-                for label_score in visual_result:
-                    if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
-                        nsfw_visual_results.append({
-                            "timestamp": timestamp,
-                            "confidence": label_score["score"],
-                            "description": visual_desc
-                        })
+            for timestamp, is_nsfw, visual_desc, text_guard, frame_text in frame_results:
+                if is_nsfw:
+                    nsfw_visual_results.append({
+                        "timestamp": timestamp,
+                        "confidence": 1.0,
+                        "description": visual_desc
+                    })
                 
                 if text_guard and not text_guard.get("safe", True):
                     unsafe_text_frames.append({
@@ -577,14 +564,13 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             )
             face_search_results = await _verify_candidates(engine, search_res)
 
-        _, visual_result, visual_desc, text_guard, frame_text = await _analyze_frame(None, b64_img)
-        for label_score in visual_result:
-            if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
-                nsfw_visual_results.append({
-                    "type": "image",
-                    "confidence": label_score["score"],
-                    "description": visual_desc
-                })
+        _, is_nsfw, visual_desc, text_guard, frame_text = await _analyze_frame(None, b64_img)
+        if is_nsfw:
+            nsfw_visual_results.append({
+                "type": "image",
+                "confidence": 1.0,
+                "description": visual_desc
+            })
                 
         if text_guard and not text_guard.get("safe", True):
             unsafe_text_frames.append({
@@ -606,21 +592,15 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     nsfw_visual_results = []
     
     async def _analyze_frame(timestamp, b64_img):
-        img_bytes = base64.b64decode(b64_img)
-        visual_result = await run_in_inference_thread(detect_visual_nsfw, img_bytes)
+        visual_desc = await _call_qwen_image_analysis(b64_img)
+        is_nsfw = visual_desc and "正常" not in visual_desc and "无法获取描述" not in visual_desc
         
-        visual_desc = None
-        for label_score in visual_result:
-            if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
-                visual_desc = await _call_qwen_image_analysis(b64_img)
-                break
-                
         text = await _call_ocr_api(b64_img)
         text_guard = None
         if text:
             text_guard = await _call_llm_guard(text)
             
-        return timestamp, visual_result, visual_desc, text_guard, text
+        return timestamp, is_nsfw, visual_desc, text_guard, text
         
     if is_video:
         video_path = Path(f"/tmp/nsfw_video_{os.urandom(8).hex()}.mp4")
@@ -633,14 +613,13 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
             tasks = [_analyze_frame(ts, b64) for ts, b64 in frames_data]
             frame_results = await asyncio.gather(*tasks)
             
-            for timestamp, visual_result, visual_desc, text_guard, frame_text in frame_results:
-                for label_score in visual_result:
-                    if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
-                        nsfw_visual_results.append({
-                            "timestamp": timestamp,
-                            "confidence": label_score["score"],
-                            "description": visual_desc
-                        })
+            for timestamp, is_nsfw, visual_desc, text_guard, frame_text in frame_results:
+                if is_nsfw:
+                    nsfw_visual_results.append({
+                        "timestamp": timestamp,
+                        "confidence": 1.0,
+                        "description": visual_desc
+                    })
                 
                 if text_guard and not text_guard.get("safe", True):
                     unsafe_text_frames.append({
@@ -655,14 +634,13 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
         img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
         b64_img = base64.b64encode(img_bytes).decode('utf-8')
         
-        _, visual_result, visual_desc, text_guard, frame_text = await _analyze_frame(None, b64_img)
-        for label_score in visual_result:
-            if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
-                nsfw_visual_results.append({
-                    "type": "image",
-                    "confidence": label_score["score"],
-                    "description": visual_desc
-                })
+        _, is_nsfw, visual_desc, text_guard, frame_text = await _analyze_frame(None, b64_img)
+        if is_nsfw:
+            nsfw_visual_results.append({
+                "type": "image",
+                "confidence": 1.0,
+                "description": visual_desc
+            })
                 
         if text_guard and not text_guard.get("safe", True):
             unsafe_text_frames.append({
