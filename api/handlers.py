@@ -421,6 +421,27 @@ async def _call_llm_guard(text: str) -> dict:
                 is_safe = False
                 category = analysis
                 
+            GUARD_CATEGORY_MAP = {
+                "violent": "暴力",
+                "non-violent illegal acts": "非暴力违法行为",
+                "sexual content or sexual acts": "色情内容或性行为",
+                "personally identifiable information": "个人身份信息",
+                "suicide & self-harm": "自杀与自残",
+                "unethical acts": "不道德行为",
+                "politically sensitive topics": "政治敏感话题",
+                "copyright violation": "侵犯版权",
+                "jailbreak": "越狱"
+            }
+            
+            lower_cat = category.lower()
+            mapped_cats = []
+            for en_key, cn_val in GUARD_CATEGORY_MAP.items():
+                if en_key in lower_cat:
+                    mapped_cats.append(cn_val)
+                    
+            if mapped_cats:
+                category = "、".join(mapped_cats)
+                
             return {"safe": is_safe, "category": category}
         except Exception as e:
             return {"safe": True, "category": ""}
@@ -436,7 +457,7 @@ async def _call_qwen_image_analysis(b64_img: str) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "这是一张可能包含违规内容的图片。请用非常简短的一句话（中文）描述该图片属于哪类违规内容（例如：裸露、血腥暴力、色情暗示等），只输出简短描述，不要输出任何其他内容。如果完全正常，请输出：正常。"},
+                    {"type": "text", "text": "请详细描述这张图片的内容。如果画面中包含裸露、色情暗示、血腥暴力等违规内容，请务必详细描述出来。如果不包含违规内容，请客观描述画面内容即可。"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
                 ]
             }
@@ -509,7 +530,14 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     
     async def _analyze_frame(timestamp, b64_img):
         visual_desc = await _call_qwen_image_analysis(b64_img)
-        is_nsfw = visual_desc and "正常" not in visual_desc and "无法获取描述" not in visual_desc
+        
+        # Use LLM guard to evaluate the visual description
+        visual_guard = await _call_llm_guard(visual_desc)
+        is_nsfw = not visual_guard.get("safe", True)
+        if is_nsfw:
+            cat = visual_guard.get("category", "违规")
+            if cat:
+                visual_desc = f"[{cat}] {visual_desc}"
         
         text = await _call_ocr_api(b64_img)
         text_guard = None
@@ -593,7 +621,14 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     
     async def _analyze_frame(timestamp, b64_img):
         visual_desc = await _call_qwen_image_analysis(b64_img)
-        is_nsfw = visual_desc and "正常" not in visual_desc and "无法获取描述" not in visual_desc
+        
+        # Use LLM guard to evaluate the visual description
+        visual_guard = await _call_llm_guard(visual_desc)
+        is_nsfw = not visual_guard.get("safe", True)
+        if is_nsfw:
+            cat = visual_guard.get("category", "违规")
+            if cat:
+                visual_desc = f"[{cat}] {visual_desc}"
         
         text = await _call_ocr_api(b64_img)
         text_guard = None
