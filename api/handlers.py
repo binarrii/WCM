@@ -579,6 +579,71 @@ def _sync_face_task(engine, frame, top_k, threshold, current_frame_time):
     except Exception:
         return []
 
+async def _call_triton_face_engine(engine, frame, top_k, threshold, current_frame_time):
+    url = f"{settings.triton_server_url}/v2/models/face_engine/infer"
+    
+    _, buffer = cv2.imencode('.jpg', frame)
+    b64_str = base64.b64encode(buffer).decode('utf-8')
+    
+    payload = {
+        "inputs": [
+            {
+                "name": "IMAGE_BYTES",
+                "shape": [1],
+                "datatype": "BYTES",
+                "data": [b64_str]
+            }
+        ]
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            outputs = {out["name"]: out for out in data.get("outputs", [])}
+            if "NUM_FACES" not in outputs:
+                return []
+                
+            num_faces = outputs["NUM_FACES"]["data"][0]
+            if num_faces == 0:
+                return []
+                
+            bboxes = outputs["BBOXES"]["data"]
+            embeddings = outputs["EMBEDDINGS"]["data"]
+            
+            # Reshape based on shape returned by triton (e.g. [3, 4] and [3, 512])
+            bbox_shape = outputs["BBOXES"].get("shape", [3, 4])
+            emb_shape = outputs["EMBEDDINGS"].get("shape", [3, 512])
+            
+            bboxes = np.array(bboxes).reshape(tuple(bbox_shape))
+            embeddings = np.array(embeddings).reshape(tuple(emb_shape))
+            
+            all_results = []
+            seen = set()
+            for i in range(num_faces):
+                emb = embeddings[i]
+                search_res = engine.search(
+                    embedding=emb,
+                    name=None,
+                    top_k=top_k,
+                    threshold=threshold
+                )
+                
+                for r in search_res:
+                    r["frame_time"] = current_frame_time
+                    key = (r.get("name"), r.get("person_id"))
+                    if key not in seen:
+                        seen.add(key)
+                        all_results.append(r)
+            
+            return all_results
+            
+        except Exception as e:
+            print("Triton inference error:", e)
+            return []
+
 
 async def _process_analyze_media(url: str, sample_interval: float, top_k: int, threshold: float) -> list:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
@@ -587,10 +652,11 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     async def _process_single_frame(frame, b64_img, current_frame_time):
         async def face_task():
             if frame is None:
-                # for image mode, frame is already bytes, handled differently? 
-                # actually for image mode, we can just use engine.search_faces but wait, we need to detect face first.
                 return []
-            return await run_in_inference_thread(_sync_face_task, engine, frame, top_k, threshold, current_frame_time)
+            if settings.face_engine_mode == "triton":
+                return await _call_triton_face_engine(engine, frame, top_k, threshold, current_frame_time)
+            else:
+                return await run_in_inference_thread(_sync_face_task, engine, frame, top_k, threshold, current_frame_time)
             
         async def nsfw_task():
             visual_desc = await _call_nsfw_analysis(b64_img)

@@ -14,15 +14,34 @@ from wcm_facerec import __version__
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
 MIN_FACE_PIXELS = 64 * 64
 
-# Dedicated single-thread pool for CUDA/DeepFace inference
-inference_executor = ThreadPoolExecutor(max_workers=1)
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+
+try:
+    mp_ctx = mp.get_context('spawn')
+except RuntimeError:
+    mp_ctx = mp.get_context()
+
+inference_executor_thread = ThreadPoolExecutor(max_workers=1)
+
+inference_executor_process = None
+if settings.face_engine_mode == "process_pool":
+    inference_executor_process = ProcessPoolExecutor(max_workers=3, mp_context=mp_ctx)
 
 async def run_in_inference_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        inference_executor,
-        partial(func, *args, **kwargs)
-    )
+    
+    # triton mode usually bypasses this for detection, but for other functions keep thread_pool
+    if settings.face_engine_mode == "process_pool" and inference_executor_process:
+        return await loop.run_in_executor(
+            inference_executor_process,
+            partial(func, *args, **kwargs)
+        )
+    else:
+        return await loop.run_in_executor(
+            inference_executor_thread,
+            partial(func, *args, **kwargs)
+        )
 
 
 async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:

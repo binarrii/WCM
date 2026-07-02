@@ -1,0 +1,41 @@
+name: "face_engine"
+backend: "python"
+max_batch_size: 16
+
+dynamic_batching {
+  preferred_batch_size: [4, 8, 16]
+  max_queue_delay_microseconds: 50000
+}
+
+input [
+  {
+    name: "IMAGE_BYTES"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "NUM_FACES"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
+    name: "BBOXES"
+    data_type: TYPE_FP32
+    dims: [ 3, 4 ]
+  },
+  {
+    name: "EMBEDDINGS"
+    data_type: TYPE_FP32
+    dims: [ 3, 512 ]
+  }
+]
+
+instance_group [
+  {
+    count: 2
+    kind: KIND_GPU
+  }
+]

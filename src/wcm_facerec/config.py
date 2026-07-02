@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # reject borderline look-alikes.
     verify_distance_threshold: float = 0.10
 
+    # Engine Config
+    face_engine_mode: Literal["thread_pool", "process_pool", "triton"] = "triton"
+    triton_server_url: str = "http://127.0.0.1:8001"
+
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000

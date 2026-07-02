@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  triton-face-engine:
+    build: .
+    container_name: triton-face-engine
+    ports:
+      - "8001:8000"
+      - "8002:8001"
+      - "8003:8002"
+    volumes:
+      - ./model_repository:/models
+      - ~/.deepface:/root/.deepface
+    shm_size: 4g
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: tritonserver --model-repository=/models
