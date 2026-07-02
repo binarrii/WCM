@@ -341,6 +341,29 @@ async def _call_llm_guard(text: str) -> dict:
                     # fallback extraction
                     category = "未知敏感内容"
                     
+            # Map known English categories to Chinese
+            guard_category_map = {
+                "Violent": "暴力",
+                "Non-violent Illegal Acts": "非暴力违法行为",
+                "Sexual Content or Sexual Acts": "色情或性行为",
+                "Personally Identifiable Information": "个人隐私信息",
+                "Suicide & Self-Harm": "自杀与自残",
+                "Unethical Acts": "不道德行为",
+                "Politically Sensitive Topics": "政治敏感",
+                "Copyright Violation": "侵犯版权",
+                "Jailbreak": "越狱/绕过安全限制"
+            }
+            
+            # The model might output multiple categories comma-separated, or just one.
+            # Handle possible partial matches or exact matches
+            mapped_categories = []
+            for en_cat, cn_cat in guard_category_map.items():
+                if en_cat.lower() in category.lower():
+                    mapped_categories.append(cn_cat)
+                    
+            if mapped_categories:
+                category = "、".join(mapped_categories)
+                    
             return {"safe": is_safe, "category": category}
         except Exception as e:
             return {"safe": True, "category": ""}
@@ -400,7 +423,7 @@ async def _call_qwen_image_analysis(b64_img: str) -> str:
         "Authorization": f"Bearer {settings.model_api_key}"
     }
     payload = {
-        "model": "WasuAI/Wenlv-Max",
+        "model": "WasuAI/JoyCaption",
         "messages": [
             {
                 "role": "user",
