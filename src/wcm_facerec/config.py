@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 100
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = "sk-o8EGlzXqMQi8Ba06E2B1BcF8217c45B6Bb70Ce5765B70c42"
+    nsfw_api_url: str = "http://127.0.0.1:3005/predict"
 
     # Filesystem
     data_root: str = "/data/wcm"

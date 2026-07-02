@@ -24,7 +24,7 @@ from .utils import (
     MIN_FACE_PIXELS
 )
 
-nsfw_pipeline = None
+
 
 async def _verify_candidates(engine: FaceEngine, candidates: list[dict], default_source_img: Union[bytes, np.ndarray, str] = None) -> list[dict]:
     """Verify vector search candidates with DeepFace.verify."""
@@ -494,19 +494,17 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
 
 
 
-def get_nsfw_pipeline():
-    global nsfw_pipeline
-    if nsfw_pipeline is None:
-        from transformers import pipeline
-        device = -1 # Force CPU to avoid CUDA conflicts with TensorFlow
-        nsfw_pipeline = pipeline("image-classification", model="Falconsai/nsfw_image_detection", device=device)
-    return nsfw_pipeline
-
-
 def detect_visual_nsfw(image_bytes: bytes) -> list:
-    image = Image.open(io.BytesIO(image_bytes))
-    pipe = get_nsfw_pipeline()
-    return pipe(image)
+    import requests
+    try:
+        url = settings.nsfw_api_url
+        files = {"image": ("frame.jpg", image_bytes, "image/jpeg")}
+        response = requests.post(url, files=files, timeout=10)
+        response.raise_for_status()
+        return response.json().get("predictions", [])
+    except Exception as e:
+        print(f"Error calling NSFW BentoML API: {e}")
+        return [{"label": "normal", "score": 1.0}]
 
 
 async def _process_analyze_media(url: str, sample_interval: float, top_k: int, threshold: float) -> dict:
