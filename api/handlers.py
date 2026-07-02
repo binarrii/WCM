@@ -434,7 +434,9 @@ async def _call_qwen_image_analysis(b64_img: str) -> str:
             }
         ],
         "max_tokens": 64,
-        "temperature": 0.3
+        "temperature": 0.3,
+        "reasoning_effort":"none",
+        "chat_template_kwargs":{"enable_thinking": False}
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
