@@ -446,7 +446,7 @@ async def _call_llm_guard(text: str) -> dict:
         except Exception as e:
             return {"safe": True, "category": ""}
 
-async def _call_qwen_image_analysis(b64_img: str) -> str:
+async def _call_nsfw_analysis(b64_img: str) -> str:
     url = settings.model_api_url
     headers = {
         "Authorization": f"Bearer {settings.model_api_key}"
@@ -554,11 +554,12 @@ async def _call_flags_analysis(b64_img: str) -> str:
 
 def _format_timestamp(seconds: float) -> str:
     if seconds is None:
-        return "00:00:00"
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
+        return "00:00:00.000"
+    total_ms = int(round(seconds * 1000))
+    h, remainder = divmod(total_ms, 3600000)
+    m, remainder = divmod(remainder, 60000)
+    s, ms = divmod(remainder, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 def _sync_face_task(engine, frame, top_k, threshold, current_frame_time):
     all_results = []
@@ -592,7 +593,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             return await run_in_inference_thread(_sync_face_task, engine, frame, top_k, threshold, current_frame_time)
             
         async def nsfw_task():
-            visual_desc = await _call_qwen_image_analysis(b64_img)
+            visual_desc = await _call_nsfw_analysis(b64_img)
             visual_guard = await _call_llm_guard(visual_desc)
             if not visual_guard.get("safe", True):
                 return {"category": visual_guard.get("category", "视觉违规"), "text": visual_desc}
@@ -640,7 +641,8 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                 if not ret:
                     break
                 if frame_idx % int(max(fps * sample_interval, 1)) == 0:
-                    current_frame_time = frame_idx / fps
+                    msec = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    current_frame_time = msec / 1000.0 if msec >= 0 else frame_idx / fps
                     _, buffer = cv2.imencode('.jpg', frame)
                     b64_img = base64.b64encode(buffer).decode('utf-8')
                     tasks.append(_process_single_frame(frame, b64_img, current_frame_time))
@@ -683,28 +685,28 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             flattened_results.append({
                 "timestamp": formatted_ts,
                 "category": "敏感人物",
-                "text": fr.get("name", "未知人物")
+                "description": fr.get("name", "未知人物")
             })
         
         if nsfw_res:
             flattened_results.append({
                 "timestamp": formatted_ts,
                 "category": nsfw_res["category"],
-                "text": nsfw_res["text"]
+                "description": nsfw_res["text"]
             })
             
         if ocr_res:
             flattened_results.append({
                 "timestamp": formatted_ts,
                 "category": ocr_res["category"],
-                "text": ocr_res["text"]
+                "description": ocr_res["text"]
             })
             
         if flags_res:
             flattened_results.append({
                 "timestamp": formatted_ts,
                 "category": flags_res["category"],
-                "text": flags_res["text"]
+                "description": flags_res["text"]
             })
             
     # Sort by timestamp
@@ -719,7 +721,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     nsfw_visual_results = []
     
     async def _analyze_frame(timestamp, b64_img):
-        visual_desc = await _call_qwen_image_analysis(b64_img)
+        visual_desc = await _call_nsfw_analysis(b64_img)
         
         # Use LLM guard to evaluate the visual description
         visual_guard = await _call_llm_guard(visual_desc)
