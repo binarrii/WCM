@@ -633,24 +633,50 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             cap = cv2.VideoCapture(str(video_path))
             fps = cap.get(cv2.CAP_PROP_FPS)
             if fps <= 0: fps = 25.0
-            frame_idx = 0
             
-            tasks = []
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                if frame_idx % int(max(fps * sample_interval, 1)) == 0:
-                    msec = cap.get(cv2.CAP_PROP_POS_MSEC)
-                    current_frame_time = msec / 1000.0 if msec >= 0 else frame_idx / fps
-                    _, buffer = cv2.imencode('.jpg', frame)
-                    b64_img = base64.b64encode(buffer).decode('utf-8')
-                    tasks.append(_process_single_frame(frame, b64_img, current_frame_time))
-                frame_idx += 1
-            cap.release()
+            queue = asyncio.Queue(maxsize=10)
             
-            # Run all frames concurrently
-            frame_results = await asyncio.gather(*tasks)
+            async def producer():
+                frame_idx = 0
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    if frame_idx % int(max(fps * sample_interval, 1)) == 0:
+                        msec = cap.get(cv2.CAP_PROP_POS_MSEC)
+                        current_frame_time = msec / 1000.0 if msec >= 0 else frame_idx / fps
+                        _, buffer = cv2.imencode('.jpg', frame)
+                        b64_img = base64.b64encode(buffer).decode('utf-8')
+                        await queue.put((frame, b64_img, current_frame_time))
+                    frame_idx += 1
+                    
+                    if frame_idx % 15 == 0:
+                        await asyncio.sleep(0)
+                        
+                cap.release()
+                await queue.put(None)
+                
+            async def consumer():
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        await queue.put(None)
+                        queue.task_done()
+                        break
+                    
+                    frame, b64_img, current_frame_time = item
+                    res = await _process_single_frame(frame, b64_img, current_frame_time)
+                    frame_results.append(res)
+                    queue.task_done()
+
+            NUM_CONSUMERS = 5
+            consumers = [asyncio.create_task(consumer()) for _ in range(NUM_CONSUMERS)]
+            
+            await producer()
+            await queue.join()
+            
+            for c in consumers:
+                c.cancel()
         finally:
             if video_path.exists():
                 video_path.unlink()
