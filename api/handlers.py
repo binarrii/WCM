@@ -259,7 +259,7 @@ async def _call_ocr_api(base64_image: str) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Extract all text from this image. Output only the extracted text."},
+                    {"type": "text", "text": "提取图片中的所有文字。请只输出纯文本，绝对不要输出任何位置坐标（如<|LOC_0|>）、边界框或多余的解释。"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]
             }
@@ -272,7 +272,17 @@ async def _call_ocr_api(base64_image: str) -> str:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
+            analysis = data["choices"][0]["message"]["content"].strip()
+            
+            import re
+            # Clean up <|LOC_X|> bounding box tokens that the VLM might output
+            analysis = re.sub(r'<\|LOC_\d+\|>', '', analysis)
+            
+            # Remove massive consecutive repetition (hallucinations like 王晓燕王晓燕...)
+            analysis = re.sub(r'(.{1,30}?)\1{4,}', r'\1...', analysis)
+            if len(analysis) > 500:
+                analysis = analysis[:500] + "..."
+            return analysis
         except Exception as e:
             if hasattr(e, 'response') and getattr(e, 'response') is not None:
                 print(f"OCR API Error: {e.response.text}")
@@ -284,6 +294,56 @@ async def _call_ocr_api(base64_image: str) -> str:
 async def _call_llm_guard(text: str) -> dict:
     if not text.strip():
         return {"safe": True, "category": ""}
+    
+    url = settings.model_api_url
+    headers = {
+        "Authorization": f"Bearer {settings.model_api_key}"
+    }
+    payload = {
+        "model": "WasuAI/WasuGuard-Gen-4B",
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个内容安全审核员。请分析以下文本是否包含敏感、违规或不适宜的信息。如果完全安全，请输出：\nSafety: Safe\n\n如果不安全，请输出：\nSafety: Unsafe\nCategories: [具体的违规类别，例如：政治敏感、色情、辱骂、暴恐等，请务必用中文作答]"
+            },
+            {
+                "role": "user",
+                "content": text
+            }
+        ],
+        "max_tokens": 512,
+        "temperature": 0.1
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            analysis = data["choices"][0]["message"]["content"].strip()
+            
+            if "</think>" in analysis:
+                analysis = analysis.split("</think>")[-1].strip()
+                
+            is_safe = True
+            category = ""
+            
+            for line in analysis.split("\n"):
+                line = line.strip()
+                if "safety:" in line.lower() and "unsafe" in line.lower():
+                    is_safe = False
+                elif "categories:" in line.lower():
+                    idx = line.lower().find("categories:")
+                    category = line[idx + len("categories:"):].strip()
+                    
+            if not is_safe and not category:
+                if "unsafe" in analysis.lower():
+                    # fallback extraction
+                    category = "未知敏感内容"
+                    
+            return {"safe": is_safe, "category": category}
+        except Exception as e:
+            return {"safe": True, "category": ""}
     
     url = settings.model_api_url
     headers = {
@@ -340,7 +400,7 @@ async def _call_qwen_image_analysis(b64_img: str) -> str:
         "Authorization": f"Bearer {settings.model_api_key}"
     }
     payload = {
-        "model": "WasuAI/Qwen3.6-27B-Abliterated",
+        "model": "WasuAI/Wenlv-Max",
         "messages": [
             {
                 "role": "user",
@@ -374,7 +434,7 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
         if text:
             guard = await _call_llm_guard(text)
             if not guard.get("safe", True):
-                return {"timestamp": timestamp, "category": guard.get("category", "")}
+                return {"timestamp": timestamp, "category": guard.get("category", ""), "text": text}
         return None
         
     if is_video:
@@ -447,7 +507,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
         if text:
             text_guard = await _call_llm_guard(text)
             
-        return timestamp, visual_result, visual_desc, text_guard
+        return timestamp, visual_result, visual_desc, text_guard, text
 
     if is_video:
         frames_processed, face_results = await run_in_inference_thread(
@@ -467,7 +527,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             tasks = [_analyze_frame(ts, b64) for ts, b64 in frames_data]
             frame_results = await asyncio.gather(*tasks)
             
-            for timestamp, visual_result, visual_desc, text_guard in frame_results:
+            for timestamp, visual_result, visual_desc, text_guard, frame_text in frame_results:
                 for label_score in visual_result:
                     if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
                         nsfw_visual_results.append({
@@ -479,7 +539,8 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                 if text_guard and not text_guard.get("safe", True):
                     unsafe_text_frames.append({
                         "timestamp": timestamp,
-                        "category": text_guard.get("category", "")
+                        "category": text_guard.get("category", ""),
+                        "text": frame_text
                     })
         finally:
             if video_path.exists():
@@ -495,7 +556,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             )
             face_search_results = await _verify_candidates(engine, search_res)
 
-        _, visual_result, visual_desc, text_guard = await _analyze_frame(None, b64_img)
+        _, visual_result, visual_desc, text_guard, frame_text = await _analyze_frame(None, b64_img)
         for label_score in visual_result:
             if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
                 nsfw_visual_results.append({
@@ -507,12 +568,12 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
         if text_guard and not text_guard.get("safe", True):
             unsafe_text_frames.append({
                 "type": "image",
-                "category": text_guard.get("category", "")
+                "category": text_guard.get("category", ""),
+                "text": frame_text
             })
 
     return {
         "face_search_results": face_search_results,
-        "is_nsfw": len(nsfw_visual_results) > 0,
         "visual_analysis": nsfw_visual_results,
         "unsafe_text_frames": unsafe_text_frames
     }
@@ -538,7 +599,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
         if text:
             text_guard = await _call_llm_guard(text)
             
-        return timestamp, visual_result, visual_desc, text_guard
+        return timestamp, visual_result, visual_desc, text_guard, text
         
     if is_video:
         video_path = Path(f"/tmp/nsfw_video_{os.urandom(8).hex()}.mp4")
@@ -551,7 +612,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
             tasks = [_analyze_frame(ts, b64) for ts, b64 in frames_data]
             frame_results = await asyncio.gather(*tasks)
             
-            for timestamp, visual_result, visual_desc, text_guard in frame_results:
+            for timestamp, visual_result, visual_desc, text_guard, frame_text in frame_results:
                 for label_score in visual_result:
                     if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
                         nsfw_visual_results.append({
@@ -563,7 +624,8 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
                 if text_guard and not text_guard.get("safe", True):
                     unsafe_text_frames.append({
                         "timestamp": timestamp,
-                        "category": text_guard.get("category", "")
+                        "category": text_guard.get("category", ""),
+                        "text": frame_text
                     })
         finally:
             if video_path.exists():
@@ -572,7 +634,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
         img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
         b64_img = base64.b64encode(img_bytes).decode('utf-8')
         
-        _, visual_result, visual_desc, text_guard = await _analyze_frame(None, b64_img)
+        _, visual_result, visual_desc, text_guard, frame_text = await _analyze_frame(None, b64_img)
         for label_score in visual_result:
             if label_score["label"] == "nsfw" and label_score["score"] > 0.5:
                 nsfw_visual_results.append({
@@ -584,11 +646,11 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
         if text_guard and not text_guard.get("safe", True):
             unsafe_text_frames.append({
                 "type": "image",
-                "category": text_guard.get("category", "")
+                "category": text_guard.get("category", ""),
+                "text": frame_text
             })
 
     return {
-        "is_nsfw": len(nsfw_visual_results) > 0,
         "visual_analysis": nsfw_visual_results,
         "unsafe_text_frames": unsafe_text_frames
     }
