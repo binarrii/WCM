@@ -9,6 +9,15 @@ services:
       - "5000:5000"
     environment:
       - DB_URI=postgresql://deepface_user:deepface_pass@pgvector:5432/deepface
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     depends_on:
       - pgvector
 

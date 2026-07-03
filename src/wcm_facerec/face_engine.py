@@ -110,7 +110,7 @@ class FaceEngine:
                     "enforce_detection": False,
                     "align": True
                 },
-                timeout=15.0
+                timeout=60.0
             )
             resp.raise_for_status()
             data = resp.json()
@@ -182,7 +182,7 @@ class FaceEngine:
                     "enforce_detection": False,
                     "align": True
                 },
-                timeout=15.0
+                timeout=60.0
             )
             resp.raise_for_status()
             data = resp.json()
@@ -216,7 +216,7 @@ class FaceEngine:
                         "enforce_detection": False,
                         "align": True
                     },
-                    timeout=15.0
+                    timeout=60.0
                 ) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
@@ -249,7 +249,7 @@ class FaceEngine:
                     "enforce_detection": False,
                     "align": True
                 },
-                timeout=15.0
+                timeout=60.0
             )
             resp.raise_for_status()
             data = resp.json()
