@@ -664,20 +664,20 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                         await asyncio.sleep(0)
                         
                 cap.release()
-                await queue.put(None)
                 
             async def consumer():
                 while True:
                     item = await queue.get()
-                    if item is None:
-                        await queue.put(None)
+                    try:
+                        frame, b64_img, current_frame_time = item
+                        res = await _process_single_frame(frame, b64_img, current_frame_time)
+                        frame_results.append(res)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        print(f"Error processing frame: {e}")
+                    finally:
                         queue.task_done()
-                        break
-                    
-                    frame, b64_img, current_frame_time = item
-                    res = await _process_single_frame(frame, b64_img, current_frame_time)
-                    frame_results.append(res)
-                    queue.task_done()
 
             NUM_CONSUMERS = 5
             consumers = [asyncio.create_task(consumer()) for _ in range(NUM_CONSUMERS)]
