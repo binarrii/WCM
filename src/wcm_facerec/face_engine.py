@@ -623,8 +623,8 @@ class FaceEngine:
                 resp = await client.post(
                     f"{self.api_url}/verify",
                     json={
-                        "img1_path": img1_b64,
-                        "img2_path": img2_b64,
+                        "img1": img1_b64,
+                        "img2": img2_b64,
                         "model_name": self.model_name,
                         "distance_metric": self.distance_metric,
                         "detector_backend": "retinaface",
