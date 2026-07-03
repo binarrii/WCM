@@ -577,7 +577,7 @@ async def _async_face_task(engine, frame, top_k, threshold, current_frame_time):
             frame_area = frame.shape[0] * frame.shape[1]
             if conf < 0.5 or area < MIN_FACE_PIXELS or area > frame_area * 0.8:
                 continue
-            await asyncio.to_thread(_search_face_in_image, engine, face_img, None, top_k, threshold, all_results, current_frame_time, embedding)
+            await _search_face_in_image(engine, face_img, None, top_k, threshold, all_results, current_frame_time, embedding)
         return all_results
     except Exception:
         return []
