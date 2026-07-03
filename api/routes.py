@@ -14,7 +14,6 @@ from wcm_facerec import __version__
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
 from .utils import (
-    run_in_inference_thread,
     _download_url_safe,
     VIDEO_EXTENSIONS
 )
@@ -90,13 +89,13 @@ async def detect_faces(request: Request):
         if isinstance(img_source, bytes):
             nparr = np.frombuffer(img_source, np.uint8)
             img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-            faces = await run_in_inference_thread(engine.detect_faces, img_array)
+            faces = await engine.detect_faces_async(img_array)
         elif isinstance(img_source, (str, Path)):
             # Local file - decode to numpy array so OpenCV fallback works
             img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR_BGR)
-            faces = await run_in_inference_thread(engine.detect_faces, img_array)
+            faces = await engine.detect_faces_async(img_array)
         else:
-            faces = await run_in_inference_thread(engine.detect_faces, img_source)
+            faces = await engine.detect_faces_async(img_source)
 
         results = []
         for i, face in enumerate(faces):
@@ -155,8 +154,7 @@ async def register_face(request: Request):
         try:
             file_url = form.get("url") if "file" in form else None
             category = form.get("category") or None
-            record = await run_in_inference_thread(
-                engine.register_from_image,
+            record = await engine.register_from_image_async(
                 name=name,
                 img_source=img_source,
                 file_url=file_url,
@@ -198,8 +196,7 @@ async def search_faces(request: Request):
 
         if is_video:
             sample_interval = float(data.get("sample_interval", 1.0))
-            frames, results = await run_in_inference_thread(
-                _search_video_frames,
+            frames, results = await _search_video_frames(
                 engine, url, name, max(min(top_k, 10), 1),
                 max(min(threshold, 1.0), 0.0), sample_interval
             )
@@ -282,8 +279,8 @@ async def websocket_search(websocket: WebSocket):
 
             try:
                 if is_video:
-                    frames, results = await run_in_inference_thread(
-                        _search_video_frames, engine, url, name, top_k, threshold, sample_interval
+                    frames, results = await _search_video_frames(
+                        engine, url, name, top_k, threshold, sample_interval
                     )
                     verified_results = await _verify_candidates(engine, results)
                     await websocket.send_json({
@@ -295,7 +292,7 @@ async def websocket_search(websocket: WebSocket):
                     })
                 else:
                     img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-                    face_result = await run_in_inference_thread(_detect_and_crop_face_from_bytes, engine, img_bytes)
+                    face_result = await _detect_and_crop_face_from_bytes(engine, img_bytes)
                     if face_result is None:
                         await websocket.send_json({
                             "status": "completed",

@@ -104,12 +104,12 @@ async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
     """Download image, detect face, crop and return face embedding (in-memory)."""
     try:
         img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024, timeout=30.0)
-        return _detect_and_crop_face_from_bytes(engine, img_bytes)
+        return await _detect_and_crop_face_from_bytes(engine, img_bytes)
     except Exception:
         return None
 
 
-def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> dict | None:
+async def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> dict | None:
     """Detect face from image bytes, crop and return face embedding (in-memory).
 
     Returns dict with 'embedding' and 'confidence' if face found, None otherwise.
@@ -134,7 +134,7 @@ def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> di
         if face_img is None or confidence < 0.6:
             return None
 
-        embedding = engine.generate_embedding(face_img)
+        embedding = await engine.generate_embedding_async(face_img)
         return {
             "embedding": embedding,
             "confidence": confidence,
@@ -144,7 +144,7 @@ def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> di
         return None
 
 
-def _search_video_frames(
+async def _search_video_frames(
     engine: FaceEngine,
     url: str,
     name: str | None,
@@ -204,7 +204,7 @@ def _search_video_frames(
                         # # --- END DEBUG ---
 
                         embedding = face_data.get("embedding")
-                        _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time, embedding)
+                        await _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time, embedding)
                 except Exception:
                     pass  # Skip frames that fail detection
 
@@ -229,7 +229,7 @@ def _search_video_frames(
             video_path.unlink()
 
 
-def _search_face_in_image(
+async def _search_face_in_image(
     engine,
     face_img,
     name: str | None,
@@ -242,7 +242,7 @@ def _search_face_in_image(
     """Search a single face from a frame (in-memory, no temp files)."""
     try:
         if embedding is None:
-            embedding = engine.generate_embedding(face_img)
+            embedding = await engine.generate_embedding_async(face_img)
         results = engine.search(
             embedding=embedding,
             name=name,

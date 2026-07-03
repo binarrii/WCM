@@ -513,7 +513,7 @@ class FaceEngine:
         session.close()
         return record
 
-    def register_from_image(
+    async def register_from_image_async(
         self,
         name: str,
         img_source: Union[str, Path, bytes],
@@ -563,7 +563,7 @@ class FaceEngine:
             raise ValueError("Failed to decode image")
 
         # Detect faces from numpy array
-        faces = self.detect_faces(img_array)
+        faces = await self.detect_faces_async(img_array)
         if not faces:
             raise ValueError(f"No face detected in image")
 
@@ -581,7 +581,7 @@ class FaceEngine:
         confidence = sorted_faces[0].get("confidence")
 
         # Generate embedding from cropped face (numpy array)
-        embedding = self.generate_embedding(best_face)
+        embedding = await self.generate_embedding_async(best_face)
 
         # Encode face to bytes and save to disk
         face_uint8 = best_face
