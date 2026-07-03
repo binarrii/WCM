@@ -645,7 +645,15 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                     if frame_idx % int(max(fps * sample_interval, 1)) == 0:
                         msec = cap.get(cv2.CAP_PROP_POS_MSEC)
                         current_frame_time = msec / 1000.0 if msec >= 0 else frame_idx / fps
-                        _, buffer = cv2.imencode('.jpg', frame)
+                        # Downsample frame for VLM to reduce payload size and processing time
+                        h, w = frame.shape[:2]
+                        if max(h, w) > 720:
+                            scale = 720 / max(h, w)
+                            small_frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                        else:
+                            small_frame = frame
+                            
+                        _, buffer = cv2.imencode('.jpg', small_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                         b64_img = base64.b64encode(buffer).decode('utf-8')
                         await queue.put((frame, b64_img, current_frame_time))
                     frame_idx += 1

@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  deepface-api:
+    image: serengil/deepface:latest
+    container_name: deepface-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_URI=postgresql://deepface_user:deepface_pass@pgvector:5432/deepface
+    depends_on:
+      - pgvector
+
+  pgvector:
+    image: pgvector/pgvector:pg15
+    container_name: deepface-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: deepface
+      POSTGRES_USER: deepface_user
+      POSTGRES_PASSWORD: deepface_pass
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./pgvector-init:/docker-entrypoint-initdb.d
+
+volumes:
+  postgres_data:
