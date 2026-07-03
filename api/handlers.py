@@ -646,9 +646,10 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                         msec = cap.get(cv2.CAP_PROP_POS_MSEC)
                         current_frame_time = msec / 1000.0 if msec >= 0 else frame_idx / fps
                         # Downsample frame for VLM to reduce payload size and processing time
+                        # Keep max dimension at 1280 to preserve OCR readability while saving bandwidth
                         h, w = frame.shape[:2]
-                        if max(h, w) > 720:
-                            scale = 720 / max(h, w)
+                        if max(h, w) > 1280:
+                            scale = 1280 / max(h, w)
                             small_frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
                         else:
                             small_frame = frame
@@ -690,8 +691,19 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                 video_path.unlink()
     else:
         img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-        b64_img = base64.b64encode(img_bytes).decode('utf-8')
         frame = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+        
+        # Downsample single image for VLM
+        h, w = frame.shape[:2]
+        if max(h, w) > 1280:
+            scale = 1280 / max(h, w)
+            small_frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
+        else:
+            small_frame = frame
+            
+        _, buffer = cv2.imencode('.jpg', small_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        b64_img = base64.b64encode(buffer).decode('utf-8')
+        
         res = await _process_single_frame(frame, b64_img, 0.0)
         frame_results = [res]
 
