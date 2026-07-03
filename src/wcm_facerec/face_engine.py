@@ -203,11 +203,11 @@ class FaceEngine:
         Returns:
             Face embedding as numpy array
         """
-        import aiohttp
+        import httpx
         img_b64 = self._prepare_image(img_source)
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
                     f"{self.api_url}/represent",
                     json={
                         "img": img_b64,
@@ -215,18 +215,87 @@ class FaceEngine:
                         "detector_backend": "retinaface",
                         "enforce_detection": False,
                         "align": True
-                    },
-                    timeout=60.0
-                ) as resp:
-                    resp.raise_for_status()
-                    data = await resp.json()
-                    embedding_array = np.array(data["results"][0]["embedding"])
+                    }
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                embedding_array = np.array(data["results"][0]["embedding"])
                     if self.distance_metric == "euclidean_l2":
                         embedding_array = _l2_normalize_embedding(embedding_array)
                     return embedding_array
         except Exception as e:
             print(f"DeepFace API Error (generate_embedding_async): {e}")
             raise
+
+    async def detect_faces_async(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
+        """Detect faces in an image asynchronously.
+
+        Args:
+            img_source: Path to image file, URL, or numpy array
+
+        Returns:
+            List of detected face dictionaries with 'face', 'confidence', 'facial_area', 'embedding'
+        """
+        import httpx
+        img_b64 = self._prepare_image(img_source)
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.api_url}/represent",
+                    json={
+                        "img": img_b64,
+                        "model_name": self.model_name,
+                        "detector_backend": "retinaface",
+                        "enforce_detection": False,
+                        "align": True
+                    }
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                results = data.get("results", [])
+            
+            # Load original image to crop faces manually since API only returns coordinates
+            if isinstance(img_source, np.ndarray):
+                img_array = img_source
+            else:
+                img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR)
+
+            faces = []
+            for res in results:
+                fa = res.get("facial_area", {})
+                w = fa.get("w", 0) or 0
+                h = fa.get("h", 0) or 0
+                x = fa.get("x", 0) or 0
+                y = fa.get("y", 0) or 0
+                
+                # Filter: short side (min of w/h) must be >= 80 pixels
+                if min(w, h) < 80:
+                    continue
+                    
+                face_crop = img_array[max(0, y):y+h, max(0, x):x+w]
+                if face_crop.size == 0:
+                    continue
+                
+                faces.append({
+                    "face": face_crop,
+                    "confidence": res.get("face_confidence", 1.0),
+                    "facial_area": fa,
+                    "area": w * h,
+                    "embedding": np.array(res["embedding"]) if "embedding" in res else None
+                })
+            
+            # Sort by area descending, keep top 3
+            faces = sorted(faces, key=lambda f: f["area"], reverse=True)[:3]
+            
+            # normalize embeddings
+            for f in faces:
+                if f["embedding"] is not None and self.distance_metric == "euclidean_l2":
+                    f["embedding"] = _l2_normalize_embedding(f["embedding"])
+                    
+            return faces
+        except Exception as e:
+            print(f"DeepFace API Error (detect_faces_async): {e}")
+            return []
 
     def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
         """Detect faces in an image.
@@ -531,8 +600,8 @@ class FaceEngine:
             confidence=confidence,
         )
 
-    def verify_faces(self, img1: Union[str, Path, np.ndarray], img2: Union[str, Path, np.ndarray]) -> bool:
-        """Verify if two faces are the same using DeepFace.verify.
+    async def verify_faces_async(self, img1: Union[str, Path, np.ndarray], img2: Union[str, Path, np.ndarray]) -> bool:
+        """Verify if two faces are the same using the DeepFace API asynchronously.
 
         Applies a tighter distance threshold than DeepFace's built-in one
         (``settings.verify_distance_threshold``) to reject borderline
@@ -545,21 +614,33 @@ class FaceEngine:
         Returns:
             True if verified, False otherwise.
         """
+        import httpx
+        img1_b64 = self._prepare_image(img1)
+        img2_b64 = self._prepare_image(img2)
+        
         try:
-            result = DeepFace.verify(
-                img1_path=img1 if isinstance(img1, np.ndarray) else str(img1),
-                img2_path=img2 if isinstance(img2, np.ndarray) else str(img2),
-                model_name=self.model_name,
-                distance_metric=self.distance_metric,
-                detector_backend="retinaface",
-                enforce_detection=False,
-                align=True,
-            )
-            distance = result.get("distance")
-            if distance is None:
-                return False
-            return float(distance) <= settings.verify_distance_threshold
-        except Exception:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.api_url}/verify",
+                    json={
+                        "img1_path": img1_b64,
+                        "img2_path": img2_b64,
+                        "model_name": self.model_name,
+                        "distance_metric": self.distance_metric,
+                        "detector_backend": "retinaface",
+                        "enforce_detection": False,
+                        "align": True
+                    }
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                    
+                    distance = data.get("distance")
+                    if distance is None:
+                        return False
+                    return float(distance) <= settings.verify_distance_threshold
+        except Exception as e:
+            print(f"DeepFace API Error (verify_faces_async): {e}")
             return False
 
 

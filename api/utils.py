@@ -5,8 +5,6 @@ import httpx
 import cv2
 import base64
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 
 from wcm_facerec.config import settings
 from wcm_facerec import __version__
@@ -14,15 +12,7 @@ from wcm_facerec import __version__
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
 MIN_FACE_PIXELS = 64 * 64
 
-# Dedicated single-thread pool for CUDA/DeepFace inference
-inference_executor = ThreadPoolExecutor(max_workers=1)
 
-async def run_in_inference_thread(func, *args, **kwargs):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        inference_executor,
-        partial(func, *args, **kwargs)
-    )
 
 
 async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:

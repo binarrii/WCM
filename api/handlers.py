@@ -16,7 +16,6 @@ from PIL import Image
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 from .utils import (
-    run_in_inference_thread, 
     _download_url_safe, 
     _download_video_safe_sync, 
     _extract_video_frames_for_ocr,
@@ -62,11 +61,11 @@ async def _verify_candidates(engine: FaceEngine, candidates: list[dict], default
         # faces. verify_faces still uses retinaface+align, which is well-behaved on
         # cropped faces (it skips re-detection and treats them as-is). Without this
         # step, passing a full DB image to verify produces garbage embeddings.
-        db_face = await run_in_inference_thread(_crop_largest_face, engine, db_img)
+        db_face = await _crop_largest_face(engine, db_img)
         if db_face is None:
             continue
 
-        verified = await run_in_inference_thread(engine.verify_faces, source_img, db_face)
+        verified = await engine.verify_faces_async(source_img, db_face)
         if verified:
             cand["verified"] = True
             verified_results.append(cand)
@@ -74,7 +73,7 @@ async def _verify_candidates(engine: FaceEngine, candidates: list[dict], default
     return verified_results
 
 
-def _crop_largest_face(engine: FaceEngine, img: np.ndarray) -> np.ndarray | None:
+async def _crop_largest_face(engine: FaceEngine, img: np.ndarray) -> np.ndarray | None:
     """Detect faces in ``img`` and return the largest cropped face, or None.
 
     Reuses ``FaceEngine.detect_faces`` (the same crop function used by
@@ -85,7 +84,7 @@ def _crop_largest_face(engine: FaceEngine, img: np.ndarray) -> np.ndarray | None
     uint8 [0,255]; feeding it float64 [0,1] collapses the embedding so that
     any two faces score distance ~0, making verification meaningless.
     """
-    faces = engine.detect_faces(img)
+    faces = await engine.detect_faces_async(img)
     if not faces:
         return None
 
@@ -121,7 +120,7 @@ def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> di
         if img_array is None:
             return None
 
-        faces = engine.detect_faces(img_array)
+        faces = await engine.detect_faces_async(img_array)
         if not faces:
             return None
 
@@ -181,7 +180,7 @@ def _search_video_frames(
             if frame_idx % int(fps * sample_interval) == 0:
                 current_frame_time = frame_idx / fps if fps > 0 else 0
                 try:
-                    faces = engine.detect_faces(frame)
+                    faces = await engine.detect_faces_async(frame)
                     for face_data in faces:
                         face_img = face_data.get("face")
                         if face_img is None:
@@ -564,10 +563,10 @@ def _format_timestamp(seconds: float) -> str:
     s, ms = divmod(remainder, 1000)
     return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
-def _sync_face_task(engine, frame, top_k, threshold, current_frame_time):
+async def _async_face_task(engine, frame, top_k, threshold, current_frame_time):
     all_results = []
     try:
-        faces = engine.detect_faces(frame)
+        faces = await engine.detect_faces_async(frame)
         for face_data in faces:
             face_img = face_data.get("face")
             if face_img is None: continue
@@ -578,7 +577,7 @@ def _sync_face_task(engine, frame, top_k, threshold, current_frame_time):
             frame_area = frame.shape[0] * frame.shape[1]
             if conf < 0.5 or area < MIN_FACE_PIXELS or area > frame_area * 0.8:
                 continue
-            _search_face_in_image(engine, face_img, None, top_k, threshold, all_results, current_frame_time, embedding)
+            await asyncio.to_thread(_search_face_in_image, engine, face_img, None, top_k, threshold, all_results, current_frame_time, embedding)
         return all_results
     except Exception:
         return []
@@ -591,10 +590,8 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     async def _process_single_frame(frame, b64_img, current_frame_time):
         async def face_task():
             if frame is None:
-                # for image mode, frame is already bytes, handled differently? 
-                # actually for image mode, we can just use engine.search_faces but wait, we need to detect face first.
                 return []
-            return await run_in_inference_thread(_sync_face_task, engine, frame, top_k, threshold, current_frame_time)
+            return await _async_face_task(engine, frame, top_k, threshold, current_frame_time)
             
         async def nsfw_task():
             visual_desc = await _call_nsfw_analysis(b64_img)
