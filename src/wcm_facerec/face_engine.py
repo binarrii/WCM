@@ -220,9 +220,9 @@ class FaceEngine:
                 resp.raise_for_status()
                 data = resp.json()
                 embedding_array = np.array(data["results"][0]["embedding"])
-                    if self.distance_metric == "euclidean_l2":
-                        embedding_array = _l2_normalize_embedding(embedding_array)
-                    return embedding_array
+                if self.distance_metric == "euclidean_l2":
+                    embedding_array = _l2_normalize_embedding(embedding_array)
+                return embedding_array
         except Exception as e:
             print(f"DeepFace API Error (generate_embedding_async): {e}")
             raise
@@ -634,11 +634,11 @@ class FaceEngine:
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                    
-                    distance = data.get("distance")
-                    if distance is None:
-                        return False
-                    return float(distance) <= settings.verify_distance_threshold
+                
+                distance = data.get("distance")
+                if distance is None:
+                    return False
+                return float(distance) <= settings.verify_distance_threshold
         except Exception as e:
             print(f"DeepFace API Error (verify_faces_async): {e}")
             return False
