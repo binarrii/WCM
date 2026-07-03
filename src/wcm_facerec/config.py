@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # DeepFace
     deepface_model: Literal["VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace", "DeepID", "ArcFace", "Dlib", "SFace"] = "Facenet512"
     deepface_distance_metric: Literal["cosine", "euclidean", "euclidean_l2"] = "cosine"
+    deepface_api_url: str = "http://127.0.0.1:5000"
     # Max distance for the verify step to accept a candidate as the same person.
     # Tighter than DeepFace's built-in threshold (~0.30 for Facenet512+cosine) to
     # reject borderline look-alikes.

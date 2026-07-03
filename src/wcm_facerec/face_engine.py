@@ -9,7 +9,6 @@ from typing import Optional, Union
 
 import cv2
 import numpy as np
-from deepface import DeepFace
 from sqlalchemy import text
 
 from .config import settings
@@ -80,38 +79,86 @@ class FaceEngine:
         self.model_name = model_name or settings.deepface_model
         self.distance_metric = distance_metric or settings.deepface_distance_metric
         self.embedding_dim = settings.embedding_dim
+        self.api_url = settings.deepface_api_url
+
+    def _prepare_image(self, img_source: Union[str, Path, bytes, np.ndarray]) -> str:
+        import base64
+        if isinstance(img_source, np.ndarray):
+            _, buf = cv2.imencode('.jpg', img_source)
+            b64_img = base64.b64encode(buf).decode('utf-8')
+            return f"data:image/jpeg;base64,{b64_img}"
+        elif isinstance(img_source, bytes):
+            b64_img = base64.b64encode(img_source).decode('utf-8')
+            return f"data:image/jpeg;base64,{b64_img}"
+        elif isinstance(img_source, (str, Path)):
+            with open(img_source, "rb") as f:
+                b64_img = base64.b64encode(f.read()).decode('utf-8')
+                return f"data:image/jpeg;base64,{b64_img}"
+        return ""
 
     def _extract_faces_from_video_frame(self, frame: np.ndarray, frame_idx: int, fps: float) -> list[dict]:
         """Extract faces from a video frame."""
+        import requests
+        img_b64 = self._prepare_image(frame)
         try:
-            faces = DeepFace.extract_faces(
-                img_path=frame,
-                detector_backend="retinaface",
-                enforce_detection=False,
-                align=True,
-                color_face="bgr",
+            resp = requests.post(
+                f"{self.api_url}/represent",
+                json={
+                    "img": img_b64,
+                    "model_name": self.model_name,
+                    "detector_backend": "retinaface",
+                    "enforce_detection": False,
+                    "align": True
+                },
+                timeout=15.0
             )
-            if not faces:
-                return []
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", [])
+            
+            faces = []
+            for res in results:
+                fa = res.get("facial_area", {})
+                w = fa.get("w", 0) or 0
+                h = fa.get("h", 0) or 0
+                x = fa.get("x", 0) or 0
+                y = fa.get("y", 0) or 0
+                
+                if min(w, h) < 80:
+                    continue
+                    
+                face_crop = frame[max(0, y):y+h, max(0, x):x+w]
+                if face_crop.size == 0:
+                    continue
+                    
+                faces.append({
+                    "face": face_crop,
+                    "confidence": res.get("face_confidence", 1.0),
+                    "facial_area": fa,
+                    "area": w * h,
+                    "embedding": np.array(res["embedding"]) if "embedding" in res else None
+                })
 
             # Sort by area and take top 3
-            def get_face_area(f):
-                fa = f.get("facial_area", {})
-                return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-
-            sorted_faces = sorted(faces, key=get_face_area, reverse=True)
+            sorted_faces = sorted(faces, key=lambda f: f["area"], reverse=True)
             top_faces = sorted_faces[:3]
 
-            results = []
+            results_out = []
             for i, face in enumerate(top_faces):
-                results.append({
+                emb = face["embedding"]
+                if emb is not None and self.distance_metric == "euclidean_l2":
+                    emb = _l2_normalize_embedding(emb)
+                    
+                results_out.append({
                     "face": face["face"],
                     "confidence": face["confidence"],
                     "face_id": f"frame_{frame_idx}_face_{i}",
                     "frame_time": frame_idx / fps if fps > 0 else 0,
+                    "embedding": emb,
                 })
-            return results
-        except Exception:
+            return results_out
+        except Exception as e:
+            print(f"DeepFace API Error (_extract_faces_from_video_frame): {e}")
             return []
 
     def generate_embedding(self, img_source: Union[str, Path, np.ndarray]) -> np.ndarray:
@@ -123,27 +170,29 @@ class FaceEngine:
         Returns:
             Face embedding as numpy array
         """
-        # Pass numpy array directly to avoid file I/O
-        if isinstance(img_source, np.ndarray):
-            embedding = DeepFace.represent(
-                img_path=img_source,
-                model_name=self.model_name,
-                detector_backend="skip",
-                enforce_detection=False,
-                align=False,
+        import requests
+        img_b64 = self._prepare_image(img_source)
+        try:
+            resp = requests.post(
+                f"{self.api_url}/represent",
+                json={
+                    "img": img_b64,
+                    "model_name": self.model_name,
+                    "detector_backend": "retinaface",
+                    "enforce_detection": False,
+                    "align": True
+                },
+                timeout=15.0
             )
-        else:
-            embedding = DeepFace.represent(
-                img_path=str(img_source),
-                model_name=self.model_name,
-                detector_backend="skip",
-                enforce_detection=False,
-                align=False,
-            )
-        embedding_array = np.array(embedding[0]["embedding"])
-        if self.distance_metric == "euclidean_l2":
-            embedding_array = _l2_normalize_embedding(embedding_array)
-        return embedding_array
+            resp.raise_for_status()
+            data = resp.json()
+            embedding_array = np.array(data["results"][0]["embedding"])
+            if self.distance_metric == "euclidean_l2":
+                embedding_array = _l2_normalize_embedding(embedding_array)
+            return embedding_array
+        except Exception as e:
+            print(f"DeepFace API Error (generate_embedding): {e}")
+            raise
 
     async def generate_embedding_async(self, img_source: Union[str, Path, bytes, np.ndarray]) -> np.ndarray:
         """Generate face embedding asynchronously (supports bytes and arrays).
@@ -154,28 +203,30 @@ class FaceEngine:
         Returns:
             Face embedding as numpy array
         """
-        if isinstance(img_source, np.ndarray):
-            # Already a numpy array - use directly
-            img_array = img_source
-        elif isinstance(img_source, bytes):
-            # Bytes - decode to numpy array via cv2
-            nparr = np.frombuffer(img_source, np.uint8)
-            img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-        else:
-            # Local file - load via cv2
-            img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR_BGR)
-
-        embedding = DeepFace.represent(
-            img_path=img_array,
-            model_name=self.model_name,
-            detector_backend="skip",
-            enforce_detection=False,
-            align=False,
-        )
-        embedding_array = np.array(embedding[0]["embedding"])
-        if self.distance_metric == "euclidean_l2":
-            embedding_array = _l2_normalize_embedding(embedding_array)
-        return embedding_array
+        import aiohttp
+        img_b64 = self._prepare_image(img_source)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.api_url}/represent",
+                    json={
+                        "img": img_b64,
+                        "model_name": self.model_name,
+                        "detector_backend": "retinaface",
+                        "enforce_detection": False,
+                        "align": True
+                    },
+                    timeout=15.0
+                ) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    embedding_array = np.array(data["results"][0]["embedding"])
+                    if self.distance_metric == "euclidean_l2":
+                        embedding_array = _l2_normalize_embedding(embedding_array)
+                    return embedding_array
+        except Exception as e:
+            print(f"DeepFace API Error (generate_embedding_async): {e}")
+            raise
 
     def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
         """Detect faces in an image.
@@ -186,46 +237,68 @@ class FaceEngine:
         Returns:
             List of detected face dictionaries with 'face', 'confidence', 'facial_area'
         """
+        import requests
+        img_b64 = self._prepare_image(img_source)
         try:
+            resp = requests.post(
+                f"{self.api_url}/represent",
+                json={
+                    "img": img_b64,
+                    "model_name": self.model_name,
+                    "detector_backend": "retinaface",
+                    "enforce_detection": False,
+                    "align": True
+                },
+                timeout=15.0
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", [])
+            
+            # Load original image to crop faces manually since API only returns coordinates
             if isinstance(img_source, np.ndarray):
-                faces = DeepFace.extract_faces(
-                    img_path=img_source,
-                    detector_backend="retinaface",
-                    enforce_detection=False,
-                    align=True,
-                    color_face="bgr",
-                )
+                img_array = img_source
             else:
-                faces = DeepFace.extract_faces(
-                    img_path=str(img_source),
-                    detector_backend="retinaface",
-                    enforce_detection=False,
-                    align=True,
-                    color_face="bgr",
-                )
+                img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR)
 
-            # Sort by area descending, keep top 3
-            def get_face_area(f):
-                fa = f.get("facial_area", {})
-                return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-
-            # Filter: only keep faces with all 5 landmark points present
-            def is_complete(f):
-                fa = f.get("facial_area", {})
-                landmarks = ["left_eye", "right_eye", "nose", "mouth_left", "mouth_right"]
-                return all(fa.get(lm) is not None for lm in landmarks)
-
-            # Filter: short side (min of w/h) must be >= 80 pixels
-            def has_min_side(f):
-                fa = f.get("facial_area", {})
+            faces = []
+            for res in results:
+                fa = res.get("facial_area", {})
                 w = fa.get("w", 0) or 0
                 h = fa.get("h", 0) or 0
-                return min(w, h) >= 80
-
-            complete_faces = [f for f in faces if is_complete(f) and has_min_side(f)]
-            faces = sorted(complete_faces, key=get_face_area, reverse=True)[:3]
+                x = fa.get("x", 0) or 0
+                y = fa.get("y", 0) or 0
+                
+                # Filter: short side (min of w/h) must be >= 80 pixels
+                if min(w, h) < 80:
+                    continue
+                    
+                # The API doesn't return detailed landmarks by default in its represent response,
+                # so we skip the 'is_complete' landmark check.
+                
+                face_crop = img_array[max(0, y):y+h, max(0, x):x+w]
+                if face_crop.size == 0:
+                    continue
+                
+                faces.append({
+                    "face": face_crop,
+                    "confidence": res.get("face_confidence", 1.0),
+                    "facial_area": fa,
+                    "area": w * h,
+                    "embedding": np.array(res["embedding"]) if "embedding" in res else None
+                })
+            
+            # Sort by area descending, keep top 3
+            faces = sorted(faces, key=lambda f: f["area"], reverse=True)[:3]
+            
+            # normalize embeddings
+            for f in faces:
+                if f["embedding"] is not None and self.distance_metric == "euclidean_l2":
+                    f["embedding"] = _l2_normalize_embedding(f["embedding"])
+                    
             return faces
-        except Exception:
+        except Exception as e:
+            print(f"DeepFace API Error (detect_faces): {e}")
             return []
 
     def search(

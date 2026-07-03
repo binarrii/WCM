@@ -204,7 +204,8 @@ def _search_video_frames(
                         # print(f"[DEBUG FACE] frame={frame_idx} time={current_frame_time:.2f}s conf={conf:.2f} area={area} saved={_debug_fname}")
                         # # --- END DEBUG ---
 
-                        _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time)
+                        embedding = face_data.get("embedding")
+                        _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time, embedding)
                 except Exception:
                     pass  # Skip frames that fail detection
 
@@ -230,17 +231,19 @@ def _search_video_frames(
 
 
 def _search_face_in_image(
-    engine: FaceEngine,
+    engine,
     face_img,
     name: str | None,
     top_k: int,
     threshold: float,
     all_results: list,
     frame_time: float | None = None,
+    embedding=None,
 ):
     """Search a single face from a frame (in-memory, no temp files)."""
     try:
-        embedding = engine.generate_embedding(face_img)
+        if embedding is None:
+            embedding = engine.generate_embedding(face_img)
         results = engine.search(
             embedding=embedding,
             name=name,
@@ -571,10 +574,11 @@ def _sync_face_task(engine, frame, top_k, threshold, current_frame_time):
             fa = face_data.get("facial_area", {})
             area = (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
             conf = face_data.get("confidence") or 0
+            embedding = face_data.get("embedding")
             frame_area = frame.shape[0] * frame.shape[1]
             if conf < 0.5 or area < MIN_FACE_PIXELS or area > frame_area * 0.8:
                 continue
-            _search_face_in_image(engine, face_img, None, top_k, threshold, all_results, current_frame_time)
+            _search_face_in_image(engine, face_img, None, top_k, threshold, all_results, current_frame_time, embedding)
         return all_results
     except Exception:
         return []
