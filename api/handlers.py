@@ -618,7 +618,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             face_task(),
             nsfw_task(),
             ocr_task(),
-            flags_task()
+            # flags_task()
         )
         return face_res, nsfw_res, ocr_res, flags_res, current_frame_time
 

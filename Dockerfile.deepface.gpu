@@ -1,0 +1,13 @@
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+RUN apt-get update && apt-get install -y python3-pip python3-dev ffmpeg libsm6 libxext6 git && rm -rf /var/lib/apt/lists/*
+RUN ln -s /usr/bin/python3 /usr/bin/python || true
+
+RUN pip3 install --no-cache-dir --upgrade pip
+RUN pip3 install --no-cache-dir "numpy<2"
+
+RUN pip3 install --no-cache-dir "numpy<2" tensorflow==2.14.0 tf-keras==2.14.1 deepface[api] psycopg[binary] --ignore-installed blinker
+
+EXPOSE 5000
+ENV PYTHONUNBUFFERED=1
+CMD ["gunicorn", "--workers=1", "--timeout=3600", "--bind=0.0.0.0:5000", "deepface.api.src.app:create_app()"]
