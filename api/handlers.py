@@ -614,12 +614,13 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                 return {"category": "非法旗帜", "text": flags_desc}
             return None
 
-        face_res, nsfw_res, ocr_res, flags_res = await asyncio.gather(
+        face_res, nsfw_res, ocr_res = await asyncio.gather(
             face_task(),
             nsfw_task(),
             ocr_task(),
             # flags_task()
         )
+        flags_res = None
         return face_res, nsfw_res, ocr_res, flags_res, current_frame_time
 
     frame_results = []
