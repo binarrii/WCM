@@ -563,7 +563,7 @@ def _format_timestamp(seconds: float) -> str:
     s, ms = divmod(remainder, 1000)
     return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
-async def _async_face_task(engine, frame, top_k, threshold, current_frame_time):
+async def _face_task(engine, frame, top_k, threshold, current_frame_time):
     all_results = []
     try:
         faces = await engine.detect_faces_async(frame)
@@ -591,7 +591,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
         async def face_task():
             if frame is None:
                 return []
-            return await _async_face_task(engine, frame, top_k, threshold, current_frame_time)
+            return await _face_task(engine, frame, top_k, threshold, current_frame_time)
             
         async def nsfw_task():
             visual_desc = await _call_nsfw_analysis(b64_img)
