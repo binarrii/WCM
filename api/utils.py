@@ -10,9 +10,7 @@ from wcm_facerec.config import settings
 from wcm_facerec import __version__
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
-MIN_FACE_PIXELS = 64 * 64
-
-
+MIN_FACE_PIXELS = 32 * 32
 
 
 async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:
