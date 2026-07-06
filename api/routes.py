@@ -18,9 +18,6 @@ from .utils import (
     VIDEO_EXTENSIONS
 )
 from .handlers import (
-    _verify_candidates,
-    _detect_and_crop_face_from_bytes,
-    _detect_and_crop_face,
     _search_video_frames,
     _process_detect_sensitive,
     _process_detect_nsfw,
@@ -200,36 +197,23 @@ async def search_faces(request: Request):
                 engine, url, name, max(min(top_k, 10), 1),
                 max(min(threshold, 1.0), 0.0), sample_interval
             )
-            verified_results = await _verify_candidates(engine, results)
             return {
-                "results": verified_results,
+                "results": results,
                 "query_embedding_dim": settings.embedding_dim,
                 "frames_processed": frames,
             }
         else:
-            # Detect and crop face before generating embedding
-            face_result = await _detect_and_crop_face(engine, url)
-            if face_result is None:
-                return {
-                    "results": [],
-                    "query_embedding_dim": settings.embedding_dim,
-                    "message": "No face detected in image",
-                }
-
-            embedding = face_result["embedding"]
-
+            # Send image directly to DeepFace API via engine.search
             results = await asyncio.to_thread(
                 engine.search,
-                embedding=embedding,
+                img_source=url,
                 name=name,
                 top_k=max(min(top_k, 10), 1),
                 threshold=max(min(threshold, 1.0), 0.0),
             )
             
-            verified_results = await _verify_candidates(engine, results, face_result["face"])
-
             return {
-                "results": verified_results,
+                "results": results,
                 "query_embedding_dim": settings.embedding_dim,
             }
     except httpx.HTTPError as e:
@@ -282,40 +266,27 @@ async def websocket_search(websocket: WebSocket):
                     frames, results = await _search_video_frames(
                         engine, url, name, top_k, threshold, sample_interval
                     )
-                    verified_results = await _verify_candidates(engine, results)
                     await websocket.send_json({
                         "status": "completed",
                         "taskId": task_id,
                         "query_embedding_dim": settings.embedding_dim,
                         "frames_processed": frames,
-                        "results": verified_results,
+                        "results": results,
                     })
                 else:
                     img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-                    face_result = await _detect_and_crop_face_from_bytes(engine, img_bytes)
-                    if face_result is None:
-                        await websocket.send_json({
-                            "status": "completed",
-                            "taskId": task_id,
-                            "query_embedding_dim": settings.embedding_dim,
-                            "results": [],
-                            "message": "No face detected in image",
-                        })
-                        continue
-                    embedding = face_result["embedding"]
                     results = await asyncio.to_thread(
                         engine.search,
-                        embedding=embedding,
+                        img_source=img_bytes,
                         name=name,
                         top_k=max(min(top_k, 10), 1),
                         threshold=max(min(threshold, 1.0), 0.0),
                     )
-                    verified_results = await _verify_candidates(engine, results, face_result["face"])
                     await websocket.send_json({
                         "status": "completed",
                         "taskId": task_id,
                         "query_embedding_dim": settings.embedding_dim,
-                        "results": verified_results,
+                        "results": results,
                     })
                     continue
 

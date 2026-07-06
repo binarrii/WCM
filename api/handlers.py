@@ -25,124 +25,6 @@ from .utils import (
 
 
 
-async def _verify_candidates(engine: FaceEngine, candidates: list[dict], default_source_img: Union[bytes, np.ndarray, str] = None) -> list[dict]:
-    """Verify vector search candidates with DeepFace.verify."""
-    verified_results = []
-    for cand in candidates:
-        source_img = cand.pop("source_face", default_source_img)
-        if source_img is None:
-            continue
-
-        # source_img is a cropped face from detect_faces (float64 [0,1]); convert
-        # to uint8 [0,255] for the same reason as db_face below — see
-        # _crop_largest_face. db images are read fresh as uint8 already.
-        if isinstance(source_img, np.ndarray) and source_img.dtype != np.uint8:
-            source_img = (np.clip(source_img, 0, 1) * 255).astype(np.uint8)
-
-        file_path = cand.get("file_path")
-        file_url = cand.get("file_url")
-
-        db_img = None
-        try:
-            if file_path and os.path.exists(file_path):
-                db_img = cv2.imread(file_path, cv2.IMREAD_COLOR_BGR)
-            elif file_url:
-                img_bytes = await _download_url_safe(file_url, settings.max_file_size_mb * 1024 * 1024, timeout=10.0)
-                nparr = np.frombuffer(img_bytes, np.uint8)
-                db_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-        except Exception:
-            pass
-
-        if db_img is None:
-            # "if no file path (or url, or invalid) skip this step"
-            continue
-
-        # Pre-crop the DB image's face so verify_faces receives two already-cropped
-        # faces. verify_faces still uses retinaface+align, which is well-behaved on
-        # cropped faces (it skips re-detection and treats them as-is). Without this
-        # step, passing a full DB image to verify produces garbage embeddings.
-        db_face = await _crop_largest_face(engine, db_img)
-        if db_face is None:
-            continue
-
-        verified = await engine.verify_faces_async(source_img, db_face)
-        if verified:
-            cand["verified"] = True
-            verified_results.append(cand)
-
-    return verified_results
-
-
-async def _crop_largest_face(engine: FaceEngine, img: np.ndarray) -> np.ndarray | None:
-    """Detect faces in ``img`` and return the largest cropped face, or None.
-
-    Reuses ``FaceEngine.detect_faces`` (the same crop function used by
-    register/search) so the crop is consistent with the embedding pipeline.
-
-    The returned face is converted to uint8 [0,255]. DeepFace.extract_faces
-    yields float64 [0,1] crops, but DeepFace.verify's preprocessing assumes
-    uint8 [0,255]; feeding it float64 [0,1] collapses the embedding so that
-    any two faces score distance ~0, making verification meaningless.
-    """
-    faces = await engine.detect_faces_async(img)
-    if not faces:
-        return None
-
-    def get_face_area(f):
-        fa = f.get("facial_area", {})
-        return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-
-    face = max(faces, key=get_face_area).get("face")
-    if face is None:
-        return None
-    if face.dtype != np.uint8:
-        face = (np.clip(face, 0, 1) * 255).astype(np.uint8)
-    return face
-
-
-async def _detect_and_crop_face(engine: FaceEngine, url: str) -> dict | None:
-    """Download image, detect face, crop and return face embedding (in-memory)."""
-    try:
-        img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024, timeout=30.0)
-        return await _detect_and_crop_face_from_bytes(engine, img_bytes)
-    except Exception:
-        return None
-
-
-async def _detect_and_crop_face_from_bytes(engine: FaceEngine, img_bytes: bytes) -> dict | None:
-    """Detect face from image bytes, crop and return face embedding (in-memory).
-
-    Returns dict with 'embedding' and 'confidence' if face found, None otherwise.
-    """
-    try:
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-        if img_array is None:
-            return None
-
-        faces = await engine.detect_faces_async(img_array)
-        if not faces:
-            return None
-
-        def get_face_area(f):
-            fa = f.get("facial_area", {})
-            return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-        best_face = max(faces, key=get_face_area)
-        face_img = best_face.get("face")
-        confidence = best_face.get("confidence", 0.0)
-
-        if face_img is None or confidence < 0.6:
-            return None
-
-        embedding = await engine.generate_embedding_async(face_img)
-        return {
-            "embedding": embedding,
-            "confidence": confidence,
-            "face": face_img,
-        }
-    except Exception:
-        return None
-
 
 async def _search_video_frames(
     engine: FaceEngine,
@@ -163,7 +45,6 @@ async def _search_video_frames(
         should_unlink = True
 
     try:
-
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             raise Exception("Could not open video file")
@@ -180,33 +61,29 @@ async def _search_video_frames(
             if frame_idx % int(fps * sample_interval) == 0:
                 current_frame_time = frame_idx / fps if fps > 0 else 0
                 try:
-                    faces = await engine.detect_faces_async(frame)
-                    for face_data in faces:
-                        face_img = face_data.get("face")
-                        if face_img is None:
-                            continue
-                        # Filter out bad detections
-                        fa = face_data.get("facial_area", {})
-                        area = (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-                        conf = face_data.get("confidence") or 0
-                        frame_area = frame.shape[0] * frame.shape[1]
-                        # Skip if confidence is very low or face covers most of frame (detection failed)
-                        if conf < 0.5 or area < MIN_FACE_PIXELS or area > frame_area * 0.8:
-                            continue
-
-                        # # --- DEBUG: save cropped face to temp dir ---
-                        # import tempfile as _debug_tmp
-                        # _debug_dir = _debug_tmp.mkdtemp(prefix="debug/face_search_debug_")
-                        # _debug_fname = _debug_dir + f"/frame{frame_idx:06d}_t{current_frame_time:.2f}_conf{conf:.2f}_area{area}.png"
-                        # _debug_face = (np.clip(face_img, 0, 1) * 255).astype(np.uint8) if face_img.dtype != np.uint8 else face_img
-                        # cv2.imwrite(_debug_fname, _debug_face)
-                        # print(f"[DEBUG FACE] frame={frame_idx} time={current_frame_time:.2f}s conf={conf:.2f} area={area} saved={_debug_fname}")
-                        # # --- END DEBUG ---
-
-                        embedding = face_data.get("embedding")
-                        await _search_face_in_image(engine, face_img, name, top_k, threshold, all_results, current_frame_time, embedding)
-                except Exception:
-                    pass  # Skip frames that fail detection
+                    # Send entire frame to DeepFace /search API directly
+                    results = await asyncio.to_thread(
+                        engine.search,
+                        img_source=frame,
+                        name=name,
+                        top_k=top_k,
+                        threshold=threshold,
+                    )
+                    
+                    for r in results:
+                        r["frame_time"] = current_frame_time
+                        # Try to extract the cropped face from the bounding box if provided by DeepFace
+                        x, y, w, h = r.get("source_x"), r.get("source_y"), r.get("source_w"), r.get("source_h")
+                        if x is not None and y is not None and w is not None and h is not None:
+                            # ensure within frame bounds
+                            y1, y2 = max(0, y), min(frame.shape[0], y + h)
+                            x1, x2 = max(0, x), min(frame.shape[1], x + w)
+                            if y2 > y1 and x2 > x1:
+                                r["source_face"] = frame[y1:y2, x1:x2]
+                        all_results.append(r)
+                except Exception as e:
+                    print(f"Error searching frame: {e}")
+                    pass
 
             frame_idx += 1
 
@@ -223,38 +100,9 @@ async def _search_video_frames(
                 deduped.append(r)
 
         return frame_idx, deduped
-        # return frame_idx, deduped[:top_k]
     finally:
         if should_unlink and video_path.exists():
             video_path.unlink()
-
-
-async def _search_face_in_image(
-    engine,
-    face_img,
-    name: str | None,
-    top_k: int,
-    threshold: float,
-    all_results: list,
-    frame_time: float | None = None,
-    embedding=None,
-):
-    """Search a single face from a frame (in-memory, no temp files)."""
-    try:
-        if embedding is None:
-            embedding = await engine.generate_embedding_async(face_img)
-        results = engine.search(
-            embedding=embedding,
-            name=name,
-            top_k=top_k,
-            threshold=threshold,
-        )
-        for r in results:
-            r["frame_time"] = frame_time
-            r["source_face"] = face_img
-        all_results.extend(results)
-    except Exception:
-        pass  # Skip faces that fail embedding generation
 
 
 async def _call_ocr_api(base64_image: str) -> str:

@@ -389,78 +389,99 @@ class FaceEngine:
             List of matching face records with distance
         """
 
-        session = get_session()
-        register_vector_type(session.connection())
-
-        # pgvector distance operators:
-        # <-> = Euclidean distance
-        # <=> = Cosine distance
-        if self.distance_metric == "cosine":
-            op = "<=>"
-        elif self.distance_metric == "euclidean":
-            op = "<->"
-        else:
-            embedding = _l2_normalize_embedding(embedding)
-            op = "<->"
-
-        # Convert numpy array to pgvector format [x,y,z]
-        embedding_str = "[" + ",".join(str(x) for x in embedding.tolist()) + "]"
-
-        # Build parameterized SQL with optional name filter
-        if name:
-            sql = text(f"""
-                SELECT
-                    fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
-                    fr.person_id, fr.frame_time, fr.created_at,
-                    fr.embedding {op} :embedding AS distance,
-                    p.name as person_name, p.occupation, p."type", p.remarks
-                FROM face_records fr
-                LEFT JOIN persons p ON fr.person_id = p.id
-                WHERE fr.name = :name
-                  AND fr.embedding {op} :embedding <= :threshold
-                ORDER BY fr.embedding {op} :embedding
-                LIMIT :top_k
-            """)
-            result = session.execute(sql, {"embedding": embedding_str, "name": name, "threshold": threshold, "top_k": top_k})
-        else:
-            sql = text(f"""
-                SELECT
-                    fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
-                    fr.person_id, fr.frame_time, fr.created_at,
-                    fr.embedding {op} :embedding AS distance,
-                    p.name as person_name, p.occupation, p."type", p.remarks
-                FROM face_records fr
-                LEFT JOIN persons p ON fr.person_id = p.id
-                WHERE fr.embedding {op} :embedding <= :threshold
-                ORDER BY fr.embedding {op} :embedding
-                LIMIT :top_k
-            """)
-            result = session.execute(sql, {"embedding": embedding_str, "threshold": threshold, "top_k": top_k})
-
+        import httpx
+        img_b64 = self._prepare_image(img_source)
+        
         matches = []
-        for row in result:
-            match = {
-                "id": str(row.id),
-                "name": row.name,
-                "file_path": row.file_path,
-                "face_file_path": row.face_file_path,
-                "file_url": row.file_url,
-                "distance": float(row.distance),
-                "confidence": row.confidence,
-                "person_id": str(row.person_id) if row.person_id else None,
-                "frame_time": row.frame_time,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            }
-            if row.person_name:
-                match["person"] = {
-                    "name": row.person_name,
-                    "occupation": row.occupation,
-                    "type": row.type,
-                    "remarks": row.remarks,
-                }
-            matches.append(match)
-
-        session.close()
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.post(
+                    f"{self.api_url}/search",
+                    json={
+                        "img": img_b64,
+                        "model_name": self.model_name,
+                        "detector_backend": "retinaface",
+                        "align": True,
+                        "enforce_detection": False,
+                    }
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                
+            results = data.get("results", [])
+            if not results:
+                return []
+                
+            session = get_session()
+            
+            for face_results in results:
+                # face_results is a list of matches for one detected face
+                for match_dict in face_results:
+                    identity = match_dict.get("identity")
+                    distance = match_dict.get("distance")
+                    # skip if distance > threshold
+                    if distance is not None and distance > threshold:
+                        continue
+                        
+                    # Lookup FaceRecord metadata in wcm_face_db
+                    if not identity:
+                        continue
+                    try:
+                        record_uuid = uuid.UUID(str(identity))
+                    except ValueError:
+                        continue
+                        
+                    from sqlalchemy import text
+                    sql = text(f"""
+                        SELECT
+                            fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
+                            fr.person_id, fr.frame_time, fr.created_at,
+                            p.name as person_name, p.occupation, p."type", p.remarks
+                        FROM face_records fr
+                        LEFT JOIN persons p ON fr.person_id = p.id
+                        WHERE fr.id = :id
+                    """)
+                    row = session.execute(sql, {"id": str(record_uuid)}).fetchone()
+                    if not row:
+                        continue
+                        
+                    if name and row.name != name:
+                        continue
+                        
+                    match = {
+                        "id": str(row.id),
+                        "name": row.name,
+                        "file_path": row.file_path,
+                        "face_file_path": row.face_file_path,
+                        "file_url": row.file_url,
+                        "distance": float(distance),
+                        "confidence": row.confidence,
+                        "person_id": str(row.person_id) if row.person_id else None,
+                        "frame_time": row.frame_time,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                        # Pass bounding box back so caller can crop
+                        "source_x": match_dict.get("source_x"),
+                        "source_y": match_dict.get("source_y"),
+                        "source_w": match_dict.get("source_w"),
+                        "source_h": match_dict.get("source_h"),
+                    }
+                    if row.person_name:
+                        match["person"] = {
+                            "name": row.person_name,
+                            "occupation": row.occupation,
+                            "type": row.type,
+                            "remarks": row.remarks,
+                        }
+                    matches.append(match)
+            session.close()
+            
+            # Sort by distance and limit to top_k
+            matches.sort(key=lambda x: x["distance"])
+            matches = matches[:top_k]
+            
+        except Exception as e:
+            print(f"DeepFace API Search Error: {e}")
+            
         return matches
 
     def register_face(
@@ -540,10 +561,15 @@ class FaceEngine:
         Raises:
             ValueError: If no face is detected in the image
         """
-        # Resolve raw bytes + extension + source path
         cat = category or settings.default_category
         source_path: Optional[Path] = None
-        if isinstance(img_source, (str, Path)):
+        ext = None
+        if isinstance(img_source, str) and (img_source.startswith("http://") or img_source.startswith("https://")):
+            import httpx
+            resp = httpx.get(img_source)
+            resp.raise_for_status()
+            image_bytes = resp.content
+        elif isinstance(img_source, (str, Path)):
             source_path = Path(img_source)
             if not source_path.exists():
                 raise ValueError(f"Image file not found: {source_path}")
@@ -551,54 +577,56 @@ class FaceEngine:
             ext = source_path.suffix.lower() or None
         else:
             image_bytes = bytes(img_source)
-            ext = None
 
         # Persist to /data/wcm/<category>/<name>_<md5><ext>
         persisted_path = _persist_image(image_bytes, name, cat, ext=ext)
 
-        # Decode for face detection
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-        if img_array is None:
-            raise ValueError("Failed to decode image")
-
-        # Detect faces from numpy array
-        faces = await self.detect_faces_async(img_array)
-        if not faces:
-            raise ValueError(f"No face detected in image")
-
-        # Filter faces by minimum area and sort by area
-        def get_face_area(f):
-            fa = f.get("facial_area", {})
-            return (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-
-        valid_faces = [f for f in faces if get_face_area(f) >= MIN_FACE_PIXELS]
-        if not valid_faces:
-            raise ValueError(f"No face with area >= {MIN_FACE_PIXELS} detected in image")
-
-        sorted_faces = sorted(valid_faces, key=get_face_area, reverse=True)
-        best_face = sorted_faces[0]["face"]
-        confidence = sorted_faces[0].get("confidence")
-
-        # Generate embedding from cropped face (numpy array)
-        embedding = await self.generate_embedding_async(best_face)
-
-        # Encode face to bytes and save to disk
-        face_uint8 = best_face
-        if face_uint8.dtype != np.uint8:
-            face_uint8 = (np.clip(face_uint8, 0, 1) * 255).astype(np.uint8)
-        _, buffer = cv2.imencode(".png", face_uint8)
-        face_bytes = buffer.tobytes()
-        persisted_face_path = _persist_image(face_bytes, name + "_face", cat, ext=".png")
-
-        return self.register_face(
+        # Create FaceRecord first to get the ID
+        # Since we use DeepFace's DB for embeddings, we don't save embedding here
+        # (Assuming the DB schema allows embedding to be null, or we just pass a zero array)
+        session = get_session()
+        from wcm_facerec.database import register_vector_type
+        register_vector_type(session.connection())
+        
+        record = FaceRecord(
+            id=uuid.uuid4(),
             name=name,
-            embedding=embedding,
             file_path=persisted_path,
-            face_file_path=persisted_face_path,
             file_url=file_url,
-            confidence=confidence,
+            model=self.model_name,
+            embedding=[0.0] * self.embedding_dim, # Dummy embedding to satisfy NOT NULL if not altered
         )
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        session.close()
+
+        import httpx
+        img_b64 = self._prepare_image(image_bytes)
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.api_url}/register",
+                    json={
+                        "img": img_b64,
+                        "img_name": str(record.id),
+                        "model_name": self.model_name,
+                        "detector_backend": "retinaface",
+                        "align": True,
+                        "enforce_detection": False,
+                    }
+                )
+                resp.raise_for_status()
+        except Exception as e:
+            # Rollback record if API fails
+            session = get_session()
+            session.delete(record)
+            session.commit()
+            session.close()
+            print(f"DeepFace API Error (register_from_image_async): {e}")
+            raise ValueError(f"Failed to register face via official API: {e}")
+
+        return record
 
     async def verify_faces_async(self, img1: Union[str, Path, np.ndarray], img2: Union[str, Path, np.ndarray]) -> bool:
         """Verify if two faces are the same using the DeepFace API asynchronously.
