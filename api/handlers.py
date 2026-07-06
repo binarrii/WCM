@@ -636,7 +636,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             fps = cap.get(cv2.CAP_PROP_FPS)
             if fps <= 0: fps = 25.0
             
-            queue = asyncio.Queue(maxsize=10)
+            queue = asyncio.Queue(maxsize=16)
             
             async def producer():
                 frame_idx = 0
@@ -661,7 +661,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                         await queue.put((frame, b64_img, current_frame_time))
                     frame_idx += 1
                     
-                    if frame_idx % 15 == 0:
+                    if frame_idx % (queue.maxsize * 2) == 0:
                         await asyncio.sleep(0)
                         
                 cap.release()
@@ -680,7 +680,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                     finally:
                         queue.task_done()
 
-            NUM_CONSUMERS = 5
+            NUM_CONSUMERS = queue.maxsize // 2
             consumers = [asyncio.create_task(consumer()) for _ in range(NUM_CONSUMERS)]
             
             await producer()

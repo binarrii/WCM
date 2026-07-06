@@ -1,13 +1,21 @@
 version: '3.8'
 
 services:
+  deepface-nginx:
+    image: nginx:alpine
+    container_name: deepface-nginx
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - deepface-api
+    restart: unless-stopped
+
   deepface-api:
     build: .
     image: deepface-gpu:latest
-    container_name: deepface-api
     restart: unless-stopped
-    ports:
-      - "5000:5000"
     environment:
       - DEEPFACE_CONNECTION_DETAILS=postgresql://deepface_user:deepface_pass@pgvector:5432/deepface
       - TF_JIT_DISABLE=1
@@ -15,7 +23,14 @@ services:
       - TF_ENABLE_ONEDNN_OPTS=0
       - NVIDIA_VISIBLE_DEVICES=all
       - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps
+      - CUDA_MPS_PINNED_DEVICE_MEM_LIMIT=0.25
+    ipc: host
+    volumes:
+      - /tmp/nvidia-mps:/tmp/nvidia-mps
     deploy:
+      mode: replicated
+      replicas: 2
       resources:
         reservations:
           devices:

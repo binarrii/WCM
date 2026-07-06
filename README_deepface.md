@@ -1,28 +1,38 @@
-# DeepFace API with PGVector
+# DeepFace API with PGVector & Load Balancing
 
-This directory contains the Docker Compose configuration to deploy the official [DeepFace API](https://hub.docker.com/r/serengil/deepface) along with `pgvector` as the vector database backend.
+This directory contains the Docker Compose configuration to deploy the [DeepFace API](https://hub.docker.com/r/serengil/deepface) backed by `pgvector` as the vector database, optimized with **Nginx Load Balancing** and **NVIDIA MPS** for hardware-level GPU VRAM isolation.
+
+## Architecture Highlights
+
+- **Load Balancing (Nginx)**: Distributes incoming requests on port `5000` across 2 identical `deepface-api` container replicas to maximize concurrency.
+- **Hardware-Level GPU VRAM Limit (NVIDIA MPS)**: 
+  Each DeepFace API instance is hard-limited to 12GB of VRAM (25% of a 48GB GPU) using NVIDIA's Multi-Process Service (MPS). This prevents out-of-memory errors and allows multiple instances to share a single GPU efficiently.
+- **Vector Database**: PostgreSQL with the `pgvector` extension is used to store and query facial embeddings.
 
 ## Services Overview
 
-1. **deepface-api** (`serengil/deepface:latest`)
+1. **deepface-nginx** (`nginx:alpine`)
    - **Port**: `5000` (Mapped to `0.0.0.0:5000`)
-   - **Environment**: Connected to PostgreSQL via `DB_URI=postgresql://deepface_user:deepface_pass@pgvector:5432/deepface`
-   - **Description**: Exposes REST API endpoints for face recognition, verification, and analysis.
+   - **Description**: Reverse proxy that round-robins traffic to the backend `deepface-api` instances.
 
-2. **pgvector** (`pgvector/pgvector:pg15`)
+2. **deepface-api** (`deepface-gpu:latest`) - **(2 Replicas)**
+   - **Environment**: 
+     - `DEEPFACE_CONNECTION_DETAILS` configured for PostgreSQL.
+     - `TF_FORCE_GPU_ALLOW_GROWTH=true` 
+     - `CUDA_MPS_PINNED_DEVICE_MEM_LIMIT=0.25` (12GB VRAM cap via MPS)
+   - **IPC**: Mapped to host (`ipc: host`) to communicate with the host's NVIDIA MPS daemon.
+
+3. **pgvector** (`pgvector/pgvector:pg15`)
    - **Port**: `5434` (Mapped to host port `5434`, internal `5432`)
-   - **Credentials**:
-     - DB Name: `deepface`
-     - User: `deepface_user`
-     - Password: `deepface_pass`
-   - **Volumes**: Data is persisted in the `postgres_data` docker volume.
-   - **Initialization**: Automatically creates the `vector` extension on startup via `./pgvector-init/init.sql`.
+   - **Credentials**: `deepface_user` / `deepface_pass`
 
 ## Directory Structure
 
 ```text
 /opt/binarii/DeepFace/
 ├── docker-compose.yml       # Docker Compose configuration file
+├── Dockerfile               # Custom Dockerfile for GPU acceleration
+├── nginx.conf               # Nginx load balancer configuration
 ├── pgvector-init/           
 │   └── init.sql             # SQL script to create the pgvector extension on startup
 └── README.md                # This documentation file
@@ -32,9 +42,14 @@ This directory contains the Docker Compose configuration to deploy the official 
 
 To manage the services, navigate to `/opt/binarii/DeepFace` and run the following commands (requires `sudo`):
 
-- **Start in background:**
+- **Start NVIDIA MPS Daemon (Required after host reboot):**
   ```bash
-  sudo docker compose up -d
+  sudo nvidia-cuda-mps-control -d
+  ```
+
+- **Start/Restart Services:**
+  ```bash
+  sudo docker compose up -d --remove-orphans
   ```
 
 - **Check status:**
@@ -47,7 +62,7 @@ To manage the services, navigate to `/opt/binarii/DeepFace` and run the followin
   # All services
   sudo docker compose logs -f
 
-  # Only API logs
+  # Only API logs (will interleave logs from both replicas)
   sudo docker compose logs -f deepface-api
   ```
 
@@ -58,7 +73,7 @@ To manage the services, navigate to `/opt/binarii/DeepFace` and run the followin
 
 ## API Testing
 
-You can verify the API is running by sending a request to port 5000:
+You can verify the API is running by sending a request to port 5000. Nginx will route the request to one of the replicas:
 
 ```bash
 curl -X GET http://127.0.0.1:5000/
