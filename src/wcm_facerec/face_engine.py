@@ -372,7 +372,7 @@ class FaceEngine:
 
     def search(
         self,
-        embedding: np.ndarray,
+        img_source: Union[str, Path, bytes, np.ndarray],
         name: Optional[str] = None,
         top_k: int = 10,
         threshold: float = 0.4,
@@ -412,68 +412,82 @@ class FaceEngine:
             if not results:
                 return []
                 
-            session = get_session()
+            # 1. First pass: Collect all valid identities below threshold
+            valid_matches = []
+            valid_uuids = set()
             
             for face_results in results:
-                # face_results is a list of matches for one detected face
                 for match_dict in face_results:
                     identity = match_dict.get("identity")
                     distance = match_dict.get("distance")
-                    # skip if distance > threshold
                     if distance is not None and distance > threshold:
                         continue
-                        
-                    # Lookup FaceRecord metadata in wcm_face_db
                     if not identity:
                         continue
                     try:
                         record_uuid = uuid.UUID(str(identity))
+                        valid_uuids.add(str(record_uuid))
+                        valid_matches.append(match_dict)
                     except ValueError:
                         continue
                         
-                    from sqlalchemy import text
-                    sql = text(f"""
-                        SELECT
-                            fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
-                            fr.person_id, fr.frame_time, fr.created_at,
-                            p.name as person_name, p.occupation, p."type", p.remarks
-                        FROM face_records fr
-                        LEFT JOIN persons p ON fr.person_id = p.id
-                        WHERE fr.id = :id
-                    """)
-                    row = session.execute(sql, {"id": str(record_uuid)}).fetchone()
-                    if not row:
-                        continue
-                        
-                    if name and row.name != name:
-                        continue
-                        
-                    match = {
-                        "id": str(row.id),
-                        "name": row.name,
-                        "file_path": row.file_path,
-                        "face_file_path": row.face_file_path,
-                        "file_url": row.file_url,
-                        "distance": float(distance),
-                        "confidence": row.confidence,
-                        "person_id": str(row.person_id) if row.person_id else None,
-                        "frame_time": row.frame_time,
-                        "created_at": row.created_at.isoformat() if row.created_at else None,
-                        # Pass bounding box back so caller can crop
-                        "source_x": match_dict.get("source_x"),
-                        "source_y": match_dict.get("source_y"),
-                        "source_w": match_dict.get("source_w"),
-                        "source_h": match_dict.get("source_h"),
-                    }
-                    if row.person_name:
-                        match["person"] = {
-                            "name": row.person_name,
-                            "occupation": row.occupation,
-                            "type": row.type,
-                            "remarks": row.remarks,
-                        }
-                    matches.append(match)
+            if not valid_uuids:
+                return []
+
+            # 2. Bulk query database
+            session = get_session()
+            from sqlalchemy import text
+            # valid_uuids are strict UUID strings, so formatting them is safe from SQLi
+            in_clause = ",".join(f"'{u}'" for u in valid_uuids)
+            sql = text(f"""
+                SELECT
+                    fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
+                    fr.person_id, fr.frame_time, fr.created_at,
+                    p.name as person_name, p.occupation, p."type", p.remarks
+                FROM face_records fr
+                LEFT JOIN persons p ON fr.person_id = p.id
+                WHERE fr.id IN ({in_clause})
+            """)
+            rows = session.execute(sql).fetchall()
             session.close()
+            
+            db_records = {str(row.id): row for row in rows}
+            
+            # 3. Second pass: Construct final results
+            for match_dict in valid_matches:
+                identity = str(uuid.UUID(str(match_dict.get("identity"))))
+                row = db_records.get(identity)
+                if not row:
+                    continue
+                    
+                if name and row.name != name:
+                    continue
+                    
+                distance = match_dict.get("distance")
+                match = {
+                    "id": str(row.id),
+                    "name": row.name,
+                    "file_path": row.file_path,
+                    "face_file_path": row.face_file_path,
+                    "file_url": row.file_url,
+                    "distance": float(distance),
+                    "confidence": row.confidence,
+                    "person_id": str(row.person_id) if row.person_id else None,
+                    "frame_time": row.frame_time,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "source_x": match_dict.get("source_x"),
+                    "source_y": match_dict.get("source_y"),
+                    "source_w": match_dict.get("source_w"),
+                    "source_h": match_dict.get("source_h"),
+                }
+                if row.person_name:
+                    match["person"] = {
+                        "name": row.person_name,
+                        "occupation": row.occupation,
+                        "type": row.type,
+                        "remarks": row.remarks,
+                    }
+                matches.append(match)
             
             # Sort by distance and limit to top_k
             matches.sort(key=lambda x: x["distance"])

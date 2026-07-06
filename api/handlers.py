@@ -414,18 +414,24 @@ def _format_timestamp(seconds: float) -> str:
 async def _face_task(engine, frame, top_k, threshold, current_frame_time):
     all_results = []
     try:
-        faces = await engine.detect_faces_async(frame)
-        for face_data in faces:
-            face_img = face_data.get("face")
-            if face_img is None: continue
-            fa = face_data.get("facial_area", {})
-            area = (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
-            conf = face_data.get("confidence") or 0
-            embedding = face_data.get("embedding")
-            frame_area = frame.shape[0] * frame.shape[1]
-            if conf < 0.5 or area < MIN_FACE_PIXELS or area > frame_area * 0.8:
-                continue
-            await _search_face_in_image(engine, face_img, None, top_k, threshold, all_results, current_frame_time, embedding)
+        results = await asyncio.to_thread(
+            engine.search,
+            img_source=frame,
+            top_k=top_k,
+            threshold=threshold
+        )
+        for r in results:
+            r["timestamp"] = _format_timestamp(current_frame_time)
+            x, y, w, h = r.get("source_x"), r.get("source_y"), r.get("source_w"), r.get("source_h")
+            if x is not None and y is not None and w is not None and h is not None:
+                y1, y2 = max(0, y), min(frame.shape[0], y + h)
+                x1, x2 = max(0, x), min(frame.shape[1], x + w)
+                if y2 > y1 and x2 > x1:
+                    import cv2, base64
+                    crop = frame[y1:y2, x1:x2]
+                    _, buf = cv2.imencode('.jpg', crop)
+                    r["face_image_b64"] = base64.b64encode(buf).decode('utf-8')
+            all_results.append(r)
         return all_results
     except Exception:
         return []
