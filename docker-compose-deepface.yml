@@ -17,6 +17,7 @@ services:
     image: deepface-gpu:latest
     restart: unless-stopped
     environment:
+      - DEEPFACE_DATABASE_TYPE=pgvector
       - DEEPFACE_CONNECTION_DETAILS=postgresql://deepface_user:deepface_pass@pgvector:5432/deepface
       - TF_JIT_DISABLE=1
       - TF_XLA_FLAGS=--tf_xla_auto_jit=0
