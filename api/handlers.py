@@ -569,7 +569,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     all_face_results = []
     for face_res, _, _, _, _ in frame_results:
         all_face_results.extend(face_res)
-    verified_faces = await _verify_candidates(engine, all_face_results)
+    verified_faces = all_face_results
     
     # Group verified faces by frame time
     faces_by_time = {}
