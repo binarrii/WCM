@@ -11,7 +11,7 @@ async def main():
     
     print(f"\n--- Testing Register ---")
     try:
-        record = await engine.register_from_image_async(
+        record = await engine.register_from_image(
             name="Test User",
             img_source=test_img
         )
@@ -22,7 +22,7 @@ async def main():
         
     print(f"\n--- Testing Search ---")
     try:
-        results = engine.search(
+        results = await engine.search(
             img_source=test_img,
             top_k=5,
             threshold=0.6

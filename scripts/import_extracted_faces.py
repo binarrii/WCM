@@ -1,3 +1,4 @@
+import asyncio
 #!/usr/bin/env python3
 """Import extracted faces into the database."""
 
@@ -111,7 +112,7 @@ def import_faces_from_directory(
                 img_array = cv2.imread(str(face_file), cv2.IMREAD_COLOR_BGR)
 
                 # First detect faces - ensure there's a valid face before generating embedding
-                faces = engine.detect_faces(img_array)
+                faces = asyncio.run(engine.detect_faces(img_array))
                 if not faces:
                     print(f"  {name} ({category}): skipped (no face detected)")
                     stats[category]["skipped"] += 1
@@ -132,7 +133,7 @@ def import_faces_from_directory(
                 best_face = sorted_faces[0]["face"]
 
                 # Generate embedding from cropped face
-                embedding = engine.generate_embedding(best_face)
+                embedding = asyncio.run(engine.generate_embedding(best_face))
 
                 # Register face in database
                 session = get_session()

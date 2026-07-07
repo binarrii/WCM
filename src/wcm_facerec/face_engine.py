@@ -96,22 +96,22 @@ class FaceEngine:
                 return f"data:image/jpeg;base64,{b64_img}"
         return ""
 
-    def _extract_faces_from_video_frame(self, frame: np.ndarray, frame_idx: int, fps: float) -> list[dict]:
+    async def _extract_faces_from_video_frame(self, frame: np.ndarray, frame_idx: int, fps: float) -> list[dict]:
         """Extract faces from a video frame."""
-        import requests
+        import httpx
         img_b64 = self._prepare_image(frame)
         try:
-            resp = requests.post(
-                f"{self.api_url}/represent",
-                json={
-                    "img": img_b64,
-                    "model_name": self.model_name,
-                    "detector_backend": "retinaface",
-                    "enforce_detection": False,
-                    "align": True
-                },
-                timeout=60.0
-            )
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.api_url}/represent",
+                    json={
+                        "img": img_b64,
+                        "model_name": self.model_name,
+                        "detector_backend": "retinaface",
+                        "enforce_detection": False,
+                        "align": True
+                    }
+                )
             resp.raise_for_status()
             data = resp.json()
             results = data.get("results", [])
@@ -161,40 +161,7 @@ class FaceEngine:
             print(f"DeepFace API Error (_extract_faces_from_video_frame): {e}")
             return []
 
-    def generate_embedding(self, img_source: Union[str, Path, np.ndarray]) -> np.ndarray:
-        """Generate face embedding from image path, URL, or numpy array.
-
-        Args:
-            img_source: Path to image file, URL, or numpy array
-
-        Returns:
-            Face embedding as numpy array
-        """
-        import requests
-        img_b64 = self._prepare_image(img_source)
-        try:
-            resp = requests.post(
-                f"{self.api_url}/represent",
-                json={
-                    "img": img_b64,
-                    "model_name": self.model_name,
-                    "detector_backend": "retinaface",
-                    "enforce_detection": False,
-                    "align": True
-                },
-                timeout=60.0
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            embedding_array = np.array(data["results"][0]["embedding"])
-            if self.distance_metric == "euclidean_l2":
-                embedding_array = _l2_normalize_embedding(embedding_array)
-            return embedding_array
-        except Exception as e:
-            print(f"DeepFace API Error (generate_embedding): {e}")
-            raise
-
-    async def generate_embedding_async(self, img_source: Union[str, Path, bytes, np.ndarray]) -> np.ndarray:
+    async def generate_embedding(self, img_source: Union[str, Path, bytes, np.ndarray]) -> np.ndarray:
         """Generate face embedding asynchronously (supports bytes and arrays).
 
         Args:
@@ -224,10 +191,10 @@ class FaceEngine:
                     embedding_array = _l2_normalize_embedding(embedding_array)
                 return embedding_array
         except Exception as e:
-            print(f"DeepFace API Error (generate_embedding_async): {e}")
+            print(f"DeepFace API Error (generate_embedding): {e}")
             raise
 
-    async def detect_faces_async(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
+    async def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
         """Detect faces in an image asynchronously.
 
         Args:
@@ -294,108 +261,24 @@ class FaceEngine:
                     
             return faces
         except Exception as e:
-            print(f"DeepFace API Error (detect_faces_async): {e}")
-            return []
-
-    def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
-        """Detect faces in an image.
-
-        Args:
-            img_source: Path to image file, URL, or numpy array
-
-        Returns:
-            List of detected face dictionaries with 'face', 'confidence', 'facial_area'
-        """
-        import requests
-        img_b64 = self._prepare_image(img_source)
-        try:
-            resp = requests.post(
-                f"{self.api_url}/represent",
-                json={
-                    "img": img_b64,
-                    "model_name": self.model_name,
-                    "detector_backend": "retinaface",
-                    "enforce_detection": False,
-                    "align": True
-                },
-                timeout=60.0
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            results = data.get("results", [])
-            
-            # Load original image to crop faces manually since API only returns coordinates
-            if isinstance(img_source, np.ndarray):
-                img_array = img_source
-            else:
-                img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR)
-
-            faces = []
-            for res in results:
-                fa = res.get("facial_area", {})
-                w = fa.get("w", 0) or 0
-                h = fa.get("h", 0) or 0
-                x = fa.get("x", 0) or 0
-                y = fa.get("y", 0) or 0
-                
-                # Filter: short side (min of w/h) must be >= 80 pixels
-                if min(w, h) < 80:
-                    continue
-                    
-                # The API doesn't return detailed landmarks by default in its represent response,
-                # so we skip the 'is_complete' landmark check.
-                
-                face_crop = img_array[max(0, y):y+h, max(0, x):x+w]
-                if face_crop.size == 0:
-                    continue
-                
-                faces.append({
-                    "face": face_crop,
-                    "confidence": res.get("face_confidence", 1.0),
-                    "facial_area": fa,
-                    "area": w * h,
-                    "embedding": np.array(res["embedding"]) if "embedding" in res else None
-                })
-            
-            # Sort by area descending, keep top 3
-            faces = sorted(faces, key=lambda f: f["area"], reverse=True)[:3]
-            
-            # normalize embeddings
-            for f in faces:
-                if f["embedding"] is not None and self.distance_metric == "euclidean_l2":
-                    f["embedding"] = _l2_normalize_embedding(f["embedding"])
-                    
-            return faces
-        except Exception as e:
             print(f"DeepFace API Error (detect_faces): {e}")
             return []
 
-    def search(
+
+    async def search(
         self,
         img_source: Union[str, Path, bytes, np.ndarray],
         name: Optional[str] = None,
         top_k: int = 10,
         threshold: float = 0.4,
     ) -> list[dict]:
-        """Search for similar faces using pgvector's SQL operators.
-
-        Args:
-            embedding: Query embedding
-            name: Optional name filter
-            top_k: Number of results to return
-            threshold: Similarity threshold (lower = more similar)
-
-        Returns:
-            List of matching face records with distance
-        """
-
         import httpx
-        img_b64 = self._prepare_image(img_source)
+        img_b64 = await __import__('asyncio').to_thread(self._prepare_image, img_source)
         
         matches = []
         try:
-            with httpx.Client(timeout=60.0) as client:
-                resp = client.post(
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
                     f"{self.api_url}/search",
                     json={
                         "img": img_b64,
@@ -412,7 +295,6 @@ class FaceEngine:
             if not results:
                 return []
                 
-            # 1. First pass: Collect all valid identities below threshold
             valid_matches = []
             valid_uuids = set()
             
@@ -434,26 +316,25 @@ class FaceEngine:
             if not valid_uuids:
                 return []
 
-            # 2. Bulk query database
-            session = get_session()
-            from sqlalchemy import text
-            # valid_uuids are strict UUID strings, so formatting them is safe from SQLi
-            in_clause = ",".join(f"'{u}'" for u in valid_uuids)
-            sql = text(f"""
-                SELECT
-                    fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
-                    fr.person_id, fr.frame_time, fr.created_at,
-                    p.name as person_name, p.occupation, p."type", p.remarks
-                FROM face_records fr
-                LEFT JOIN persons p ON fr.person_id = p.id
-                WHERE fr.id IN ({in_clause})
-            """)
-            rows = session.execute(sql).fetchall()
-            session.close()
+            def db_query():
+                session = get_session()
+                from sqlalchemy import text
+                in_clause = ",".join(f"'{u}'" for u in valid_uuids)
+                sql = text(f"""
+                    SELECT
+                        fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
+                        fr.person_id, fr.frame_time, fr.created_at,
+                        p.name as person_name, p.occupation, p."type", p.remarks
+                    FROM face_records fr
+                    LEFT JOIN persons p ON fr.person_id = p.id
+                    WHERE fr.id IN ({in_clause})
+                """)
+                rows = session.execute(sql).fetchall()
+                session.close()
+                return {str(row.id): row for row in rows}
+
+            db_records = await __import__('asyncio').to_thread(db_query)
             
-            db_records = {str(row.id): row for row in rows}
-            
-            # 3. Second pass: Construct final results
             for match_dict in valid_matches:
                 identity = str(uuid.UUID(str(match_dict.get("identity"))))
                 row = db_records.get(identity)
@@ -479,24 +360,20 @@ class FaceEngine:
                     "source_y": match_dict.get("source_y"),
                     "source_w": match_dict.get("source_w"),
                     "source_h": match_dict.get("source_h"),
+                    "person_name": row.person_name,
+                    "occupation": row.occupation,
+                    "type": getattr(row, "type", getattr(row, "type_", None)),
+                    "remarks": row.remarks,
                 }
-                if row.person_name:
-                    match["person"] = {
-                        "name": row.person_name,
-                        "occupation": row.occupation,
-                        "type": row.type,
-                        "remarks": row.remarks,
-                    }
                 matches.append(match)
-            
-            # Sort by distance and limit to top_k
+                
             matches.sort(key=lambda x: x["distance"])
-            matches = matches[:top_k]
+            return matches[:top_k]
             
         except Exception as e:
-            print(f"DeepFace API Search Error: {e}")
-            
-        return matches
+            print(f"DeepFace API Error (search): {e}")
+            return []
+
 
     def register_face(
         self,
@@ -548,7 +425,7 @@ class FaceEngine:
         session.close()
         return record
 
-    async def register_from_image_async(
+    async def register_from_image(
         self,
         name: str,
         img_source: Union[str, Path, bytes],
@@ -637,12 +514,12 @@ class FaceEngine:
             session.delete(record)
             session.commit()
             session.close()
-            print(f"DeepFace API Error (register_from_image_async): {e}")
+            print(f"DeepFace API Error (register_from_image): {e}")
             raise ValueError(f"Failed to register face via official API: {e}")
 
         return record
 
-    async def verify_faces_async(self, img1: Union[str, Path, np.ndarray], img2: Union[str, Path, np.ndarray]) -> bool:
+    async def verify_faces(self, img1: Union[str, Path, np.ndarray], img2: Union[str, Path, np.ndarray]) -> bool:
         """Verify if two faces are the same using the DeepFace API asynchronously.
 
         Applies a tighter distance threshold than DeepFace's built-in one
@@ -682,7 +559,7 @@ class FaceEngine:
                     return False
                 return float(distance) <= settings.verify_distance_threshold
         except Exception as e:
-            print(f"DeepFace API Error (verify_faces_async): {e}")
+            print(f"DeepFace API Error (verify_faces): {e}")
             return False
 
 

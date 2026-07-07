@@ -414,8 +414,7 @@ def _format_timestamp(seconds: float) -> str:
 async def _face_task(engine, frame, top_k, threshold, current_frame_time):
     all_results = []
     try:
-        results = await asyncio.to_thread(
-            engine.search,
+        results = await engine.search(
             img_source=frame,
             top_k=top_k,
             threshold=threshold

@@ -86,13 +86,13 @@ async def detect_faces(request: Request):
         if isinstance(img_source, bytes):
             nparr = np.frombuffer(img_source, np.uint8)
             img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR_BGR)
-            faces = await engine.detect_faces_async(img_array)
+            faces = await engine.detect_faces(img_array)
         elif isinstance(img_source, (str, Path)):
             # Local file - decode to numpy array so OpenCV fallback works
             img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR_BGR)
-            faces = await engine.detect_faces_async(img_array)
+            faces = await engine.detect_faces(img_array)
         else:
-            faces = await engine.detect_faces_async(img_source)
+            faces = await engine.detect_faces(img_source)
 
         results = []
         for i, face in enumerate(faces):
@@ -151,7 +151,7 @@ async def register_face(request: Request):
         try:
             file_url = form.get("url") if "file" in form else None
             category = form.get("category") or None
-            record = await engine.register_from_image_async(
+            record = await engine.register_from_image(
                 name=name,
                 img_source=img_source,
                 file_url=file_url,
@@ -203,10 +203,9 @@ async def search_faces(request: Request):
                 "frames_processed": frames,
             }
         else:
-            # Send image directly to DeepFace API via engine.search
-            results = await asyncio.to_thread(
-                engine.search,
-                img_source=url,
+            img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
+            results = await engine.search(
+                img_source=img_bytes,
                 name=name,
                 top_k=max(min(top_k, 10), 1),
                 threshold=max(min(threshold, 1.0), 0.0),
@@ -275,8 +274,7 @@ async def websocket_search(websocket: WebSocket):
                     })
                 else:
                     img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-                    results = await asyncio.to_thread(
-                        engine.search,
+                    results = await engine.search(
                         img_source=img_bytes,
                         name=name,
                         top_k=max(min(top_k, 10), 1),

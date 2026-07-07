@@ -1,3 +1,4 @@
+import asyncio
 #!/usr/bin/env python3
 """Extract faces from images in a directory, organized by category."""
 
@@ -87,7 +88,7 @@ def extract_faces_from_directory(
                 return 0
 
             # Detect faces using numpy array
-            faces = engine.detect_faces(img)
+            faces = asyncio.run(engine.detect_faces(img))
 
             face_count = 0
             for i, face_data in enumerate(faces):

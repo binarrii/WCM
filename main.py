@@ -1,3 +1,4 @@
+import asyncio
 #!/usr/bin/env python3
 """CLI tool for face detection and visualization.
 
@@ -93,7 +94,7 @@ def main():
 
     engine = FaceEngine()
     print("Detecting faces...")
-    faces = engine.detect_faces(img)
+    faces = asyncio.run(engine.detect_faces(img))
     print(f"Detected {len(faces)} face(s)\n")
 
     MIN_FACE_PIXELS = 64 * 64
