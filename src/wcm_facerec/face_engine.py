@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, Union
 
+import httpx
 import cv2
 import numpy as np
 from sqlalchemy import text
@@ -98,7 +99,7 @@ class FaceEngine:
 
     async def _extract_faces_from_video_frame(self, frame: np.ndarray, frame_idx: int, fps: float) -> list[dict]:
         """Extract faces from a video frame."""
-        import httpx
+        
         img_b64 = self._prepare_image(frame)
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -170,7 +171,7 @@ class FaceEngine:
         Returns:
             Face embedding as numpy array
         """
-        import httpx
+        
         img_b64 = self._prepare_image(img_source)
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -203,7 +204,7 @@ class FaceEngine:
         Returns:
             List of detected face dictionaries with 'face', 'confidence', 'facial_area', 'embedding'
         """
-        import httpx
+        
         img_b64 = self._prepare_image(img_source)
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -272,7 +273,7 @@ class FaceEngine:
         top_k: int = 10,
         threshold: float = 0.4,
     ) -> list[dict]:
-        import httpx
+        
         img_b64 = await __import__('asyncio').to_thread(self._prepare_image, img_source)
         
         matches = []
@@ -456,7 +457,7 @@ class FaceEngine:
         source_path: Optional[Path] = None
         ext = None
         if isinstance(img_source, str) and (img_source.startswith("http://") or img_source.startswith("https://")):
-            import httpx
+            
             resp = httpx.get(img_source)
             resp.raise_for_status()
             image_bytes = resp.content
@@ -492,7 +493,7 @@ class FaceEngine:
         session.refresh(record)
         session.close()
 
-        import httpx
+        
         img_b64 = self._prepare_image(image_bytes)
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -533,7 +534,7 @@ class FaceEngine:
         Returns:
             True if verified, False otherwise.
         """
-        import httpx
+        
         img1_b64 = self._prepare_image(img1)
         img2_b64 = self._prepare_image(img2)
         
