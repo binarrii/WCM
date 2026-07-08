@@ -157,7 +157,8 @@ def main():
         with open(_img, "rb") as f:
             image_bytes = f.read()
             image_array = np.frombuffer(image_bytes, np.uint8)
-        face_objs = DeepFace.extract_faces(image_array, detector_backend = "retinaface", align = True)
+            img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        face_objs = DeepFace.extract_faces(img, detector_backend = "retinaface", align = True)
         if len(face_objs) > 1:
             continue
     
