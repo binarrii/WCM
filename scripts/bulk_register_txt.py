@@ -151,10 +151,12 @@ def main():
     print(f"Starting registration with {MAX_WORKERS} threads...")
     start_time = time.time()
 
-    for img in image_files:
-        if not os.path.exists(img):
+    for _img in image_files:
+        if not os.path.exists(_img):
             continue
-        face_objs = DeepFace.extract_faces(img_path = img, detector_backend = "retinaface", align = True)
+        with open(_img, "rb") as f:
+            image_bytes = f.read()
+        face_objs = DeepFace.extract_faces(image_bytes, detector_backend = "retinaface", align = True)
         if len(face_objs) > 1:
             continue
     
