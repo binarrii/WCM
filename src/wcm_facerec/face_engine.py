@@ -47,7 +47,7 @@ def _persist_image(
     safe_name = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name) or "unknown"
     content_hash = hashlib.md5(image_bytes).hexdigest()
     final_ext = ext or _detect_image_ext(image_bytes)
-    target_dir = Path(settings.data_root) / category
+    target_dir = Path("/tmp/wcm") / category
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / f"{safe_name}_{content_hash}{final_ext}"
     if not target_path.exists():
