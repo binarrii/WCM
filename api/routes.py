@@ -3,7 +3,6 @@ import uuid
 import json
 from pathlib import Path
 from typing import Union
-import asyncio
 import httpx
 import cv2
 import numpy as np

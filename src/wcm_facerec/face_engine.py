@@ -16,7 +16,7 @@ from .config import settings
 from .database import FaceRecord, get_session, register_vector_type
 
 # Minimum face area in pixels (128x128)
-MIN_FACE_PIXELS = 128 * 128
+MIN_FACE_PIXELS = 32 * 32
 
 
 def _detect_image_ext(image_bytes: bytes) -> str:
@@ -108,7 +108,7 @@ class FaceEngine:
                     json={
                         "img": img_b64,
                         "model_name": self.model_name,
-                        "detector_backend": "retinaface",
+                        "detector_backend": "fastmtcnn",
                         "enforce_detection": False,
                         "align": True
                     }
@@ -180,7 +180,7 @@ class FaceEngine:
                     json={
                         "img": img_b64,
                         "model_name": self.model_name,
-                        "detector_backend": "retinaface",
+                        "detector_backend": "fastmtcnn",
                         "enforce_detection": False,
                         "align": True
                     }
@@ -213,7 +213,7 @@ class FaceEngine:
                     json={
                         "img": img_b64,
                         "model_name": self.model_name,
-                        "detector_backend": "retinaface",
+                        "detector_backend": "fastmtcnn",
                         "enforce_detection": False,
                         "align": True
                     }
@@ -284,9 +284,10 @@ class FaceEngine:
                     json={
                         "img": img_b64,
                         "model_name": self.model_name,
-                        "detector_backend": "retinaface",
+                        "detector_backend": "fastmtcnn",
                         "align": True,
                         "enforce_detection": False,
+                        "k": top_k * 2,
                     }
                 )
                 resp.raise_for_status()
@@ -301,17 +302,19 @@ class FaceEngine:
             
             for face_results in results:
                 for match_dict in face_results:
-                    identity = match_dict.get("identity")
+                    identity = match_dict.get("img_name")
                     distance = match_dict.get("distance")
                     if distance is not None and distance > threshold:
                         continue
                     if not identity:
+                        print("No identity")
                         continue
                     try:
                         record_uuid = uuid.UUID(str(identity))
                         valid_uuids.add(str(record_uuid))
                         valid_matches.append(match_dict)
                     except ValueError:
+                        print(f"UUID error {identity}")
                         continue
                         
             if not valid_uuids:
@@ -337,7 +340,7 @@ class FaceEngine:
             db_records = await __import__('asyncio').to_thread(db_query)
             
             for match_dict in valid_matches:
-                identity = str(uuid.UUID(str(match_dict.get("identity"))))
+                identity = str(uuid.UUID(str(match_dict.get("img_name"))))
                 row = db_records.get(identity)
                 if not row:
                     continue
@@ -503,7 +506,7 @@ class FaceEngine:
                         "img": img_b64,
                         "img_name": str(record.id),
                         "model_name": self.model_name,
-                        "detector_backend": "retinaface",
+                        "detector_backend": "fastmtcnn",
                         "align": True,
                         "enforce_detection": False,
                     }
@@ -547,7 +550,7 @@ class FaceEngine:
                         "img2": img2_b64,
                         "model_name": self.model_name,
                         "distance_metric": self.distance_metric,
-                        "detector_backend": "retinaface",
+                        "detector_backend": "fastmtcnn",
                         "enforce_detection": False,
                         "align": True
                     }

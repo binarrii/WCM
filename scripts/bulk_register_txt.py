@@ -1,4 +1,9 @@
 import os
+
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+# os.environ["KERAS_BACKEND"] = "tensorflow"
+
 import sys
 import time
 import asyncio
@@ -7,7 +12,7 @@ import uuid
 import cv2
 import numpy as np
 
-import threading
+
 import httpx
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,9 +24,9 @@ from wcm_facerec.database import Person
 from wcm_facerec.face_engine import _persist_image
 
 
-PERSONS_TXT = "/home/aigc/wcm/ten.txt"
-MAX_WORKERS = 4
-face_detect_lock = threading.Lock()
+PERSONS_TXT = "/home/aigc/wcm/persons.txt"
+MAX_WORKERS = 10
+
 
 CATEGORY_MAP = {
     "人物": {"type": "普通人物", "remarks": ""},
@@ -155,22 +160,29 @@ def main():
     skipped_count = 0
     error_count = 0
 
-    for _img in image_files:
-        if not os.path.exists(_img):
-            print(f"Not exist: {_img}")
-            skipped_count += 1
-            continue
-        with open(_img, "rb") as f:
-            image_bytes = f.read()
-            image_array = np.frombuffer(image_bytes, np.uint8)
-            img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-        face_objs = DeepFace.extract_faces(img, detector_backend = "retinaface", align = True)
-        if len(face_objs) > 1:
-            continue
-        
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_img = {executor.submit(process_image, img_path): img_path for img_path in image_files}
-        
+        for _img in image_files:
+            if not os.path.exists(_img):
+                skipped_count += 1
+                print(f"Not exist: {_img}")
+                continue
+            try:
+                with open(_img, "rb") as f:
+                    image_bytes = f.read()
+                    image_array = np.frombuffer(image_bytes, np.uint8)
+                    img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                face_objs = DeepFace.extract_faces(
+                    img, detector_backend="fastmtcnn", enforce_detection=False
+                )
+                if len(face_objs) > 1:
+                    skipped_count += 1
+                    print(f"More than one face: {_img}")
+                    continue
+            except:
+                error_count += 1
+
+            future_to_img = {executor.submit(process_image, _img): _img}
+
         for future in as_completed(future_to_img):
             result = future.result()
             print(result)

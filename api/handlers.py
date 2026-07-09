@@ -2,16 +2,11 @@
 
 import asyncio
 import base64
-import json
 import os
-import uuid
-import io
 from pathlib import Path
-from typing import Union
 import cv2
 import httpx
 import numpy as np
-from PIL import Image
 
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
@@ -19,11 +14,8 @@ from .utils import (
     _download_url_safe, 
     _download_video_safe_sync, 
     _extract_video_frames_for_ocr,
-    VIDEO_EXTENSIONS,
-    MIN_FACE_PIXELS
+    VIDEO_EXTENSIONS
 )
-
-
 
 
 async def _search_video_frames(
@@ -426,7 +418,6 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
                 y1, y2 = max(0, y), min(frame.shape[0], y + h)
                 x1, x2 = max(0, x), min(frame.shape[1], x + w)
                 if y2 > y1 and x2 > x1:
-                    import cv2, base64
                     crop = frame[y1:y2, x1:x2]
                     _, buf = cv2.imencode('.jpg', crop)
                     r["face_image_b64"] = base64.b64encode(buf).decode('utf-8')
