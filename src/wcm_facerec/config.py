@@ -1,6 +1,5 @@
 """Configuration management for face recognition service."""
 
-from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,7 +37,7 @@ class Settings(BaseSettings):
     # Max distance for the verify step to accept a candidate as the same person.
     # Tighter than DeepFace's built-in threshold (~0.30 for Facenet512+cosine) to
     # reject borderline look-alikes.
-    verify_distance_threshold: float = 0.10
+    verify_distance_threshold: float = 0.3
 
     # API
     api_host: str = "0.0.0.0"
@@ -46,7 +45,6 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 100
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = "sk-o8EGlzXqMQi8Ba06E2B1BcF8217c45B6Bb70Ce5765B70c42"
-    nsfw_api_url: str = "http://127.0.0.1:3005/predict"
 
     # Filesystem
     data_root: str = "/data/wcm"
