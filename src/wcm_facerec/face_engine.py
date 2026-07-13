@@ -369,6 +369,7 @@ class FaceEngine:
                     "source_h": match_dict.get("source_h"),
                     "person_name": row.person_name,
                     "occupation": row.occupation,
+                    "category": (row.file_path or "").split('/', 4)[3],
                     "type": getattr(row, "type", getattr(row, "type_", None)),
                     "remarks": row.remarks,
                 }

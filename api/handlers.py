@@ -413,6 +413,7 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
         )
         for r in results:
             r["timestamp"] = _format_timestamp(current_frame_time)
+            r["frame_time"] = current_frame_time
             x, y, w, h = r.get("source_x"), r.get("source_y"), r.get("source_w"), r.get("source_h")
             if x is not None and y is not None and w is not None and h is not None:
                 y1, y2 = max(0, y), min(frame.shape[0], y + h)
@@ -564,7 +565,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     # Group verified faces by frame time
     faces_by_time = {}
     for vf in verified_faces:
-        t = vf.get("frame_time", 0.0)
+        t = vf.get("frame_time", 0.0) or vf.get("timestamp", 0.0)
         if t not in faces_by_time:
             faces_by_time[t] = []
         faces_by_time[t].append(vf)
@@ -572,12 +573,12 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
     for _, nsfw_res, ocr_res, flags_res, ts in frame_results:
         formatted_ts = _format_timestamp(ts)
         
-        face_list = faces_by_time.get(ts, [])
+        face_list = faces_by_time.get(ts, []) or faces_by_time.get(formatted_ts, [])
         for fr in face_list:
             flattened_results.append({
                 "timestamp": formatted_ts,
                 "category": "敏感人物",
-                "description": fr.get("name", "未知人物")
+                "description": fr.get("name", "敏感人物")
             })
         
         if nsfw_res:
