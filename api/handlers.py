@@ -317,7 +317,7 @@ async def _call_nsfw_analysis(b64_img: str) -> str:
                 analysis = analysis.split("</think>")[-1].strip()
             return analysis
         except Exception as e:
-            return "无法获取描述"
+            return f"无法获取描述: {e}"
 
 async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
@@ -577,7 +577,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
         for fr in face_list:
             flattened_results.append({
                 "timestamp": formatted_ts,
-                "category": "敏感人物",
+                "category": fr.get("category", None) or "敏感人物",
                 "description": fr.get("name", "敏感人物")
             })
         

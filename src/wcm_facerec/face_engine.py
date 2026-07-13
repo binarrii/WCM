@@ -274,7 +274,7 @@ class FaceEngine:
         img_source: Union[str, Path, bytes, np.ndarray],
         name: Optional[str] = None,
         top_k: int = 10,
-        threshold: float = 0.4,
+        threshold: float = 0.3,
     ) -> list[dict]:
         
         img_b64 = await asyncio.to_thread(self._prepare_image, img_source)
@@ -341,6 +341,13 @@ class FaceEngine:
                 return {str(row.id): row for row in rows}
 
             db_records = await asyncio.to_thread(db_query)
+
+            def category(row):
+                if hasattr(row, "category") and row.category:
+                    return row.category
+                if hasattr(row, "file_path") and row.file_path:
+                    path_arr = row.file_path.split('/', 4)
+                return path_arr[3] if len(path_arr) > 3 else None
             
             for match_dict in valid_matches:
                 identity = str(uuid.UUID(str(match_dict.get("img_name"))))
@@ -369,7 +376,7 @@ class FaceEngine:
                     "source_h": match_dict.get("source_h"),
                     "person_name": row.person_name,
                     "occupation": row.occupation,
-                    "category": (row.file_path or "").split('/', 4)[3],
+                    "category": category(row),
                     "type": getattr(row, "type", getattr(row, "type_", None)),
                     "remarks": row.remarks,
                 }
