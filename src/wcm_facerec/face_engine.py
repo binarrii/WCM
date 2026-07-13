@@ -304,21 +304,22 @@ class FaceEngine:
             valid_uuids = set()
             
             for face_results in results:
-                match_dict = face_results[0]
-                identity = match_dict.get("img_name")
-                distance = match_dict.get("distance")
-                if distance is not None and distance > threshold:
-                    continue
-                if not identity:
-                    print("No identity")
-                    continue
-                try:
-                    record_uuid = uuid.UUID(str(identity))
-                    valid_uuids.add(str(record_uuid))
-                    valid_matches.append(match_dict)
-                except ValueError:
-                    print(f"UUID error {identity}")
-                    continue
+                if len(face_results) > 0:
+                    match_dict = face_results[0]
+                    identity = match_dict.get("img_name")
+                    distance = match_dict.get("distance")
+                    if distance is not None and distance > threshold:
+                        continue
+                    if not identity:
+                        print("No identity")
+                        continue
+                    try:
+                        record_uuid = uuid.UUID(str(identity))
+                        valid_uuids.add(str(record_uuid))
+                        valid_matches.append(match_dict)
+                    except ValueError:
+                        print(f"UUID error {identity}")
+                        continue
                         
             if not valid_uuids:
                 return []
