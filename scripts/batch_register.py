@@ -321,9 +321,6 @@ def process_directory(
                     id=uuid.uuid4(),
                     name=name,
                     file_path=str(image_path),
-                    embedding=embedding.tolist(),  # List for VECTOR type
-                    model=config.deepface_model,
-                    confidence=confidence,
                     person_id=person.id if person else None,
                 )
                 session.add(record)

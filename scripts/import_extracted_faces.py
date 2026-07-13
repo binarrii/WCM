@@ -142,12 +142,6 @@ def import_faces_from_directory(
                         id=uuid.uuid4(),
                         name=name,
                         file_path=str(face_file),
-                        file_url=None,
-                        embedding=embedding.tolist(),
-                        model=settings.deepface_model,
-                        confidence=None,
-                        face_id=f"face_{hashlib.md5(str(face_file).encode()).hexdigest()[:8]}",
-                        frame_time=None,
                         person_id=person.id,
                     )
                     session.add(record)

@@ -16,7 +16,7 @@ import numpy as np
 from sqlalchemy import text
 
 from .config import settings
-from .database import FaceRecord, get_session, register_vector_type
+from .database import FaceRecord, get_session
 
 
 # Minimum face area in pixels (128x128)
@@ -332,8 +332,8 @@ class FaceEngine:
                 in_clause = ",".join(f"'{u}'" for u in valid_uuids)
                 sql = text(f"""
                     SELECT
-                        fr.id, fr.name, fr.file_path, fr.face_file_path, fr.file_url, fr.confidence,
-                        fr.person_id, fr.frame_time, fr.created_at,
+                        fr.id, fr.name, fr.file_path,
+                        fr.person_id, fr.created_at,
                         p.name as person_name, p.occupation, p."type", p.remarks
                     FROM face_records fr
                     LEFT JOIN persons p ON fr.person_id = p.id
@@ -366,12 +366,8 @@ class FaceEngine:
                     "id": str(row.id),
                     "name": row.name,
                     "file_path": row.file_path,
-                    "face_file_path": row.face_file_path,
-                    "file_url": row.file_url,
                     "distance": float(distance),
-                    "confidence": row.confidence,
                     "person_id": str(row.person_id) if row.person_id else None,
-                    "frame_time": row.frame_time,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "source_x": match_dict.get("source_x"),
                     "source_y": match_dict.get("source_y"),
@@ -396,46 +392,23 @@ class FaceEngine:
     def register_face(
         self,
         name: str,
-        embedding: np.ndarray,
         file_path: Optional[str] = None,
-        face_file_path: Optional[str] = None,
-        file_url: Optional[str] = None,
-        confidence: Optional[float] = None,
-        face_id: Optional[str] = None,
-        frame_time: Optional[float] = None,
     ) -> FaceRecord:
         """Register a face in the database.
 
         Args:
             name: Person name
-            embedding: Face embedding vector
             file_path: Optional local file path
-            face_file_path: Optional cropped face file path
-            file_url: Optional URL
-            confidence: Detection confidence
-            face_id: For video: which face identifier
-            frame_time: For video: timestamp in seconds
 
         Returns:
             Created FaceRecord
         """
         session = get_session()
-        register_vector_type(session.connection())
-
-        if self.distance_metric == "euclidean_l2":
-            embedding = _l2_normalize_embedding(embedding)
 
         record = FaceRecord(
             id=uuid.uuid4(),
             name=name,
-            embedding=embedding.tolist(),
             file_path=file_path,
-            face_file_path=face_file_path,
-            file_url=file_url,
-            model=self.model_name,
-            confidence=confidence,
-            face_id=face_id,
-            frame_time=frame_time,
         )
         session.add(record)
         session.commit()
@@ -447,7 +420,6 @@ class FaceEngine:
         self,
         name: str,
         img_source: Union[str, Path, bytes],
-        file_url: Optional[str] = None,
         category: Optional[str] = None,
     ) -> FaceRecord:
         """Register a face from an image file or bytes.
@@ -460,7 +432,6 @@ class FaceEngine:
         Args:
             name: Person name
             img_source: Path to local image file, or image bytes
-            file_url: Optional URL (stored but not used for loading)
             category: Subdirectory under data_root. Defaults to
                 ``settings.default_category``.
 
@@ -490,19 +461,12 @@ class FaceEngine:
         # Persist to /data/wcm/<category>/<name>_<md5><ext>
         persisted_path = _persist_image(image_bytes, name, cat, ext=ext)
 
-        # Create FaceRecord first to get the ID
-        # Since we use DeepFace's DB for embeddings, we don't save embedding here
-        # (Assuming the DB schema allows embedding to be null, or we just pass a zero array)
         session = get_session()
-        register_vector_type(session.connection())
         
         record = FaceRecord(
             id=uuid.uuid4(),
             name=name,
             file_path=persisted_path,
-            file_url=file_url,
-            model=self.model_name,
-            embedding=[0.0] * self.embedding_dim, # Dummy embedding to satisfy NOT NULL if not altered
         )
         session.add(record)
         session.commit()

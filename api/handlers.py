@@ -296,6 +296,7 @@ async def _call_nsfw_analysis(b64_img: str) -> str:
     payload = {
         "model": "WasuAI/JoyCaption",
         "messages": [
+            {"role": "system", "content": "你是一个贴心的看图配文小助手"},
             {
                 "role": "user",
                 "content": [
@@ -304,7 +305,7 @@ async def _call_nsfw_analysis(b64_img: str) -> str:
                 ]
             }
         ],
-        "max_tokens": 64,
+        "max_tokens": 256,
         "temperature": 0.3,
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
