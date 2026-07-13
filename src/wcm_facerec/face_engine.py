@@ -307,8 +307,11 @@ class FaceEngine:
                 if len(face_results) > 0:
                     match_dict = face_results[0]
                     identity = match_dict.get("img_name")
+                    confidence = match_dict.get("confidence")
                     distance = match_dict.get("distance")
                     if distance is not None and distance > threshold:
+                        continue
+                    if confidence is not None and confidence < 0.7:
                         continue
                     if not identity:
                         print("No identity")
