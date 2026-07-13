@@ -503,7 +503,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
                             
                         _, buffer = cv2.imencode('.jpg', small_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
                         b64_img = base64.b64encode(buffer).decode('utf-8')
-                        await queue.put((frame, b64_img, current_frame_time))
+                        await queue.put((small_frame, b64_img, current_frame_time))
                     frame_idx += 1
                     
                     if frame_idx % (queue.maxsize * 2) == 0:
