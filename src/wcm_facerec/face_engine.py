@@ -383,7 +383,7 @@ class FaceEngine:
                 matches.append(match)
                 
             matches.sort(key=lambda x: x["distance"])
-            return matches
+            return matches[:top_k]
             
         except Exception as e:
             print(f"DeepFace API Error (search): {e}")
