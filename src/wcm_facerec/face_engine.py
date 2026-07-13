@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import uuid
 from pathlib import Path
@@ -10,10 +12,12 @@ from typing import Optional, Union
 import httpx
 import cv2
 import numpy as np
+
 from sqlalchemy import text
 
 from .config import settings
 from .database import FaceRecord, get_session, register_vector_type
+
 
 # Minimum face area in pixels (128x128)
 MIN_FACE_PIXELS = 32 * 32
@@ -83,7 +87,6 @@ class FaceEngine:
         self.api_url = settings.deepface_api_url
 
     def _prepare_image(self, img_source: Union[str, Path, bytes, np.ndarray]) -> str:
-        import base64
         if isinstance(img_source, np.ndarray):
             _, buf = cv2.imencode('.jpg', img_source)
             b64_img = base64.b64encode(buf).decode('utf-8')
@@ -274,7 +277,7 @@ class FaceEngine:
         threshold: float = 0.4,
     ) -> list[dict]:
         
-        img_b64 = await __import__('asyncio').to_thread(self._prepare_image, img_source)
+        img_b64 = await asyncio.to_thread(self._prepare_image, img_source)
         
         matches = []
         try:
@@ -287,7 +290,7 @@ class FaceEngine:
                         "detector_backend": "fastmtcnn",
                         "align": True,
                         "enforce_detection": False,
-                        "k": top_k * 2,
+                        "k": top_k,
                     }
                 )
                 resp.raise_for_status()
@@ -301,28 +304,27 @@ class FaceEngine:
             valid_uuids = set()
             
             for face_results in results:
-                for match_dict in face_results:
-                    identity = match_dict.get("img_name")
-                    distance = match_dict.get("distance")
-                    if distance is not None and distance > threshold:
-                        continue
-                    if not identity:
-                        print("No identity")
-                        continue
-                    try:
-                        record_uuid = uuid.UUID(str(identity))
-                        valid_uuids.add(str(record_uuid))
-                        valid_matches.append(match_dict)
-                    except ValueError:
-                        print(f"UUID error {identity}")
-                        continue
+                match_dict = face_results[0]
+                identity = match_dict.get("img_name")
+                distance = match_dict.get("distance")
+                if distance is not None and distance > threshold:
+                    continue
+                if not identity:
+                    print("No identity")
+                    continue
+                try:
+                    record_uuid = uuid.UUID(str(identity))
+                    valid_uuids.add(str(record_uuid))
+                    valid_matches.append(match_dict)
+                except ValueError:
+                    print(f"UUID error {identity}")
+                    continue
                         
             if not valid_uuids:
                 return []
 
             def db_query():
                 session = get_session()
-                from sqlalchemy import text
                 in_clause = ",".join(f"'{u}'" for u in valid_uuids)
                 sql = text(f"""
                     SELECT
@@ -337,7 +339,7 @@ class FaceEngine:
                 session.close()
                 return {str(row.id): row for row in rows}
 
-            db_records = await __import__('asyncio').to_thread(db_query)
+            db_records = await asyncio.to_thread(db_query)
             
             for match_dict in valid_matches:
                 identity = str(uuid.UUID(str(match_dict.get("img_name"))))
@@ -372,7 +374,7 @@ class FaceEngine:
                 matches.append(match)
                 
             matches.sort(key=lambda x: x["distance"])
-            return matches[:top_k]
+            return matches
             
         except Exception as e:
             print(f"DeepFace API Error (search): {e}")
@@ -480,7 +482,6 @@ class FaceEngine:
         # Since we use DeepFace's DB for embeddings, we don't save embedding here
         # (Assuming the DB schema allows embedding to be null, or we just pass a zero array)
         session = get_session()
-        from wcm_facerec.database import register_vector_type
         register_vector_type(session.connection())
         
         record = FaceRecord(
