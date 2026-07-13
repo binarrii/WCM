@@ -296,11 +296,11 @@ async def _call_nsfw_analysis(b64_img: str) -> str:
     payload = {
         "model": "WasuAI/JoyCaption",
         "messages": [
-            {"role": "system", "content": "你是一位专业的看图配文助手，擅长使用中文精细描述图片内容！"},
+            {"role": "system", "content": "You are a helpful image captioner."},
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "请详细描述这张图片的内容。如果画面中包含裸露、色情暗示、血腥暴力等违规内容，请务必详细描述出来。如果不包含违规内容，请客观描述画面内容即可。"},
+                    {"type": "text", "text": "Write a long descriptive caption for this image in Chinese, formal tone."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
                 ]
             }
