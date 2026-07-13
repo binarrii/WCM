@@ -296,7 +296,7 @@ async def _call_nsfw_analysis(b64_img: str) -> str:
     payload = {
         "model": "WasuAI/JoyCaption",
         "messages": [
-            {"role": "system", "content": "你是一个贴心的看图配文小助手"},
+            {"role": "system", "content": "你是一位专业的看图配文助手，擅长使用中文精细描述图片内容！"},
             {
                 "role": "user",
                 "content": [
