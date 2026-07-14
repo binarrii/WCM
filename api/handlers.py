@@ -480,7 +480,7 @@ async def _process_analyze_media(url: str, sample_interval: float, top_k: int, t
             
             cap = cv2.VideoCapture(str(video_path))
             fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps <= 0: fps = 25.0
+            if fps <= 0: fps = 25.0  # noqa: E701
             
             queue = asyncio.Queue(maxsize=16)
             
