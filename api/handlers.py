@@ -192,7 +192,7 @@ async def _call_llm_guard(text: str) -> dict:
                     
             # Map known English categories to Chinese
             guard_category_map = {
-                "Violent": "暴力",
+                "Violent": "血腥/暴力",
                 "Non-violent Illegal Acts": "非暴力违法行为",
                 "Sexual Content or Sexual Acts": "色情或性行为",
                 "Personally Identifiable Information": "个人隐私信息",
@@ -264,7 +264,7 @@ async def _call_llm_guard(text: str) -> dict:
                 category = analysis
                 
             GUARD_CATEGORY_MAP = {
-                "violent": "暴力",
+                "violent": "血腥/暴力",
                 "non-violent illegal acts": "非暴力违法行为",
                 "sexual content or sexual acts": "色情内容或性行为",
                 "personally identifiable information": "个人身份信息",
