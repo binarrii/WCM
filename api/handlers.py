@@ -413,9 +413,14 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
             threshold=threshold
         )
         for r in results:
+            x, y, w, h = r.get("source_x"), r.get("source_y"), r.get("source_w"), r.get("source_h")
+            
+            # 过滤掉过小的人脸 (< 64x64)
+            if w is not None and h is not None and (w < 64 or h < 64):
+                continue
+                
             r["timestamp"] = _format_timestamp(current_frame_time)
             r["frame_time"] = current_frame_time
-            x, y, w, h = r.get("source_x"), r.get("source_y"), r.get("source_w"), r.get("source_h")
             if x is not None and y is not None and w is not None and h is not None:
                 y1, y2 = max(0, y), min(frame.shape[0], y + h)
                 x1, x2 = max(0, x), min(frame.shape[1], x + w)
