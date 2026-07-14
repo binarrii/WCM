@@ -206,13 +206,13 @@ async def _call_llm_guard(text: str) -> dict:
             
             # The model might output multiple categories comma-separated, or just one.
             # Handle possible partial matches or exact matches
-            mapped_categories = []
+            mapped_categories = set()
             for en_cat, cn_cat in guard_category_map.items():
                 if en_cat.lower() in category.lower():
-                    mapped_categories.append(cn_cat)
+                    mapped_categories.add(cn_cat)
                     
             if mapped_categories:
-                category = "、".join(mapped_categories)
+                category = "、".join(str(mc) for mc in mapped_categories)
                     
             return {"safe": is_safe, "category": category}
         except Exception as e:
