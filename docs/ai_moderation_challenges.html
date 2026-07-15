@@ -307,16 +307,92 @@
                 </div>
             </div>
         </div>
+
+        <!-- 数据集难点 -->
+        <div class="card section-full">
+            <div class="card-header">
+                <div class="icon-box">📊</div>
+                <h2>数据集层面的难点</h2>
+            </div>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+                <div class="challenge-item">
+                    <h3>数据获取的法律与伦理困境</h3>
+                    <p>最根本的矛盾——<strong>想训练模型识别违规内容，首先得拥有大量违规内容</strong>。涉黄、涉暴、涉恐数据本身违法持有，采集、存储、标注面临严重法律风险。涉及未成年人的违规内容更是绝对红线。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>类别极度不平衡</h3>
+                    <p>违规内容可能只占 0.01%-0.1%，模型容易学到"全判正常"就达 99.9% 准确率。过采样/欠采样引入偏差，某些细分违规类型样本可能只有个位数。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>标注的主观性与一致性</h3>
+                    <p>不同标注员对"擦边球"内容判断完全不同，标注指南长达数百页，标注一致性（Inter-Annotator Agreement）通常很低。标注员心理健康问题导致高流动率。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>数据时效性</h3>
+                    <p>违规形式不断演化，今天的"正常"明天可能变"敏感"。Deepfake、新型网络黑话不断涌现，历史训练集无法覆盖。数据集需要<strong>持续更新</strong>而非一次性构建。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型微调难点 -->
+        <div class="card section-full">
+            <div class="card-header">
+                <div class="icon-box">🧬</div>
+                <h2>模型微调的难点</h2>
+            </div>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+                <div class="challenge-item">
+                    <h3>灾难性遗忘</h3>
+                    <p>在违规数据上微调后，模型对正常内容的理解能力可能显著下降。违规样本占比小时，模型容易过拟合到少数违规模式上，导致大量误判。需要 replay buffer 或 EWC 等策略。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>安全对齐的冲突</h3>
+                    <p>主流大模型经过严格的安全对齐（RLHF），当让模型"分析"违规内容时，安全层会主动拒绝——<strong>模型会拒绝看你让它审核的东西</strong>。突破安全限制又可能导致其他场景不安全。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>多模态微调的复杂性</h3>
+                    <p>文本微调（LoRA/QLoRA）相对成熟，但视觉+文本+音频联合微调仍是前沿难题。不同模态学习速率不同，易出现某模态主导训练而其他退化。视频微调需时序建模，难度更高。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>评估指标的设计</h3>
+                    <p>Precision/Recall/F1 无法反映真实效果。漏放违规的代价远大于误杀正常内容，非对称代价难以量化到损失函数。不同违规类型严重程度不同（涉恐 > 涉黄 > 擦边），需分层评估。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 训练工程难点 -->
+        <div class="card section-full">
+            <div class="card-header">
+                <div class="icon-box">⚙️</div>
+                <h2>训练工程层面的难点</h2>
+            </div>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+                <div class="challenge-item">
+                    <h3>算力与成本</h3>
+                    <p>多模态大模型全量微调需要数百张 A100/H100。即使用 LoRA，视频理解模型训练仍需大量显存。持续学习意味着训练是持续性开支而非一次性投入。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>数据安全与隔离</h3>
+                    <p>违规数据不能上传第三方云平台（合规要求），需本地化训练集群。训练环境须与生产环境严格隔离。模型权重可能"记住"违规内容（模型记忆攻击），需额外隐私保护。</p>
+                </div>
+                <div class="challenge-item">
+                    <h3>版本管理与回滚</h3>
+                    <p>审核模型每次更新影响数百万用户内容可见性，需灰度发布和 A/B 测试。误杀率飙升时需快速回滚。多个子模型版本需协同管理，任一更新都可能影响整体效果。</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 总结与落地 -->
     <div class="highlight-box">
         <h2>💡 总结与工业落地解法</h2>
+        <p style="margin-bottom: 12px; font-weight: 600; font-size: 1.05rem;">核心矛盾：你需要用违规数据来训练识别违规的模型，但获取、持有、标注、维护违规数据本身就面临法律、伦理、工程的三重挑战。</p>
         <p style="margin-bottom: 12px; font-weight: 500;">在实际应用中，通常构建<strong>混合协同系统 (Hybrid System)</strong>，而非让大模型单打独斗：</p>
         <ul>
             <li><strong>分层初筛：</strong> 用传统小模型（YOLO 做检测，ResNet 做分类，Facenet 做人脸识别）做第一道防线，快速过滤 90% 明显正常/违规内容。</li>
-            <li><strong>大模型复核：</strong> 将“灰色地带”或小模型低置信度的内容，组装复杂 Prompt 交给大模型进行多模态推理并给出理由。</li>
+            <li><strong>大模型复核：</strong> 将"灰色地带"或小模型低置信度的内容，组装复杂 Prompt 交给大模型进行多模态推理并给出理由。</li>
             <li><strong>人工兜底：</strong> 保留小部分极高难度的边缘案例交由人工复核，同时反哺微调模型。</li>
+            <li><strong>持续迭代：</strong> 建立"数据飞轮"机制——人工复核结果回流训练集，驱动模型定期迭代更新，形成正向循环。</li>
         </ul>
     </div>
 </div>
