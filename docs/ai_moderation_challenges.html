@@ -383,6 +383,61 @@
         </div>
     </div>
 
+    <!-- 微调的现实边界 -->
+    <div class="card section-full" style="margin-top: 30px;">
+        <div class="card-header">
+            <div class="icon-box">🎯</div>
+            <h2>微调的现实边界与务实策略</h2>
+        </div>
+
+        <div class="challenge-item">
+            <h3>微调的本质：调方向，不是加能力</h3>
+            <p>微调本质上是在<strong>基座模型已有的能力空间内做微调整</strong>，而不是给模型"注入新知识"。基座模型是一个受过完整教育的人，微调相当于短期岗前培训——能适应特定岗位的输出格式，但不会改变知识储备和认知能力。</p>
+        </div>
+
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 20px;">
+            <div class="challenge-item" style="background: rgba(79, 70, 229, 0.03); padding: 16px; border-radius: 12px;">
+                <h3 style="color: #10B981;">微调擅长做的事 ✓</h3>
+                <ul>
+                    <li>调整输出格式和风格（固定 JSON schema）</li>
+                    <li>校准判断阈值（更敏感或更宽容）</li>
+                    <li>适配领域术语（平台审核规则表述）</li>
+                    <li>纠正特定的、可枚举的错误模式</li>
+                </ul>
+            </div>
+            <div class="challenge-item" style="background: rgba(239, 68, 68, 0.03); padding: 16px; border-radius: 12px;">
+                <h3 style="color: #EF4444;">微调做不到的事 ✗</h3>
+                <ul>
+                    <li>让模型"看懂"它原本无法理解的视觉特征</li>
+                    <li>给模型灌入全新的知识体系</li>
+                    <li>从根本上提升推理能力</li>
+                    <li>替代专用模型在特定任务上的精度</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="challenge-item" style="margin-top: 24px;">
+            <h3>数据量的两难</h3>
+            <p>业界 LoRA 微调的典型高质量数据集仅 <strong>500-5000 条</strong>。太少（< 几百条）学不到东西；适中（几百~几千条）是最佳平衡区；太多（数万条以上）开始侵蚀基座能力，导致灾难性遗忘和泛化下降。超过这个量级，收益递减且风险急剧增加。</p>
+        </div>
+
+        <div class="challenge-item">
+            <h3>为什么容易破坏基座能力</h3>
+            <p>基座模型预训练用了<strong>数万亿 token</strong>，微调用几千条数据调权重，是在巨大参数空间里做局部扰动。学习率太高会"覆盖"原知识，数据分布太窄会让模型过拟合，微调轮次太多则越来越"专"但越来越"窄"。这也是 LoRA 只动 &lt; 1% 参数的原因。</p>
+        </div>
+
+        <div class="challenge-item" style="background: linear-gradient(135deg, rgba(79, 70, 229, 0.05), rgba(236, 72, 153, 0.05)); padding: 20px; border-radius: 12px; border: 1px solid rgba(79, 70, 229, 0.1); margin-top: 20px;">
+            <h3 style="font-size: 1.1rem;">对内容审核的务实策略（优先级从高到低）</h3>
+            <ul>
+                <li><strong>① Prompt Engineering 优先</strong> — 精心设计系统提示词 + Few-shot 示例引导模型，零成本且不破坏基座</li>
+                <li><strong>② RAG 检索增强</strong> — 审核规则和违规案例库作为外部知识动态注入，而非让模型"记住"</li>
+                <li><strong>③ 微调只做最后一步</strong> — 仅在 Prompt + RAG 无法解决的特定问题上，用极少量数据做 LoRA 微调</li>
+                <li><strong>④ 专用小模型才是主力</strong> — 明确分类任务（色情/暴力/人脸）用 ResNet、BERT，效果远优于微调大模型且成本低几个数量级</li>
+            </ul>
+            <p style="margin-top: 12px; font-weight: 600; color: var(--primary);">结论：大模型的价值不在于被微调成"审核专家"，而在于利用其开箱即用的通用理解能力处理专用小模型搞不定的"灰色地带"。微调是锦上添花，不是核心策略。</p>
+        </div>
+    </div>
+
     <!-- 总结与落地 -->
     <div class="highlight-box">
         <h2>💡 总结与工业落地解法</h2>
