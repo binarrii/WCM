@@ -304,8 +304,7 @@ class FaceEngine:
             valid_uuids = set()
             
             for face_results in results:
-                if len(face_results) > 0:
-                    match_dict = face_results[0]
+                for match_dict in face_results:
                     identity = match_dict.get("img_name")
                     confidence = match_dict.get("confidence")
                     distance = match_dict.get("distance")

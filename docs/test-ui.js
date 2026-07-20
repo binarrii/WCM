@@ -140,6 +140,49 @@ const fs = require('fs');
   console.log(`Waterfall scroll loaded successfully! Visible cards count increased to: ${finalCardsCount}`);
   await page.screenshot({ path: path.join(artifactDir, 'test_case3_scroll_loaded.png') });
   
+  // Test Case 4: Image Search (以图搜图)
+  console.log('\n--- Test Case 4: Image Search (以图搜图) ---');
+  // Click image search button inside the search box
+  const searchImgBtn = await page.waitForSelector('.search-image-btn', { visible: true });
+  await searchImgBtn.click();
+  
+  // Wait for the Image Search modal to open
+  await page.waitForSelector('.modal-card', { visible: true });
+  console.log('Image Search modal opened.');
+  
+  // Upload search face image (using the singleFacePath file input inside the open modal)
+  const searchFileInput = await page.waitForSelector('.modal-overlay .hidden-input');
+  await searchFileInput.uploadFile(singleFacePath);
+  
+  // Wait for the preview image to load
+  await page.waitForSelector('.upload-preview', { visible: true });
+  await page.screenshot({ path: path.join(artifactDir, 'test_case4_preview.png') });
+  
+  // Click search button
+  console.log('Executing Image Search...');
+  const confirmSearchBtn = await page.waitForSelector('.modal-overlay .btn-primary');
+  await confirmSearchBtn.click();
+  
+  // Wait for image search banner to show up
+  await page.waitForSelector('.image-search-banner', { visible: true });
+  console.log('Image Search active. Results loaded successfully!');
+  
+  // Verify matching similarity badges exist on cards
+  const similarityBadgeExists = await page.waitForSelector('.similarity-badge', { visible: true });
+  const similarityVal = await page.$eval('.similarity-badge', el => el.textContent);
+  console.log(`Matching record found with similarity rating: ${similarityVal.trim()}`);
+  
+  await page.screenshot({ path: path.join(artifactDir, 'test_case4_success.png') });
+  
+  // Clear image search
+  console.log('Clearing Image Search...');
+  const clearSearchBtn = await page.waitForSelector('.clear-image-search-btn');
+  await clearSearchBtn.click();
+  
+  // Wait for banner to disappear
+  await page.waitForSelector('.image-search-banner', { hidden: true });
+  console.log('Image Search cleared. Returned to paginated records.');
+  
   await browser.close();
   console.log('\nAutomation tests completed successfully.');
 })();

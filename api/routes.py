@@ -174,48 +174,71 @@ async def register_face(request: Request):
 async def search_faces(request: Request):
     """Search for similar faces in the database."""
     engine = get_face_engine()
-
-    data = await request.json()
-    if not data:
-        raise HTTPException(status_code=400, detail="Request body required")
-
-    url = data.get("url")
-    if not url:
-        raise HTTPException(status_code=400, detail="url is required for search")
-
-    name = data.get("name")
-    top_k = int(data.get("top_k", 10))
-    threshold = float(data.get("threshold", 0.4))
-
-    try:
-        is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
-
-        if is_video:
-            sample_interval = float(data.get("sample_interval", 1.0))
-            frames, results = await _search_video_frames(
-                engine, url, name, max(min(top_k, 10), 1),
-                max(min(threshold, 1.0), 0.0), sample_interval
-            )
-            return {
-                "results": results,
-                "query_embedding_dim": settings.embedding_dim,
-                "frames_processed": frames,
-            }
-        else:
-            img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-            results = await engine.search(
-                img_source=img_bytes,
-                name=name,
-                top_k=max(min(top_k, 10), 1),
-                threshold=max(min(threshold, 1.0), 0.0),
-            )
+    content_type = request.headers.get("content-type", "")
+    
+    img_bytes = None
+    name = None
+    top_k = 10
+    threshold = 0.4
+    
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        file = form.get("file")
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="file is required for multipart search")
+        img_bytes = await file.read()
+        name = form.get("name")
+        top_k = int(form.get("top_k", 10))
+        threshold = float(form.get("threshold", 0.4))
+    else:
+        # JSON body
+        try:
+            data = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body or request format")
             
-            return {
-                "results": results,
-                "query_embedding_dim": settings.embedding_dim,
-            }
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+        if not data:
+            raise HTTPException(status_code=400, detail="Request body required")
+            
+        url = data.get("url")
+        if not url:
+            raise HTTPException(status_code=400, detail="url is required for JSON search")
+            
+        name = data.get("name")
+        top_k = int(data.get("top_k", 10))
+        threshold = float(data.get("threshold", 0.4))
+        
+        # Download from URL
+        try:
+            is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
+            if is_video:
+                sample_interval = float(data.get("sample_interval", 1.0))
+                frames, results = await _search_video_frames(
+                    engine, url, name, max(min(top_k, 10), 1),
+                    max(min(threshold, 1.0), 0.0), sample_interval
+                )
+                return {
+                    "results": results,
+                    "query_embedding_dim": settings.embedding_dim,
+                    "frames_processed": frames,
+                }
+            else:
+                img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+            
+    # Execute face search
+    try:
+        results = await engine.search(
+            img_source=img_bytes,
+            name=name,
+            top_k=max(min(top_k, 10), 1),
+            threshold=max(min(threshold, 1.0), 0.0),
+        )
+        return {
+            "results": results,
+            "query_embedding_dim": settings.embedding_dim,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
