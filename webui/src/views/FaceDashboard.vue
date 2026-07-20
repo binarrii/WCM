@@ -337,6 +337,24 @@ const handleSubmit = async () => {
       });
       showToast('人脸及人物记录更新成功');
       closeModal();
+      
+      // Update image search results dynamically if active
+      if (isImageSearchActive.value && imageSearchResults.value) {
+        imageSearchResults.value = imageSearchResults.value.map(item => {
+          if (item.id === editingRecordId.value) {
+            return {
+              ...item,
+              name: form.value.name,
+              person_name: form.value.name,
+              occupation: form.value.occupation,
+              type: form.value.type,
+              remarks: form.value.remarks
+            };
+          }
+          return item;
+        });
+      }
+      
       fetchRecords(true);
       fetchStats();
     } else {
@@ -370,6 +388,12 @@ const handleDelete = async (record) => {
   try {
     await faceService.deleteRecord(record.id);
     showToast('记录删除成功');
+    
+    // Filter out deleted record from active search results
+    if (isImageSearchActive.value && imageSearchResults.value) {
+      imageSearchResults.value = imageSearchResults.value.filter(r => r.id !== record.id);
+    }
+    
     fetchRecords(true);
     fetchStats();
   } catch (error) {
@@ -429,7 +453,7 @@ const executeImageSearch = async () => {
     imageSearchResults.value = data.results || [];
     isImageSearchActive.value = true;
     const matchCount = imageSearchResults.value.filter(r => (1 - (r.distance || 0)) >= 0.9).length;
-    showToast(`检索成功，共找到 ${matchCount} 个相似人脸（相似度≥90%）`);
+    showToast(`检索成功，共找到 ${matchCount} 个相似人脸`);
     closeImageSearchModal();
   } catch (error) {
     const errorMsg = error.response?.data?.detail || '以图搜图失败';
@@ -519,6 +543,36 @@ const handleSystemThemeChange = () => {
   }
 };
 
+const handleGlobalPaste = (e) => {
+  if (!isModalOpen.value && !isImageSearchModalOpen.value) return;
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  
+  let imageFile = null;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) {
+      imageFile = items[i].getAsFile();
+      break;
+    }
+  }
+  
+  if (!imageFile) return;
+  
+  e.preventDefault();
+  
+  if (isImageSearchModalOpen.value) {
+    imageSearchFile.value = imageFile;
+    if (imageSearchPreviewUrl.value) {
+      URL.revokeObjectURL(imageSearchPreviewUrl.value);
+    }
+    imageSearchPreviewUrl.value = URL.createObjectURL(imageFile);
+    showToast('已从剪贴板粘贴图片到搜图', 'success');
+  } else if (isModalOpen.value) {
+    openCropper(imageFile);
+    showToast('已从剪贴板粘贴图片并打开裁剪器', 'success');
+  }
+};
+
 onMounted(() => {
   // Load saved theme
   const savedTheme = localStorage.getItem('theme') || 'system';
@@ -528,11 +582,13 @@ onMounted(() => {
   fetchRecords(true);
   fetchStats();
   window.addEventListener('scroll', handleScroll);
+  window.addEventListener('paste', handleGlobalPaste);
   mediaQuery.addEventListener('change', handleSystemThemeChange);
 });
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll);
+  window.removeEventListener('paste', handleGlobalPaste);
   mediaQuery.removeEventListener('change', handleSystemThemeChange);
 });
 </script>
@@ -1689,7 +1745,7 @@ onUnmounted(() => {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(6, 10, 22, 0.75);
+  background-color: var(--modal-overlay-bg);
   backdrop-filter: blur(12px);
   z-index: 100;
   display: flex;
@@ -1699,8 +1755,8 @@ onUnmounted(() => {
 }
 
 .modal-card {
-  background-color: rgba(24, 34, 63, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: var(--modal-card-bg);
+  border: 1px solid var(--border-color);
   border-radius: 24px;
   width: 100%;
   max-width: 580px;
@@ -1738,7 +1794,7 @@ onUnmounted(() => {
 }
 
 .close-btn:hover {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--modal-hover-bg);
   color: var(--text-primary);
 }
 
@@ -1762,7 +1818,7 @@ onUnmounted(() => {
 }
 
 .upload-dropzone {
-  border: 2px dashed rgba(255, 255, 255, 0.15);
+  border: 2px dashed var(--modal-dropzone-border);
   border-radius: 16px;
   padding: 30px;
   display: flex;
@@ -1776,7 +1832,7 @@ onUnmounted(() => {
 
 .upload-dropzone:hover {
   border-color: var(--color-primary);
-  background-color: rgba(92, 103, 242, 0.04);
+  background-color: var(--color-primary-glow);
 }
 
 .upload-icon {
@@ -1815,7 +1871,7 @@ onUnmounted(() => {
   position: absolute;
   top: 12px;
   right: 12px;
-  background-color: rgba(10, 14, 26, 0.85);
+  background-color: var(--modal-card-bg);
   border: 1px solid var(--border-color);
   width: 32px;
   height: 32px;
@@ -1940,7 +1996,7 @@ onUnmounted(() => {
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--modal-hover-bg);
   color: var(--text-primary);
 }
 

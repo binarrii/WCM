@@ -48,6 +48,11 @@
   
   --radial-gradient-1: radial-gradient(circle at 10% 20%, rgba(92, 103, 242, 0.08) 0%, transparent 40%);
   --radial-gradient-2: radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.06) 0%, transparent 40%);
+  
+  --modal-overlay-bg: rgba(6, 10, 22, 0.75);
+  --modal-card-bg: rgba(24, 34, 63, 0.95);
+  --modal-hover-bg: rgba(255, 255, 255, 0.05);
+  --modal-dropzone-border: rgba(255, 255, 255, 0.15);
 }
 
 /* Light Theme Variables */
@@ -85,6 +90,11 @@
   
   --radial-gradient-1: radial-gradient(circle at 10% 20%, rgba(92, 103, 242, 0.04) 0%, transparent 40%);
   --radial-gradient-2: radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.03) 0%, transparent 40%);
+  
+  --modal-overlay-bg: rgba(100, 116, 139, 0.45);
+  --modal-card-bg: rgba(255, 255, 255, 0.97);
+  --modal-hover-bg: rgba(0, 0, 0, 0.04);
+  --modal-dropzone-border: rgba(0, 0, 0, 0.15);
 }
 
 * {
