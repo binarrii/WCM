@@ -140,33 +140,35 @@ const showToast = (message, type = 'success') => {
 // Filtered records
 const filteredRecords = computed(() => {
   if (isImageSearchActive.value && imageSearchResults.value) {
-    return imageSearchResults.value.map(item => {
-      // Map file_path to image_url
-      let imageUrl = null;
-      if (item.file_path) {
-        const prefix = "/tmp/wcm";
-        if (item.file_path.startsWith(prefix)) {
-          imageUrl = "/images" + item.file_path.substring(prefix.length);
-        } else {
-          imageUrl = item.file_path;
+    return imageSearchResults.value
+      .filter(item => (1 - (item.distance || 0)) >= 0.9)
+      .map(item => {
+        // Map file_path to image_url
+        let imageUrl = null;
+        if (item.file_path) {
+          const prefix = "/tmp/wcm";
+          if (item.file_path.startsWith(prefix)) {
+            imageUrl = "/images" + item.file_path.substring(prefix.length);
+          } else {
+            imageUrl = item.file_path;
+          }
         }
-      }
-      
-      return {
-        id: item.id,
-        name: item.name,
-        image_url: imageUrl,
-        created_at: item.created_at,
-        person: {
-          name: item.person_name,
-          occupation: item.occupation,
-          type: item.type,
-          remarks: item.remarks
-        },
-        searchDistance: item.distance,
-        searchSimilarity: (1 - item.distance).toFixed(2)
-      };
-    });
+        
+        return {
+          id: item.id,
+          name: item.name,
+          image_url: imageUrl,
+          created_at: item.created_at,
+          person: {
+            name: item.person_name,
+            occupation: item.occupation,
+            type: item.type,
+            remarks: item.remarks
+          },
+          searchDistance: item.distance,
+          searchSimilarity: (1 - item.distance).toFixed(2)
+        };
+      });
   }
   return records.value;
 });
@@ -426,7 +428,8 @@ const executeImageSearch = async () => {
     const data = await faceService.searchFaces(formData);
     imageSearchResults.value = data.results || [];
     isImageSearchActive.value = true;
-    showToast(`检索成功，共找到 ${imageSearchResults.value.length} 个相似人脸`);
+    const matchCount = imageSearchResults.value.filter(r => (1 - (r.distance || 0)) >= 0.9).length;
+    showToast(`检索成功，共找到 ${matchCount} 个相似人脸（相似度≥90%）`);
     closeImageSearchModal();
   } catch (error) {
     const errorMsg = error.response?.data?.detail || '以图搜图失败';
@@ -938,7 +941,7 @@ onUnmounted(() => {
               :disabled="!imageSearchFile || imageSearching"
             >
               <Settings v-if="imageSearching" class="spinner btn-spinner" />
-              <span>{{ imageSearching ? '人脸检索中...' : '确定搜索' }}</span>
+              <span>{{ imageSearching ? '人脸检索中...' : '搜索' }}</span>
             </button>
           </div>
         </div>
