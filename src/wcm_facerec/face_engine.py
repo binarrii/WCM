@@ -302,27 +302,33 @@ class FaceEngine:
                 
             valid_matches = []
             valid_uuids = set()
+
+            def resolve_face_result(match_dict):
+                identity = match_dict.get("img_name")
+                confidence = match_dict.get("confidence")
+                distance = match_dict.get("distance")
+                if distance is not None and distance > threshold:
+                    return
+                if confidence is not None and confidence < 0.7:
+                    return
+                if not identity:
+                    print("No identity")
+                    return
+                try:
+                    record_uuid = uuid.UUID(str(identity))
+                    valid_uuids.add(str(record_uuid))
+                    valid_matches.append(match_dict)
+                except ValueError:
+                    print(f"UUID error {identity}")
+                    return
             
             for face_results in results:
                 for match_dict in face_results:
-                    identity = match_dict.get("img_name")
-                    confidence = match_dict.get("confidence")
-                    distance = match_dict.get("distance")
-                    if distance is not None and distance > threshold:
-                        continue
-                    if confidence is not None and confidence < 0.7:
-                        continue
-                    if not identity:
-                        print("No identity")
-                        continue
-                    try:
-                        record_uuid = uuid.UUID(str(identity))
-                        valid_uuids.add(str(record_uuid))
-                        valid_matches.append(match_dict)
-                    except ValueError:
-                        print(f"UUID error {identity}")
-                        continue
-                        
+                    resolve_face_result(match_dict)
+                    if len(results) > 1:
+                        # if multiple persons found, only keep first match for each person
+                        break
+
             if not valid_uuids:
                 return []
 
