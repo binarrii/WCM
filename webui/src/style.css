@@ -1,0 +1,143 @@
+/* Global Stylesheet & Design Tokens */
+:root {
+  /* Common variables */
+  --color-primary: #5c67f2;
+  --color-primary-hover: #4a54d4;
+  
+  --status-red: #ef4444;
+  --status-yellow: #f59e0b;
+  --status-blue: #3b82f6;
+  --status-green: #10b981;
+  
+  --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: 'Outfit', 'Inter', 'Noto Sans SC', sans-serif;
+}
+
+/* Dark Theme Variables (Default) */
+:root, :root[data-theme="dark"] {
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #131a30;
+  --bg-card: #18223f;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(92, 103, 242, 0.4);
+  
+  --color-primary-glow: rgba(92, 103, 242, 0.25);
+  
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  
+  --status-red-bg: rgba(239, 68, 68, 0.15);
+  --status-red-border: rgba(239, 68, 68, 0.3);
+  
+  --status-yellow-bg: rgba(245, 158, 11, 0.15);
+  --status-yellow-border: rgba(245, 158, 11, 0.3);
+  
+  --status-blue-bg: rgba(59, 130, 246, 0.15);
+  --status-blue-border: rgba(59, 130, 246, 0.3);
+  
+  --status-green-bg: rgba(16, 185, 129, 0.15);
+  --status-green-border: rgba(16, 185, 129, 0.3);
+  
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+  
+  --brand-gradient-start: #ffffff;
+  --brand-gradient-end: #a5b4fc;
+  
+  --radial-gradient-1: radial-gradient(circle at 10% 20%, rgba(92, 103, 242, 0.08) 0%, transparent 40%);
+  --radial-gradient-2: radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.06) 0%, transparent 40%);
+}
+
+/* Light Theme Variables */
+:root[data-theme="light"] {
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-hover: rgba(92, 103, 242, 0.5);
+  
+  --color-primary-glow: rgba(92, 103, 242, 0.15);
+  
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  
+  --status-red-bg: rgba(239, 68, 68, 0.08);
+  --status-red-border: rgba(239, 68, 68, 0.2);
+  
+  --status-yellow-bg: rgba(245, 158, 11, 0.08);
+  --status-yellow-border: rgba(245, 158, 11, 0.2);
+  
+  --status-blue-bg: rgba(59, 130, 246, 0.08);
+  --status-blue-border: rgba(59, 130, 246, 0.2);
+  
+  --status-green-bg: rgba(16, 185, 129, 0.08);
+  --status-green-border: rgba(16, 185, 129, 0.2);
+  
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.12);
+  
+  --brand-gradient-start: #0f172a;
+  --brand-gradient-end: #5c67f2;
+  
+  --radial-gradient-1: radial-gradient(circle at 10% 20%, rgba(92, 103, 242, 0.04) 0%, transparent 40%);
+  --radial-gradient-2: radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.03) 0%, transparent 40%);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+  background-image: var(--radial-gradient-1), var(--radial-gradient-2);
+  background-attachment: fixed;
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease forwards;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}

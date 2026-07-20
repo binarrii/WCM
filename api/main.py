@@ -36,12 +36,18 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
     # Register blueprints
     app.include_router(api_bp, prefix="/api/v1")
+
+    # Mount static files for face images
+    import os
+    from fastapi.staticfiles import StaticFiles
+    os.makedirs("/tmp/wcm", exist_ok=True)
+    app.mount("/images", StaticFiles(directory="/tmp/wcm"), name="images")
 
     return app
 

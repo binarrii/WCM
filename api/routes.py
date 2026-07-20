@@ -479,3 +479,353 @@ async def websocket_analyze_media(websocket: WebSocket):
             await websocket.send_json({"status": "error", "error": str(e)})
         except:
             pass
+
+
+# --- CRUD Endpoints for Face Records ---
+
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+from wcm_facerec.database import Person, FaceRecord, get_session
+
+@api_bp.get("/face_records")
+async def list_face_records(
+    page: int = 1,
+    limit: int = 12,
+    search: str = None,
+    type: str = None
+):
+    """List face records with pagination, search, and type filtering."""
+    session = get_session()
+    try:
+        # Base query joining FaceRecord and Person
+        stmt = select(FaceRecord).outerjoin(Person)
+        
+        # Apply type filter
+        if type and type != "All":
+            stmt = stmt.where(Person.type_ == type)
+            
+        # Apply search filter
+        if search:
+            search_clause = f"%{search}%"
+            stmt = stmt.where(
+                (FaceRecord.name.ilike(search_clause)) |
+                (Person.occupation.ilike(search_clause)) |
+                (Person.remarks.ilike(search_clause))
+            )
+            
+        # Get total count before pagination
+        from sqlalchemy import func
+        count_stmt = select(func.count(FaceRecord.id)).select_from(FaceRecord).outerjoin(Person)
+        if type and type != "All":
+            count_stmt = count_stmt.where(Person.type_ == type)
+        if search:
+            count_stmt = count_stmt.where(
+                (FaceRecord.name.ilike(search_clause)) |
+                (Person.occupation.ilike(search_clause)) |
+                (Person.remarks.ilike(search_clause))
+            )
+        total = session.scalar(count_stmt) or 0
+        
+        # Apply offset and limit
+        offset = (page - 1) * limit
+        stmt = stmt.options(joinedload(FaceRecord.person)).order_by(FaceRecord.created_at.desc()).offset(offset).limit(limit)
+        records = session.scalars(stmt).all()
+        
+        results = []
+        for r in records:
+            image_url = None
+            if r.file_path:
+                p = Path(r.file_path)
+                try:
+                    rel_path = p.relative_to("/tmp/wcm")
+                    image_url = f"/images/{rel_path}"
+                except ValueError:
+                    image_url = f"/images/{p.name}"
+                    
+            results.append({
+                "id": str(r.id),
+                "name": r.name,
+                "file_path": r.file_path,
+                "image_url": image_url,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "person": {
+                    "id": str(r.person.id),
+                    "name": r.person.name,
+                    "occupation": r.person.occupation,
+                    "type": r.person.type_,
+                    "remarks": r.person.remarks,
+                } if r.person else None
+            })
+            
+        has_more = (offset + len(records)) < total
+        
+        return {
+            "items": results,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "has_more": has_more
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@api_bp.get("/face_records/stats")
+async def get_face_records_stats():
+    """Get overall statistics for face records database."""
+    session = get_session()
+    try:
+        from sqlalchemy import func
+        
+        total = session.scalar(select(func.count(FaceRecord.id))) or 0
+        
+        bad_artists = session.scalar(
+            select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "劣迹艺人")
+        ) or 0
+        
+        political = session.scalar(
+            select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "时政敏感")
+        ) or 0
+        
+        officials = session.scalar(
+            select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "落马官员")
+        ) or 0
+        
+        return {
+            "total": total,
+            "bad_artists": bad_artists,
+            "political": political,
+            "officials": officials
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@api_bp.post("/face_records")
+async def create_face_record(request: Request):
+    """Create a new face record and register it, requiring exactly 1 face, and records person info."""
+    engine = get_face_engine()
+    
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        raise HTTPException(status_code=400, detail="Content-Type must be multipart/form-data")
+        
+    form = await request.form()
+    name = form.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="姓名是必填项")
+        
+    occupation = form.get("occupation") or None
+    type_val = form.get("type") or None
+    remarks = form.get("remarks") or None
+    category = form.get("category") or None
+    
+    file = form.get("file")
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="请上传图片")
+        
+    contents = await file.read()
+    if len(contents) > settings.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="文件过大")
+        
+    # Decode image to numpy array
+    nparr = np.frombuffer(contents, np.uint8)
+    img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img_array is None:
+        raise HTTPException(status_code=400, detail="图片格式错误，无法解析")
+        
+    # Detect faces locally
+    try:
+        import asyncio
+        from deepface import DeepFace
+        
+        def run_local_detect():
+            try:
+                return DeepFace.extract_faces(img_array, detector_backend='fastmtcnn', enforce_detection=False)
+            except Exception:
+                return DeepFace.extract_faces(img_array, detector_backend='opencv', enforce_detection=False)
+                
+        local_faces = await asyncio.to_thread(run_local_detect)
+        
+        faces = []
+        for res in local_faces:
+            fa = res.get("facial_area", {})
+            w = fa.get("w", 0) or 0
+            h = fa.get("h", 0) or 0
+            # Filter: short side must be >= 80 pixels
+            if min(w, h) < 80:
+                continue
+            faces.append(res)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"本地人脸检测失败: {str(e)}")
+        
+    if len(faces) == 0:
+        raise HTTPException(status_code=400, detail="未检测到人脸，请上传包含单张清晰人脸的图片")
+    elif len(faces) > 1:
+        raise HTTPException(status_code=400, detail=f"检测到多个人脸({len(faces)}个)，请上传仅包含单张清晰人脸的图片")
+        
+    # Exactly 1 face, proceed to registration
+    session = get_session()
+    try:
+        # 1. Create Person record
+        person = Person(
+            id=uuid.uuid4(),
+            name=name,
+            occupation=occupation,
+            type_=type_val,
+            remarks=remarks
+        )
+        session.add(person)
+        session.commit()
+        session.refresh(person)
+        
+        # 2. Call register_from_image
+        record = await engine.register_from_image(
+            name=name,
+            img_source=contents,
+            category=category
+        )
+        
+        # 3. Associate FaceRecord with the Person record
+        db_record = session.get(FaceRecord, record.id)
+        if db_record:
+            db_record.person_id = person.id
+            session.commit()
+            session.refresh(db_record)
+        else:
+            raise HTTPException(status_code=500, detail="人脸记录创建失败")
+            
+        image_url = None
+        if db_record.file_path:
+            p = Path(db_record.file_path)
+            try:
+                rel_path = p.relative_to("/tmp/wcm")
+                image_url = f"/images/{rel_path}"
+            except ValueError:
+                image_url = f"/images/{p.name}"
+                
+        return {
+            "id": str(db_record.id),
+            "name": db_record.name,
+            "file_path": db_record.file_path,
+            "image_url": image_url,
+            "created_at": db_record.created_at.isoformat() if db_record.created_at else None,
+            "person": {
+                "id": str(person.id),
+                "name": person.name,
+                "occupation": person.occupation,
+                "type": person.type_,
+                "remarks": person.remarks,
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"注册人脸失败: {str(e)}")
+    finally:
+        session.close()
+
+
+@api_bp.put("/face_records/{record_id}")
+async def update_face_record(record_id: str, request: Request):
+    """Update face record and its associated person profile."""
+    session = get_session()
+    try:
+        data = await request.json()
+        r_uuid = uuid.UUID(record_id)
+        db_record = session.get(FaceRecord, r_uuid)
+        if not db_record:
+            raise HTTPException(status_code=404, detail="人脸记录不存在")
+            
+        name = data.get("name")
+        if name:
+            db_record.name = name
+            
+        if db_record.person:
+            if name:
+                db_record.person.name = name
+            if "occupation" in data:
+                db_record.person.occupation = data["occupation"]
+            if "type" in data:
+                db_record.person.type_ = data["type"]
+            if "remarks" in data:
+                db_record.person.remarks = data["remarks"]
+        else:
+            if name:
+                person = Person(
+                    id=uuid.uuid4(),
+                    name=name,
+                    occupation=data.get("occupation"),
+                    type_=data.get("type"),
+                    remarks=data.get("remarks")
+                )
+                session.add(person)
+                db_record.person_id = person.id
+                
+        session.commit()
+        session.refresh(db_record)
+        
+        image_url = None
+        if db_record.file_path:
+            p = Path(db_record.file_path)
+            try:
+                rel_path = p.relative_to("/tmp/wcm")
+                image_url = f"/images/{rel_path}"
+            except ValueError:
+                image_url = f"/images/{p.name}"
+                
+        return {
+            "id": str(db_record.id),
+            "name": db_record.name,
+            "file_path": db_record.file_path,
+            "image_url": image_url,
+            "created_at": db_record.created_at.isoformat() if db_record.created_at else None,
+            "person": {
+                "id": str(db_record.person.id),
+                "name": db_record.person.name,
+                "occupation": db_record.person.occupation,
+                "type": db_record.person.type_,
+                "remarks": db_record.person.remarks,
+            } if db_record.person else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@api_bp.delete("/face_records/{record_id}")
+async def delete_face_record(record_id: str):
+    """Delete a face record and its associated person profile."""
+    session = get_session()
+    try:
+        r_uuid = uuid.UUID(record_id)
+        db_record = session.get(FaceRecord, r_uuid)
+        if not db_record:
+            raise HTTPException(status_code=404, detail="人脸记录不存在")
+            
+        person = db_record.person
+        if person:
+            session.delete(person)
+        
+        if db_record.file_path:
+            p = Path(db_record.file_path)
+            if p.exists():
+                try:
+                    p.unlink()
+                except Exception as e:
+                    print(f"Warning: Failed to delete file {p}: {e}")
+                    
+        session.delete(db_record)
+        session.commit()
+        return {"message": "人脸记录及人物信息删除成功"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
