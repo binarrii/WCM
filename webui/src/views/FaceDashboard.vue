@@ -74,6 +74,18 @@ const imageSearching = ref(false);
 const isImageSearchActive = ref(false);
 const imageSearchResults = ref([]);
 
+// Full image preview state
+const isImagePreviewOpen = ref(false);
+const previewImageUrl = ref('');
+const openImagePreview = (url) => {
+  previewImageUrl.value = url;
+  isImagePreviewOpen.value = true;
+};
+const closeImagePreview = () => {
+  isImagePreviewOpen.value = false;
+  previewImageUrl.value = '';
+};
+
 // Toast state
 const toasts = ref([]);
 
@@ -355,7 +367,24 @@ const handleSubmit = async () => {
         });
       }
       
-      fetchRecords(true);
+      // Update local records array in place so the scroll position remains identical
+      records.value = records.value.map(item => {
+        if (item.id === editingRecordId.value) {
+          return {
+            ...item,
+            name: form.value.name,
+            person: {
+              ...item.person,
+              name: form.value.name,
+              occupation: form.value.occupation,
+              type: form.value.type,
+              remarks: form.value.remarks
+            }
+          };
+        }
+        return item;
+      });
+      
       fetchStats();
     } else {
       const formData = new FormData();
@@ -573,6 +602,20 @@ const handleGlobalPaste = (e) => {
   }
 };
 
+const handleGlobalKeyDown = (e) => {
+  if (e.key === 'Escape' || e.keyCode === 27) {
+    if (isImagePreviewOpen.value) {
+      closeImagePreview();
+    } else if (showCropperModal.value) {
+      closeCropper();
+    } else if (isImageSearchModalOpen.value) {
+      closeImageSearchModal();
+    } else if (isModalOpen.value) {
+      closeModal();
+    }
+  }
+};
+
 onMounted(() => {
   // Load saved theme
   const savedTheme = localStorage.getItem('theme') || 'system';
@@ -583,12 +626,14 @@ onMounted(() => {
   fetchStats();
   window.addEventListener('scroll', handleScroll);
   window.addEventListener('paste', handleGlobalPaste);
+  window.addEventListener('keydown', handleGlobalKeyDown);
   mediaQuery.addEventListener('change', handleSystemThemeChange);
 });
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll);
   window.removeEventListener('paste', handleGlobalPaste);
+  window.removeEventListener('keydown', handleGlobalKeyDown);
   mediaQuery.removeEventListener('change', handleSystemThemeChange);
 });
 </script>
@@ -752,7 +797,7 @@ onUnmounted(() => {
             class="record-card"
           >
             <!-- Card Image -->
-            <div class="card-image-container">
+            <div class="card-image-container" @click="record.image_url && openImagePreview(`${IMAGE_BASE}${record.image_url}`)">
               <img 
                 v-if="record.image_url" 
                 :src="`${IMAGE_BASE}${record.image_url}`" 
@@ -1037,6 +1082,14 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- Image Preview Modal -->
+    <div v-if="isImagePreviewOpen" class="modal-overlay preview-overlay" @click.self="closeImagePreview">
+      <div class="preview-close-btn" @click="closeImagePreview" title="关闭">
+        <X class="close-icon" />
+      </div>
+      <img :src="previewImageUrl" alt="完整大图" class="preview-image-large animate-zoom-in" />
+    </div>
   </div>
 </template>
 
@@ -1258,6 +1311,9 @@ onUnmounted(() => {
 
 /* Controls styling */
 .controls-panel {
+  position: sticky;
+  top: 16px;
+  z-index: 10;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 16px;
@@ -1265,6 +1321,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  box-shadow: var(--shadow-md);
 }
 
 @media (min-width: 900px) {
@@ -1555,6 +1612,7 @@ onUnmounted(() => {
   position: relative;
   background-color: var(--bg-primary);
   overflow: hidden;
+  cursor: zoom-in;
 }
 
 .card-image {
@@ -2183,5 +2241,61 @@ onUnmounted(() => {
   padding: 24px;
   display: flex;
   flex-direction: column;
+}
+
+/* Image Preview Modal */
+.preview-overlay {
+  background-color: var(--preview-overlay-bg) !important;
+  z-index: 200;
+}
+
+.preview-image-large {
+  max-width: 90vw;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+}
+
+.preview-close-btn {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  background-color: var(--preview-close-bg);
+  border: 1px solid var(--border-color);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--preview-close-color);
+  cursor: pointer;
+  z-index: 201;
+  transition: all 0.25s ease;
+}
+
+.preview-close-btn:hover {
+  background-color: var(--status-red);
+  border-color: var(--status-red);
+  color: #ffffff;
+  transform: rotate(90deg);
+}
+
+.animate-zoom-in {
+  animation: zoomIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 </style>

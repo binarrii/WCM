@@ -53,6 +53,9 @@
   --modal-card-bg: rgba(24, 34, 63, 0.95);
   --modal-hover-bg: rgba(255, 255, 255, 0.05);
   --modal-dropzone-border: rgba(255, 255, 255, 0.15);
+  --preview-overlay-bg: rgba(6, 10, 22, 0.9);
+  --preview-close-bg: rgba(255, 255, 255, 0.1);
+  --preview-close-color: #ffffff;
 }
 
 /* Light Theme Variables */
@@ -95,6 +98,9 @@
   --modal-card-bg: rgba(255, 255, 255, 0.97);
   --modal-hover-bg: rgba(0, 0, 0, 0.04);
   --modal-dropzone-border: rgba(0, 0, 0, 0.15);
+  --preview-overlay-bg: rgba(245, 247, 250, 0.9);
+  --preview-close-bg: rgba(15, 23, 42, 0.08);
+  --preview-close-color: #0f172a;
 }
 
 * {
