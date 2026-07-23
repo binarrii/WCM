@@ -485,7 +485,7 @@ const executeImageSearch = async () => {
     showToast(`检索成功，共找到 ${matchCount} 个相似人脸`);
     closeImageSearchModal();
   } catch (error) {
-    const errorMsg = error.response?.data?.detail || '以图搜图失败';
+    const errorMsg = error.response?.data?.detail || '人脸检索失败';
     showToast(errorMsg, 'error');
     console.error(error);
   } finally {
@@ -738,7 +738,7 @@ onUnmounted(() => {
             type="button"
             class="search-image-btn" 
             @click="openImageSearchModal"
-            title="以图搜图"
+            title="人脸检索"
           >
             <ImageIcon class="image-icon" />
           </button>
@@ -769,7 +769,7 @@ onUnmounted(() => {
         <div v-if="isImageSearchActive" class="image-search-banner">
           <div class="banner-info">
             <UserCheck class="banner-icon" />
-            <span>以图搜图结果：找到 {{ filteredRecords.length }} 个相似人脸</span>
+            <span>人脸检索结果：找到 {{ filteredRecords.length }} 个相似人脸</span>
           </div>
           <button class="clear-image-search-btn" @click="clearImageSearch">
             <X class="btn-icon-small" />
@@ -984,7 +984,7 @@ onUnmounted(() => {
     <div v-if="isImageSearchModalOpen" class="modal-overlay" @click.self="closeImageSearchModal">
       <div class="modal-card animate-fade-in">
         <div class="modal-header">
-          <h3 class="modal-title">以图搜图</h3>
+          <h3 class="modal-title">人脸检索</h3>
           <button class="close-btn" @click="closeImageSearchModal">
             <X class="close-icon" />
           </button>

@@ -140,8 +140,8 @@ const fs = require('fs');
   console.log(`Waterfall scroll loaded successfully! Visible cards count increased to: ${finalCardsCount}`);
   await page.screenshot({ path: path.join(artifactDir, 'test_case3_scroll_loaded.png') });
   
-  // Test Case 4: Image Search (以图搜图)
-  console.log('\n--- Test Case 4: Image Search (以图搜图) ---');
+  // Test Case 4: Image Search (人脸检索)
+  console.log('\n--- Test Case 4: Image Search (人脸检索) ---');
   // Click image search button inside the search box
   const searchImgBtn = await page.waitForSelector('.search-image-btn', { visible: true });
   await searchImgBtn.click();
