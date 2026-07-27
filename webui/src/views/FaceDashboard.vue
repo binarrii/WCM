@@ -153,7 +153,7 @@ const showToast = (message, type = 'success') => {
 const filteredRecords = computed(() => {
   if (isImageSearchActive.value && imageSearchResults.value) {
     return imageSearchResults.value
-      .filter(item => (1 - (item.distance || 0)) >= 0.9)
+      .filter(item => (1 - (item.distance || 0)) >= 0.8)
       .map(item => {
         // Map file_path to image_url
         let imageUrl = null;
