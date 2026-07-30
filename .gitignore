@@ -9,6 +9,7 @@ wheels/
 # IDE files
 .vscode/
 .antigravitycli/
+.codegraph/
 
 # Virtual environments
 .venv
