@@ -1,13 +1,15 @@
 import asyncio
+
 #!/usr/bin/env python3
 """Extract faces from images in a directory, organized by category."""
 
 import os
 import sys
+from collections import defaultdict
+from pathlib import Path
+
 import cv2
 import numpy as np
-from pathlib import Path
-from collections import defaultdict
 
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -37,7 +39,11 @@ def extract_faces_from_directory(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     engine = FaceEngine()
-    stats = {"categories": defaultdict(lambda: {"images": 0, "faces": 0}), "total_images": 0, "total_faces": 0}
+    stats = {
+        "categories": defaultdict(lambda: {"images": 0, "faces": 0}),
+        "total_images": 0,
+        "total_faces": 0,
+    }
 
     # Supported image extensions
     image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
@@ -53,7 +59,9 @@ def extract_faces_from_directory(
                 images.append((item, category))
         return images
 
-    def save_face(face_img: np.ndarray, category: str, original_name: Path, face_idx: int, output_root: Path):
+    def save_face(
+        face_img: np.ndarray, category: str, original_name: Path, face_idx: int, output_root: Path
+    ):
         """Save a cropped face maintaining category structure."""
         cat_dir = output_root / category
         cat_dir.mkdir(parents=True, exist_ok=True)
@@ -132,7 +140,9 @@ def main():
     parser = argparse.ArgumentParser(description="Extract faces from images in a directory")
     parser.add_argument("input_dir", help="Input directory to scan")
     parser.add_argument("output_dir", help="Output directory for cropped faces")
-    parser.add_argument("--min-size", type=int, default=30, help="Minimum face dimension (default: 30)")
+    parser.add_argument(
+        "--min-size", type=int, default=30, help="Minimum face dimension (default: 30)"
+    )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing files")
 
     args = parser.parse_args()

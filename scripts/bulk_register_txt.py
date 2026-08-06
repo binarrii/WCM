@@ -1,21 +1,18 @@
+import asyncio
 import os
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 # os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 # os.environ["KERAS_BACKEND"] = "tensorflow"
-
 import sys
 import time
-import asyncio
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import cv2
-import numpy as np
-
-
 import httpx
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import numpy as np
 
 # Legacy one-shot batch script that talks directly to the DeepFace library.
 # The main API no longer depends on DeepFace (see CLAUDE.md — the live
@@ -39,7 +36,6 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from wcm_facerec.database import Person
 from wcm_facerec.face_engine import _persist_image
-
 
 PERSONS_TXT = "/home/aigc/wcm/persons.txt"
 MAX_WORKERS = 10
@@ -69,6 +65,7 @@ def _create_person(name: str, category: str) -> Person:
     except:
         pass
 
+
 def _extract_info_from_path(img_path: str):
     """
     Extract category and name from path.
@@ -78,12 +75,13 @@ def _extract_info_from_path(img_path: str):
     category = path_obj.parent.name
     filename = path_obj.stem
     # Remove hash suffix if exists
-    parts = filename.rsplit('_', 1)
-    if len(parts) == 2 and len(parts[1]) >= 32:  
+    parts = filename.rsplit("_", 1)
+    if len(parts) == 2 and len(parts[1]) >= 32:
         name = parts[0]
     else:
         name = filename
     return category, name
+
 
 async def async_register(img_path, person, name, category):
     ext = Path(img_path).suffix.lower() or None
@@ -101,12 +99,12 @@ async def async_register(img_path, person, name, category):
             new_w = int(w * scale)
             new_h = int(h * scale)
             resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            success, buf = cv2.imencode('.jpg', resized_img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            success, buf = cv2.imencode(".jpg", resized_img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
             if success:
                 image_bytes = buf.tobytes()
 
     # 拷贝到业务目录
-    persisted_path = _persist_image(image_bytes, name, category, ext='.jpg')
+    persisted_path = _persist_image(image_bytes, name, category, ext=".jpg")
 
     # 调用注册接口
     try:
@@ -131,24 +129,23 @@ async def async_register(img_path, person, name, category):
     except Exception as e:
         return f"[Error] {img_path} - API failed: {str(e)}"
 
+
 def process_image(img_path):
     try:
         img_path = img_path.strip()
         if not os.path.exists(img_path):
             return f"[Failed] {img_path} - File does not exist."
-            
+
         category, name = _extract_info_from_path(img_path)
-        
+
         # No local face detection - let the API handle it
         person = _create_person(name, category)
-        
+
         # 严格遵循 register_from_image 流程入库
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(
-                async_register(img_path, person, name, category)
-            )
+            result = loop.run_until_complete(async_register(img_path, person, name, category))
             return result
         finally:
             loop.close()
@@ -156,20 +153,21 @@ def process_image(img_path):
     except Exception as e:
         return f"[Error] {img_path} - Processing failed: {str(e)}"
 
+
 def main():
     if not os.path.exists(PERSONS_TXT):
         print(f"File not found: {PERSONS_TXT}")
         return
-        
-    with open(PERSONS_TXT, "r") as f:
+
+    with open(PERSONS_TXT) as f:
         image_files = [line.strip() for line in f if line.strip()]
-        
+
     print(f"Found {len(image_files)} image paths in {PERSONS_TXT}.")
-    
+
     if not image_files:
         print("No images found. Exiting.")
         return
-        
+
     print(f"Starting registration with {MAX_WORKERS} threads...")
     start_time = time.time()
 
@@ -205,14 +203,14 @@ def main():
         for future in as_completed(future_to_img):
             result = future.result()
             print(result)
-            
+
             if result.startswith("[Success]"):
                 success_count += 1
             elif result.startswith("[Skipped]"):
                 skipped_count += 1
             else:
                 error_count += 1
-                
+
     elapsed = time.time() - start_time
     print("-" * 40)
     print("Batch Registration Completed!")
@@ -221,6 +219,7 @@ def main():
     print(f"  - Success: {success_count}")
     print(f"  - Skipped: {skipped_count}")
     print(f"  - Failed/Error: {error_count}")
+
 
 if __name__ == "__main__":
     main()

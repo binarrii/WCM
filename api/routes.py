@@ -1,29 +1,32 @@
 """API routes for face recognition service."""
-import uuid
-import json
-from pathlib import Path
-from typing import Union
-import httpx
-import cv2
-import numpy as np
 
-from fastapi import APIRouter, Request, HTTPException, WebSocket, WebSocketDisconnect
+import contextlib
+import json
+import uuid
+from pathlib import Path
+
+import cv2
+import httpx
+import numpy as np
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
+from wcm_facerec.database import FaceRecord, Person, get_session
 from wcm_facerec.face_engine import get_face_engine
-from .utils import (
-    _download_url_safe,
-    VIDEO_EXTENSIONS
-)
+
 from .handlers import (
-    _search_video_frames,
-    _process_detect_sensitive,
+    _process_analyze_media,
     _process_detect_nsfw,
-    _process_analyze_media
+    _process_detect_sensitive,
+    _search_video_frames,
 )
+from .utils import VIDEO_EXTENSIONS, _download_url_safe
 
 api_bp = APIRouter()
+
 
 @api_bp.get("/health")
 async def health_check():
@@ -43,7 +46,7 @@ async def detect_faces(request: Request):
     Accepts either an uploaded file or a URL via form data.
     """
     engine = get_face_engine()
-    img_source: Union[str, Path, bytes]
+    img_source: str | Path | bytes
     image_source = "unknown"
 
     content_type = request.headers.get("content-type", "")
@@ -95,11 +98,13 @@ async def detect_faces(request: Request):
 
         results = []
         for i, face in enumerate(faces):
-            results.append({
-                "face_id": f"face_{i}",
-                "confidence": face.get("confidence", 0.0),
-                "facial_area": face.get("facial_area", {}),
-            })
+            results.append(
+                {
+                    "face_id": f"face_{i}",
+                    "confidence": face.get("confidence", 0.0),
+                    "facial_area": face.get("facial_area", {}),
+                }
+            )
 
         return {
             "faces": results,
@@ -136,12 +141,12 @@ async def search_faces(request: Request):
     """Search for similar faces in the database."""
     engine = get_face_engine()
     content_type = request.headers.get("content-type", "")
-    
+
     img_bytes = None
     name = None
     top_k = 10
     threshold = 0.4
-    
+
     if "multipart/form-data" in content_type:
         form = await request.form()
         file = form.get("file")
@@ -157,26 +162,30 @@ async def search_faces(request: Request):
             data = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid JSON body or request format")
-            
+
         if not data:
             raise HTTPException(status_code=400, detail="Request body required")
-            
+
         url = data.get("url")
         if not url:
             raise HTTPException(status_code=400, detail="url is required for JSON search")
-            
+
         name = data.get("name")
         top_k = int(data.get("top_k", 10))
         threshold = float(data.get("threshold", 0.4))
-        
+
         # Download from URL
         try:
             is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
             if is_video:
                 sample_interval = float(data.get("sample_interval", 1.0))
                 frames, results = await _search_video_frames(
-                    engine, url, name, max(min(top_k, 10), 1),
-                    max(min(threshold, 1.0), 0.0), sample_interval
+                    engine,
+                    url,
+                    name,
+                    max(min(top_k, 10), 1),
+                    max(min(threshold, 1.0), 0.0),
+                    sample_interval,
                 )
                 return {
                     "results": results,
@@ -187,7 +196,7 @@ async def search_faces(request: Request):
                 img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
         except httpx.HTTPError as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
-            
+
     # Execute face search
     try:
         results = await engine.search(
@@ -248,39 +257,47 @@ async def websocket_search(websocket: WebSocket):
                     frames, results = await _search_video_frames(
                         engine, url, name, top_k, threshold, sample_interval
                     )
-                    await websocket.send_json({
-                        "status": "completed",
-                        "taskId": task_id,
-                        "query_embedding_dim": settings.embedding_dim,
-                        "frames_processed": frames,
-                        "results": results,
-                    })
+                    await websocket.send_json(
+                        {
+                            "status": "completed",
+                            "taskId": task_id,
+                            "query_embedding_dim": settings.embedding_dim,
+                            "frames_processed": frames,
+                            "results": results,
+                        }
+                    )
                 else:
-                    img_bytes = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
+                    img_bytes = await _download_url_safe(
+                        url, settings.max_file_size_mb * 1024 * 1024
+                    )
                     results = await engine.search(
                         img_source=img_bytes,
                         name=name,
                         top_k=max(min(top_k, 10), 1),
                         threshold=max(min(threshold, 1.0), 0.0),
                     )
-                    await websocket.send_json({
-                        "status": "completed",
-                        "taskId": task_id,
-                        "query_embedding_dim": settings.embedding_dim,
-                        "results": results,
-                    })
+                    await websocket.send_json(
+                        {
+                            "status": "completed",
+                            "taskId": task_id,
+                            "query_embedding_dim": settings.embedding_dim,
+                            "results": results,
+                        }
+                    )
                     continue
 
             except httpx.HTTPError as e:
-                await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Failed to fetch: {str(e)}"})
+                await websocket.send_json(
+                    {"status": "error", "taskId": task_id, "error": f"Failed to fetch: {str(e)}"}
+                )
             except Exception as e:
-                await websocket.send_json({"status": "error", "taskId": task_id, "error": f"Search failed: {str(e)}"})
+                await websocket.send_json(
+                    {"status": "error", "taskId": task_id, "error": f"Search failed: {str(e)}"}
+                )
 
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json({"status": "error", "error": str(e)})
-        except:
-            pass
 
 
 @api_bp.post("/detect_sensitive")
@@ -292,13 +309,13 @@ async def detect_sensitive(request: Request):
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-        
+
     url = data.get("url")
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
-        
+
     sample_interval = float(data.get("sample_interval", 1.0))
-    
+
     try:
         return await _process_detect_sensitive(url, sample_interval)
     except Exception as e:
@@ -312,23 +329,24 @@ async def websocket_detect_sensitive(websocket: WebSocket):
         while True:
             try:
                 data = await websocket.receive_text()
-                if not data or len(data) < 2: continue
+                if not data or len(data) < 2:
+                    continue
                 payload = json.loads(data)
             except json.JSONDecodeError:
                 await websocket.send_json({"status": "error", "error": "Invalid JSON"})
                 continue
             except WebSocketDisconnect:
                 break
-                
+
             url = payload.get("url")
             if not url:
                 await websocket.send_json({"status": "error", "error": "url is required"})
                 continue
-                
+
             task_id = str(uuid.uuid4())
             sample_interval = float(payload.get("sample_interval", 1.0))
             await websocket.send_json({"status": "accepted", "taskId": task_id})
-            
+
             try:
                 result = await _process_detect_sensitive(url, sample_interval)
                 result["status"] = "completed"
@@ -337,14 +355,11 @@ async def websocket_detect_sensitive(websocket: WebSocket):
             except Exception as e:
                 await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json({"status": "error", "error": str(e)})
-        except:
-            pass
+
 
 nsfw_pipeline = None
-
-
 
 
 @api_bp.post("/detect_nsfw")
@@ -353,17 +368,18 @@ async def detect_nsfw(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-        
+
     url = body.get("url")
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
-        
+
     sample_interval = float(body.get("sample_interval", 1.0))
-    
+
     try:
         return await _process_detect_nsfw(url, sample_interval)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process media: {str(e)}")
+
 
 @api_bp.websocket("/ws/detect_nsfw")
 async def websocket_detect_nsfw(websocket: WebSocket):
@@ -372,23 +388,24 @@ async def websocket_detect_nsfw(websocket: WebSocket):
         while True:
             try:
                 data = await websocket.receive_text()
-                if not data or len(data) < 2: continue
+                if not data or len(data) < 2:
+                    continue
                 payload = json.loads(data)
             except json.JSONDecodeError:
                 await websocket.send_json({"status": "error", "error": "Invalid JSON"})
                 continue
             except WebSocketDisconnect:
                 break
-                
+
             url = payload.get("url")
             if not url:
                 await websocket.send_json({"status": "error", "error": "url is required"})
                 continue
-                
+
             task_id = str(uuid.uuid4())
             sample_interval = float(payload.get("sample_interval", 1.0))
             await websocket.send_json({"status": "accepted", "taskId": task_id})
-            
+
             try:
                 result = await _process_detect_nsfw(url, sample_interval)
                 result["status"] = "completed"
@@ -397,10 +414,8 @@ async def websocket_detect_nsfw(websocket: WebSocket):
             except Exception as e:
                 await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json({"status": "error", "error": str(e)})
-        except:
-            pass
 
 
 @api_bp.post("/analyze_media")
@@ -410,19 +425,20 @@ async def analyze_media(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-        
+
     url = body.get("url")
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
-        
+
     sample_interval = float(body.get("sample_interval", 1.0))
     top_k = int(body.get("top_k", 10))
     threshold = float(body.get("threshold", 0.4))
-    
+
     try:
         return await _process_analyze_media(url, sample_interval, top_k, threshold)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process media: {str(e)}")
+
 
 @api_bp.websocket("/ws/analyze_media")
 async def websocket_analyze_media(websocket: WebSocket):
@@ -431,26 +447,27 @@ async def websocket_analyze_media(websocket: WebSocket):
         while True:
             try:
                 data = await websocket.receive_text()
-                if not data or len(data) < 2: continue
+                if not data or len(data) < 2:
+                    continue
                 payload = json.loads(data)
             except json.JSONDecodeError:
                 await websocket.send_json({"status": "error", "error": "Invalid JSON"})
                 continue
             except WebSocketDisconnect:
                 break
-                
+
             url = payload.get("url")
             if not url:
                 await websocket.send_json({"status": "error", "error": "url is required"})
                 continue
-                
+
             task_id = str(uuid.uuid4())
             sample_interval = float(payload.get("sample_interval", 1.0))
             top_k = int(payload.get("top_k", 10))
             threshold = float(payload.get("threshold", 0.4))
-            
+
             await websocket.send_json({"status": "accepted", "taskId": task_id})
-            
+
             try:
                 result = await _process_analyze_media(url, sample_interval, top_k, threshold)
                 result["status"] = "completed"
@@ -459,62 +476,58 @@ async def websocket_analyze_media(websocket: WebSocket):
             except Exception as e:
                 await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json({"status": "error", "error": str(e)})
-        except:
-            pass
 
 
 # --- CRUD Endpoints for Face Records ---
 
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
-from wcm_facerec.database import Person, FaceRecord, get_session
 
 @api_bp.get("/face_records")
-async def list_face_records(
-    page: int = 1,
-    limit: int = 12,
-    search: str = None,
-    type: str = None
-):
+async def list_face_records(page: int = 1, limit: int = 12, search: str = None, type: str = None):
     """List face records with pagination, search, and type filtering."""
     session = get_session()
     try:
         # Base query joining FaceRecord and Person
         stmt = select(FaceRecord).outerjoin(Person)
-        
+
         # Apply type filter
         if type and type != "All":
             stmt = stmt.where(Person.type_ == type)
-            
+
         # Apply search filter
         if search:
             search_clause = f"%{search}%"
             stmt = stmt.where(
-                (FaceRecord.name.ilike(search_clause)) |
-                (Person.occupation.ilike(search_clause)) |
-                (Person.remarks.ilike(search_clause))
+                (FaceRecord.name.ilike(search_clause))
+                | (Person.occupation.ilike(search_clause))
+                | (Person.remarks.ilike(search_clause))
             )
-            
+
         # Get total count before pagination
         from sqlalchemy import func
+
         count_stmt = select(func.count(FaceRecord.id)).select_from(FaceRecord).outerjoin(Person)
         if type and type != "All":
             count_stmt = count_stmt.where(Person.type_ == type)
         if search:
             count_stmt = count_stmt.where(
-                (FaceRecord.name.ilike(search_clause)) |
-                (Person.occupation.ilike(search_clause)) |
-                (Person.remarks.ilike(search_clause))
+                (FaceRecord.name.ilike(search_clause))
+                | (Person.occupation.ilike(search_clause))
+                | (Person.remarks.ilike(search_clause))
             )
         total = session.scalar(count_stmt) or 0
-        
+
         # Apply offset and limit
         offset = (page - 1) * limit
-        stmt = stmt.options(joinedload(FaceRecord.person)).order_by(FaceRecord.created_at.desc()).offset(offset).limit(limit)
+        stmt = (
+            stmt.options(joinedload(FaceRecord.person))
+            .order_by(FaceRecord.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         records = session.scalars(stmt).all()
-        
+
         results = []
         for r in records:
             image_url = None
@@ -525,30 +538,34 @@ async def list_face_records(
                     image_url = f"/images/{rel_path}"
                 except ValueError:
                     image_url = f"/images/{p.name}"
-                    
-            results.append({
-                "id": str(r.id),
-                "name": r.name,
-                "file_path": r.file_path,
-                "image_url": image_url,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "person": {
-                    "id": str(r.person.id),
-                    "name": r.person.name,
-                    "occupation": r.person.occupation,
-                    "type": r.person.type_,
-                    "remarks": r.person.remarks,
-                } if r.person else None
-            })
-            
+
+            results.append(
+                {
+                    "id": str(r.id),
+                    "name": r.name,
+                    "file_path": r.file_path,
+                    "image_url": image_url,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "person": {
+                        "id": str(r.person.id),
+                        "name": r.person.name,
+                        "occupation": r.person.occupation,
+                        "type": r.person.type_,
+                        "remarks": r.person.remarks,
+                    }
+                    if r.person
+                    else None,
+                }
+            )
+
         has_more = (offset + len(records)) < total
-        
+
         return {
             "items": results,
             "total": total,
             "page": page,
             "limit": limit,
-            "has_more": has_more
+            "has_more": has_more,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -562,26 +579,35 @@ async def get_face_records_stats():
     session = get_session()
     try:
         from sqlalchemy import func
-        
+
         total = session.scalar(select(func.count(FaceRecord.id))) or 0
-        
-        bad_artists = session.scalar(
-            select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "劣迹艺人")
-        ) or 0
-        
-        political = session.scalar(
-            select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "时政敏感")
-        ) or 0
-        
-        officials = session.scalar(
-            select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "落马官员")
-        ) or 0
-        
+
+        bad_artists = (
+            session.scalar(
+                select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "劣迹艺人")
+            )
+            or 0
+        )
+
+        political = (
+            session.scalar(
+                select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "时政敏感")
+            )
+            or 0
+        )
+
+        officials = (
+            session.scalar(
+                select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "落马官员")
+            )
+            or 0
+        )
+
         return {
             "total": total,
             "bad_artists": bad_artists,
             "political": political,
-            "officials": officials
+            "officials": officials,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -593,29 +619,29 @@ async def get_face_records_stats():
 async def create_face_record(request: Request):
     """Create a new face record and register it, requiring exactly 1 face, and records person info."""
     engine = get_face_engine()
-    
+
     content_type = request.headers.get("content-type", "")
     if "multipart/form-data" not in content_type:
         raise HTTPException(status_code=400, detail="Content-Type must be multipart/form-data")
-        
+
     form = await request.form()
     name = form.get("name")
     if not name:
         raise HTTPException(status_code=400, detail="姓名是必填项")
-        
+
     occupation = form.get("occupation") or None
     type_val = form.get("type") or None
     remarks = form.get("remarks") or None
     category = form.get("category") or None
-    
+
     file = form.get("file")
     if not file or not file.filename:
         raise HTTPException(status_code=400, detail="请上传图片")
-        
+
     contents = await file.read()
     if len(contents) > settings.max_file_size_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail="文件过大")
-        
+
     # Decode + single-face enforcement via InsightFace Server. We don't
     # need the decoded ndarray here — the engine accepts bytes directly —
     # but we still confirm the image is well-formed before paying for a
@@ -633,23 +659,22 @@ async def create_face_record(request: Request):
     if len(local_faces) == 0:
         raise HTTPException(status_code=400, detail="未检测到人脸，请上传包含单张清晰人脸的图片")
     elif len(local_faces) > 1:
-        raise HTTPException(status_code=400, detail=f"检测到多个人脸({len(local_faces)}个)，请上传仅包含单张清晰人脸的图片")
-        
+        raise HTTPException(
+            status_code=400,
+            detail=f"检测到多个人脸({len(local_faces)}个)，请上传仅包含单张清晰人脸的图片",
+        )
+
     # Exactly 1 face, proceed to registration
     session = get_session()
     try:
         # 1. Create Person record
         person = Person(
-            id=uuid.uuid4(),
-            name=name,
-            occupation=occupation,
-            type_=type_val,
-            remarks=remarks
+            id=uuid.uuid4(), name=name, occupation=occupation, type_=type_val, remarks=remarks
         )
         session.add(person)
         session.commit()
         session.refresh(person)
-        
+
         # 2. Call register_from_image
         record = await engine.register_from_image(
             name=name,
@@ -659,7 +684,7 @@ async def create_face_record(request: Request):
             type_=type_val,
             remarks=remarks,
         )
-        
+
         # 3. Associate FaceRecord with the Person record
         db_record = session.get(FaceRecord, record.id)
         if db_record:
@@ -668,7 +693,7 @@ async def create_face_record(request: Request):
             session.refresh(db_record)
         else:
             raise HTTPException(status_code=500, detail="人脸记录创建失败")
-            
+
         image_url = None
         if db_record.file_path:
             p = Path(db_record.file_path)
@@ -677,7 +702,7 @@ async def create_face_record(request: Request):
                 image_url = f"/images/{rel_path}"
             except ValueError:
                 image_url = f"/images/{p.name}"
-                
+
         return {
             "id": str(db_record.id),
             "name": db_record.name,
@@ -690,7 +715,7 @@ async def create_face_record(request: Request):
                 "occupation": person.occupation,
                 "type": person.type_,
                 "remarks": person.remarks,
-            }
+            },
         }
     except HTTPException:
         raise
@@ -710,11 +735,11 @@ async def update_face_record(record_id: str, request: Request):
         db_record = session.get(FaceRecord, r_uuid)
         if not db_record:
             raise HTTPException(status_code=404, detail="人脸记录不存在")
-            
+
         name = data.get("name")
         if name:
             db_record.name = name
-            
+
         if db_record.person:
             if name:
                 db_record.person.name = name
@@ -731,14 +756,14 @@ async def update_face_record(record_id: str, request: Request):
                     name=name,
                     occupation=data.get("occupation"),
                     type_=data.get("type"),
-                    remarks=data.get("remarks")
+                    remarks=data.get("remarks"),
                 )
                 session.add(person)
                 db_record.person_id = person.id
-                
+
         session.commit()
         session.refresh(db_record)
-        
+
         image_url = None
         if db_record.file_path:
             p = Path(db_record.file_path)
@@ -747,7 +772,7 @@ async def update_face_record(record_id: str, request: Request):
                 image_url = f"/images/{rel_path}"
             except ValueError:
                 image_url = f"/images/{p.name}"
-                
+
         return {
             "id": str(db_record.id),
             "name": db_record.name,
@@ -760,7 +785,9 @@ async def update_face_record(record_id: str, request: Request):
                 "occupation": db_record.person.occupation,
                 "type": db_record.person.type_,
                 "remarks": db_record.person.remarks,
-            } if db_record.person else None
+            }
+            if db_record.person
+            else None,
         }
     except HTTPException:
         raise
@@ -779,11 +806,11 @@ async def delete_face_record(record_id: str):
         db_record = session.get(FaceRecord, r_uuid)
         if not db_record:
             raise HTTPException(status_code=404, detail="人脸记录不存在")
-            
+
         person = db_record.person
         if person:
             session.delete(person)
-        
+
         if db_record.file_path:
             p = Path(db_record.file_path)
             if p.exists():
@@ -791,7 +818,7 @@ async def delete_face_record(record_id: str):
                     p.unlink()
                 except Exception as e:
                     print(f"Warning: Failed to delete file {p}: {e}")
-                    
+
         session.delete(db_record)
         session.commit()
         return {"message": "人脸记录及人物信息删除成功"}

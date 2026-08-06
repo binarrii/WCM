@@ -1,6 +1,7 @@
-import httpx
 import base64
 import sys
+
+import httpx
 
 api_url = "http://10.252.25.251:5000"
 img_path = "/Users/binarii/Downloads/2026智能审核/劣迹艺人/0000000000016508_164ad27ae0448e990c63dc3e9a2474cc.jpg"

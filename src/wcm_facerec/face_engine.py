@@ -16,18 +16,18 @@ Internally every method delegates to InsightFaceAdapter. The legacy
 ``img_source`` overload (path | bytes | np.ndarray) is normalized to bytes
 at the boundary; the route layer is expected to already download URLs.
 """
+
 from __future__ import annotations
 
 import hashlib
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional, Union
 
 import cv2
 import numpy as np
 
-from .config import warn_deprecated, settings
+from .config import settings, warn_deprecated
 from .database import FaceRecord, get_session
 from .ifs_adapter import InsightFaceAdapter
 
@@ -55,14 +55,16 @@ def _persist_image(
     image_bytes: bytes,
     name: str,
     category: str,
-    ext: Optional[str] = None,
+    ext: str | None = None,
 ) -> str:
     """Save image bytes under ``/tmp/wcm/<category>/<name>_<md5><ext>``.
 
     Returns the absolute file path. Reuses the existing file if the hash
     already exists (idempotent).
     """
-    safe_name = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name) or "unknown"
+    safe_name = (
+        "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name) or "unknown"
+    )
     content_hash = hashlib.md5(image_bytes).hexdigest()
     final_ext = ext or _detect_image_ext(image_bytes)
     target_dir = Path("/tmp/wcm") / category
@@ -73,7 +75,7 @@ def _persist_image(
     return str(target_path)
 
 
-def _to_bytes(img_source: Union[str, Path, bytes, np.ndarray]) -> bytes:
+def _to_bytes(img_source: str | Path | bytes | np.ndarray) -> bytes:
     """Coerce the legacy ``img_source`` overload to raw bytes.
 
     Raises ValueError for URLs — the route layer owns URL downloads now.
@@ -101,8 +103,8 @@ class FaceEngine:
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        distance_metric: Optional[str] = None,
+        model_name: str | None = None,
+        distance_metric: str | None = None,
     ):
         """Args are accepted for back-compat with the old DeepFace signature
         and are ignored — InsightFace Server ships a single fixed model
@@ -122,9 +124,7 @@ class FaceEngine:
     # ------------------------------------------------------------------
     # Read paths (legacy contract preserved)
     # ------------------------------------------------------------------
-    async def detect_faces(
-        self, img_source: Union[str, Path, bytes, np.ndarray]
-    ) -> list[dict]:
+    async def detect_faces(self, img_source: str | Path | bytes | np.ndarray) -> list[dict]:
         """Detect faces in an image.
 
         Accepts the legacy overload (path | bytes | np.ndarray). Each
@@ -144,17 +144,15 @@ class FaceEngine:
             include_embeddings=True,
         )
 
-    async def generate_embedding(
-        self, img_source: Union[str, Path, bytes, np.ndarray]
-    ) -> np.ndarray:
+    async def generate_embedding(self, img_source: str | Path | bytes | np.ndarray) -> np.ndarray:
         """Generate a 512-d float32 embedding for the most prominent face."""
         image_bytes = _to_bytes(img_source)
         return await self._run(self._adapter.embed, image_bytes)
 
     async def search(
         self,
-        img_source: Union[str, Path, bytes, np.ndarray],
-        name: Optional[str] = None,
+        img_source: str | Path | bytes | np.ndarray,
+        name: str | None = None,
         top_k: int = 10,
         threshold: float = 0.3,
     ) -> list[dict]:
@@ -201,8 +199,8 @@ class FaceEngine:
 
     async def verify_faces(
         self,
-        img1: Union[str, Path, bytes, np.ndarray],
-        img2: Union[str, Path, bytes, np.ndarray],
+        img1: str | Path | bytes | np.ndarray,
+        img2: str | Path | bytes | np.ndarray,
     ) -> bool:
         """Return True iff similarity ≥ ``insightface_verify_similarity_threshold``.
 
@@ -219,7 +217,7 @@ class FaceEngine:
     def register_face(
         self,
         name: str,
-        file_path: Optional[str] = None,
+        file_path: str | None = None,
     ) -> FaceRecord:
         """Sync DB-only insert (no remote call). Preserved for back-compat
         with scripts that want to record a row without enrolling."""
@@ -240,13 +238,13 @@ class FaceEngine:
     async def register_from_image(
         self,
         name: str,
-        img_source: Union[str, Path, bytes, np.ndarray],
-        category: Optional[str] = None,
+        img_source: str | Path | bytes | np.ndarray,
+        category: str | None = None,
         *,
-        occupation: Optional[str] = None,
-        type_: Optional[str] = None,
-        remarks: Optional[str] = None,
-        external_id: Optional[str] = None,
+        occupation: str | None = None,
+        type_: str | None = None,
+        remarks: str | None = None,
+        external_id: str | None = None,
     ) -> FaceRecord:
         """Persist bytes, write a FaceRecord, enroll into InsightFace.
 
@@ -316,11 +314,12 @@ class FaceEngine:
     @staticmethod
     async def _run(func, *args, **kwargs):
         import asyncio
+
         return await asyncio.to_thread(func, *args, **kwargs)
 
 
 # Global engine instance
-_engine: Optional[FaceEngine] = None
+_engine: FaceEngine | None = None
 
 
 def get_face_engine() -> FaceEngine:

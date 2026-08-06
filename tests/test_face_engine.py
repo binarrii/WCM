@@ -1,13 +1,14 @@
 """Unit tests for FaceEngine — adapter mocked; live server untouched."""
+
 from __future__ import annotations
 
 import pytest
 
+from tests.test_ifs_adapter import _make_client
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine
 
 from .conftest import FakeTransport
-from tests.test_ifs_adapter import _make_client
 
 
 # ----------------------------------------------------------------------
@@ -17,6 +18,7 @@ from tests.test_ifs_adapter import _make_client
 def engine(fake_transport: FakeTransport, monkeypatch):
     """A FaceEngine wired to a fake transport. Wipes the singleton."""
     import wcm_facerec.face_engine as fe_mod
+
     monkeypatch.setattr(fe_mod, "_engine", None)
 
     # Force the singleton to be created against our test base URL so the
@@ -35,10 +37,13 @@ def engine(fake_transport: FakeTransport, monkeypatch):
 def test_detect_rejects_url_gr_source():
     """URLs must be downloaded by the route layer; engine refuses them."""
     import asyncio
+
     from wcm_facerec.face_engine import FaceEngine
 
     e = FaceEngine()
-    e._adapter.detect = lambda *_a, **_kw: [{"facial_area": {}, "confidence": 0, "area": 0, "embedding": None}]
+    e._adapter.detect = lambda *_a, **_kw: [
+        {"facial_area": {}, "confidence": 0, "area": 0, "embedding": None}
+    ]
 
     async def go():
         return await e.detect_faces("https://example.com/x.jpg")
@@ -51,9 +56,7 @@ def test_detect_rejects_url_gr_source():
 # ----------------------------------------------------------------------
 # Search results stay sorted by distance (legacy contract)
 # ----------------------------------------------------------------------
-def test_search_returns_results_in_distance_order(
-    engine, fake_transport, sample_image_bytes
-):
+def test_search_returns_results_in_distance_order(engine, fake_transport, sample_image_bytes):
     fake_transport.register(
         "POST",
         "/v1/collections/all-persons/search",
@@ -75,12 +78,20 @@ def test_search_returns_results_in_distance_order(
     fake_transport.register(
         "GET",
         "/v1/collections/all-persons/persons/p1/faces",
-        {"faces": [{"id": "f1", "bounding_box": {"pixels": {"x": 1, "y": 2, "width": 3, "height": 4}}}]},
+        {
+            "faces": [
+                {"id": "f1", "bounding_box": {"pixels": {"x": 1, "y": 2, "width": 3, "height": 4}}}
+            ]
+        },
     )
     fake_transport.register(
         "GET",
         "/v1/collections/all-persons/persons/p2/faces",
-        {"faces": [{"id": "f2", "bounding_box": {"pixels": {"x": 5, "y": 6, "width": 7, "height": 8}}}]},
+        {
+            "faces": [
+                {"id": "f2", "bounding_box": {"pixels": {"x": 5, "y": 6, "width": 7, "height": 8}}}
+            ]
+        },
     )
     import asyncio
 
@@ -92,9 +103,7 @@ def test_search_returns_results_in_distance_order(
     assert matches[1]["source_x"] == 1
 
 
-def test_search_threshold_filters_by_distance(
-    engine, fake_transport, sample_image_bytes
-):
+def test_search_threshold_filters_by_distance(engine, fake_transport, sample_image_bytes):
     """threshold=0.3 (distance) → similarity >= 0.7 must pass.
 
     The SDK applies the threshold server-side. We mimic that here by only
@@ -105,15 +114,22 @@ def test_search_threshold_filters_by_distance(
         "/v1/collections/all-persons/search",
         {
             "matches": [
-                {"person": {"id": "p1", "name": "Pass", "metadata": {}},
-                 "matched_face_id": "f1", "similarity": 0.8},
+                {
+                    "person": {"id": "p1", "name": "Pass", "metadata": {}},
+                    "matched_face_id": "f1",
+                    "similarity": 0.8,
+                },
             ]
         },
     )
     fake_transport.register(
         "GET",
         "/v1/collections/all-persons/persons/p1/faces",
-        {"faces": [{"id": "f1", "bounding_box": {"pixels": {"x": 0, "y": 0, "width": 1, "height": 1}}}]},
+        {
+            "faces": [
+                {"id": "f1", "bounding_box": {"pixels": {"x": 0, "y": 0, "width": 1, "height": 1}}}
+            ]
+        },
     )
     import asyncio
 
@@ -121,9 +137,7 @@ def test_search_threshold_filters_by_distance(
     assert [m["name"] for m in matches] == ["Pass"]
 
 
-def test_search_passes_similarity_threshold_to_sdk(
-    engine, fake_transport, sample_image_bytes
-):
+def test_search_passes_similarity_threshold_to_sdk(engine, fake_transport, sample_image_bytes):
     """threshold=0.3 → SDK receives threshold=0.7 (1 - 0.3)."""
     fake_transport.register(
         "POST",
@@ -145,9 +159,7 @@ def test_search_passes_similarity_threshold_to_sdk(
 # Verify uses insightface_verify_similarity_threshold (not the legacy
 # cosine-distance threshold).
 # ----------------------------------------------------------------------
-def test_verify_uses_similarity_threshold(
-    engine, fake_transport, monkeypatch, sample_image_bytes
-):
+def test_verify_uses_similarity_threshold(engine, fake_transport, monkeypatch, sample_image_bytes):
     monkeypatch.setattr(settings, "insightface_verify_similarity_threshold", 0.6)
     fake_transport.register(
         "POST",
@@ -212,10 +224,7 @@ def test_register_writes_to_both_aggregate_and_category_collection(
     # Local FaceRecord exists and has a UUID.
     assert record.id is not None
     # The metadata for both calls included our form fields.
-    posts = [
-        c for c in fake_transport.calls
-        if c[0] == "POST" and c[1].endswith("/persons")
-    ]
+    posts = [c for c in fake_transport.calls if c[0] == "POST" and c[1].endswith("/persons")]
     assert len(posts) == 2
     # Both should mention "category" in metadata. We can't easily assert on
     # the multipart body here; the live round-trip test covers that.

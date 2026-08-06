@@ -26,11 +26,12 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import Column, DateTime, Float, ForeignKey, String, Text, create_engine, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, relationship
+from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
 try:
     from pgvector.psycopg2 import register_vector
     from pgvector.sqlalchemy import VECTOR
+
     PGVECTOR_AVAILABLE = True
 except ImportError:
     PGVECTOR_AVAILABLE = False
@@ -61,11 +62,13 @@ MIN_FACE_PIXELS = 128 * 128
 
 class Base(DeclarativeBase):
     """SQLAlchemy base."""
+
     pass
 
 
 class Person(Base):
     """Person model with basic information."""
+
     __tablename__ = "persons"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -83,6 +86,7 @@ class Person(Base):
 
 class FaceRecord(Base):
     """Face record model."""
+
     __tablename__ = "face_records"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -145,7 +149,7 @@ def extract_name_from_path(path: Path) -> str:
     name = path.stem
     for suffix in ["_face", "_aligned", "_crop"]:
         if name.endswith(suffix):
-            name = name[:-len(suffix)]
+            name = name[: -len(suffix)]
 
     if "_" in name:
         parts = name.split("_")
@@ -394,7 +398,17 @@ Examples:
     parser.add_argument(
         "--model",
         default=os.getenv("DEEPFACE_MODEL", "Facenet512"),
-        choices=["VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace", "DeepID", "ArcFace", "Dlib", "SFace"],
+        choices=[
+            "VGG-Face",
+            "Facenet",
+            "Facenet512",
+            "OpenFace",
+            "DeepFace",
+            "DeepID",
+            "ArcFace",
+            "Dlib",
+            "SFace",
+        ],
         help="DeepFace model to use (default: Facenet512)",
     )
     parser.add_argument(

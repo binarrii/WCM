@@ -6,6 +6,7 @@ Goals:
   adapter exercises real serialization/deserialization paths.
 - Generate a tiny in-memory JPEG fixture for image bytes.
 """
+
 from __future__ import annotations
 
 import io
@@ -67,7 +68,9 @@ class FakeTransport(httpx.BaseTransport):
         self.calls.append((request.method, str(request.url), None))
         if key in self.responses:
             return httpx.Response(200, json=self.responses[key])
-        return httpx.Response(404, json={"error": {"code": "not_found", "message": f"unmocked {key}"}})
+        return httpx.Response(
+            404, json={"error": {"code": "not_found", "message": f"unmocked {key}"}}
+        )
 
 
 @pytest.fixture

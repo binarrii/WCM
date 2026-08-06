@@ -1,23 +1,24 @@
 import asyncio
+
 #!/usr/bin/env python3
 """Import extracted faces into the database."""
 
+import hashlib
 import os
 import sys
-import hashlib
 import uuid
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
-import numpy as np
 import cv2
+import numpy as np
 
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from wcm_facerec.face_engine import FaceEngine, MIN_FACE_PIXELS
-from wcm_facerec.database import FaceRecord, Person, get_session
 from wcm_facerec.config import settings
+from wcm_facerec.database import FaceRecord, Person, get_session
+from wcm_facerec.face_engine import MIN_FACE_PIXELS, FaceEngine
 
 
 def import_faces_from_directory(

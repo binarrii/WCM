@@ -6,8 +6,10 @@ Marked live; skipped unless RUN_LIVE=1. Run with:
 
 Targets ``http://10.252.25.251:18097`` (override via ``WCM_INSIGHTFACE_BASE_URL``).
 """
+
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 
@@ -15,7 +17,6 @@ import pytest
 
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine
-
 
 pytestmark = pytest.mark.live
 
@@ -51,9 +52,21 @@ def test_live_embed_is_512d(engine, sample_bytes):
     assert e.shape == (512,)
     # Buffalo_m embeddings are L2-normalized out of the box.
     import math
-    assert math.isclose(float((e["embedding"].tolist() if hasattr(e, "keys") else e) @ (e["embedding"].tolist() if hasattr(e, "keys") else e)), 1.0, abs_tol=1e-3) or True
+
+    assert (
+        math.isclose(
+            float(
+                (e["embedding"].tolist() if hasattr(e, "keys") else e)
+                @ (e["embedding"].tolist() if hasattr(e, "keys") else e)
+            ),
+            1.0,
+            abs_tol=1e-3,
+        )
+        or True
+    )
     # The simpler check: norm is ~1
     import numpy as np
+
     assert abs(float(np.linalg.norm(e)) - 1.0) < 1e-3
 
 
@@ -103,18 +116,17 @@ def test_live_engine_register_and_cleanup(engine, sample_bytes):
         for cid in {settings.insightface_collection_id, "未分类"} & set(
             settings.insightface_category_collections.values()
         ):
-            try:
+            with contextlib.suppress(Exception):
                 engine._adapter.delete_person(record.id, collection_id=cid)
-            except Exception:
-                pass
         # Always remove from the aggregate collection keyed by record.id is wrong;
         # the IFS-side person_id is its own. Fetch and delete via search.
         # The simplest reliable path: search for our unique name, then delete.
         matches = asyncio.run(engine.search(sample_bytes, top_k=20, threshold=0.0))
         for m in matches:
             if m.get("name") == name:
-                for cid in [settings.insightface_collection_id, *settings.insightface_category_collections.values()]:
-                    try:
+                for cid in [
+                    settings.insightface_collection_id,
+                    *settings.insightface_category_collections.values(),
+                ]:
+                    with contextlib.suppress(Exception):
                         engine._adapter.delete_person(m["person_id"], collection_id=cid)
-                    except Exception:
-                        pass

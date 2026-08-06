@@ -3,6 +3,7 @@
 
 print("1 ==> before import")
 import tensorflow as tf
+
 print("2 ==> after import")
 
 print(f"3 ==> {tf.__version__}")

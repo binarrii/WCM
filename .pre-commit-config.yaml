@@ -1,0 +1,23 @@
+# Pre-commit hook configuration. Install once with:
+#
+#     uv pip install pre-commit
+#     pre-commit install
+#
+# Then `git commit` will run the listed hooks on staged files. Run
+# manually against the whole repo with:
+#
+#     pre-commit run --all-files
+#
+# `pre-commit.ci` is the optional hosted service that runs the same
+# hooks on PRs — not used here; configure on pre-commit.ci if desired.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      # Run the linter (with --fix) before the formatter so that autofixable
+      # rules (e.g. import sorting) are resolved before the formatter touches
+      # the file. Both stages pass `--exit-non-zero-on-fix` exit cleanly when
+      # only autofixes were applied.
+      - id: ruff
+        args: ["--fix", "--exit-non-zero-on-fix"]
+      - id: ruff-format

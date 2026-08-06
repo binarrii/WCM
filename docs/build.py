@@ -1,11 +1,13 @@
-import os
+import base64
+import mimetypes
 import re
 import subprocess
 import urllib.parse
-import base64
-import mimetypes
 
-html_content = subprocess.check_output(['npx', 'marked', 'dataset_creation_standards.md'], text=True)
+html_content = subprocess.check_output(
+    ["npx", "marked", "dataset_creation_standards.md"], text=True
+)
+
 
 def replace_image_with_base64(match):
     file_path = match.group(1)
@@ -21,28 +23,35 @@ def replace_image_with_base64(match):
         print(f"Warning: Could not load image {file_path}: {e}")
         return match.group(0)
 
+
 html_content = re.sub(r'src="file://([^"]+)"', replace_image_with_base64, html_content)
 
 # Generate TOC
 toc = "<h2>目录 / 大纲</h2>\n<ul style='list-style-type: none; padding-left: 0;'>\n"
-for match in re.finditer(r'<h([23])>(.*?)</h\1>', html_content):
+for match in re.finditer(r"<h([23])>(.*?)</h\1>", html_content):
     level = int(match.group(1))
     text = match.group(2)
-    text_clean = re.sub(r'<[^>]+>', '', text)
+    text_clean = re.sub(r"<[^>]+>", "", text)
     indent = "20px" if level == 3 else "0px"
     weight = "bold" if level == 2 else "normal"
     toc += f"<li style='margin-left: {indent}; margin-bottom: 5px;'><a href='#{text_clean}' style='text-decoration: none; color: #2563eb; font-weight: {weight};'>{text_clean}</a></li>\n"
 toc += "</ul>\n<hr>\n"
 
 # Add id attributes for anchors
-html_content = re.sub(r'<h([23])>(.*?)</h\1>', lambda m: f'<h{m.group(1)} id="{re.sub(r"<[^>]+>", "", m.group(2))}">{m.group(2)}</h{m.group(1)}>', html_content)
+html_content = re.sub(
+    r"<h([23])>(.*?)</h\1>",
+    lambda m: (
+        f'<h{m.group(1)} id="{re.sub(r"<[^>]+>", "", m.group(2))}">{m.group(2)}</h{m.group(1)}>'
+    ),
+    html_content,
+)
 
 # Watermark SVG
-svg = '''<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500">
+svg = """<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500">
 <g transform="rotate(-35, 250, 250)">
 <text x="50%" y="50%" fill="rgba(0,0,0,0.06)" font-size="26" font-weight="bold" font-family="sans-serif" text-anchor="middle">平台技术中心      AI能力研发分部</text>
 </g>
-</svg>'''
+</svg>"""
 svg_encoded = urllib.parse.quote(svg)
 
 watermark_css = f"""

@@ -11,13 +11,13 @@ update_names_from_excel.py
     uv run python scripts/update_names_from_excel.py [--dry-run]
 """
 
+import argparse
 import os
 import sys
-import argparse
 from pathlib import Path
 
-import xlrd
 import psycopg2
+import xlrd
 
 # ==========================================
 # 配置
@@ -123,7 +123,7 @@ def update_database(mapping: dict[str, str], dry_run: bool = False):
     # 清理未匹配到且名字为纯数字序号的记录
     cur.execute("SELECT COUNT(*) FROM face_records WHERE name ~ '^[0-9]+$'")
     numeric_count = cur.fetchone()[0]
-    
+
     if numeric_count > 0:
         if dry_run:
             print(f"  [DRY-RUN] 将删除 {numeric_count} 条未匹配到的纯数字序号记录")
@@ -135,7 +135,7 @@ def update_database(mapping: dict[str, str], dry_run: bool = False):
 
     if not dry_run and (updated > 0 or deleted > 0):
         conn.commit()
-        print(f"[INFO] 已提交事务")
+        print("[INFO] 已提交事务")
     elif dry_run:
         conn.rollback()
 

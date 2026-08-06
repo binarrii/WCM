@@ -3,6 +3,7 @@
 Strategy: instantiate the vendored SDK Client with a FakeTransport so we
 can inspect outgoing requests and inject canned responses.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,9 +37,7 @@ def adapter(fake_transport: FakeTransport):
 # ----------------------------------------------------------------------
 # Detection
 # ----------------------------------------------------------------------
-def test_detect_normalizes_bbox_and_filters_tiny_faces(
-    adapter, fake_transport, sample_image_bytes
-):
+def test_detect_normalizes_bbox_and_filters_tiny_faces(adapter, fake_transport, sample_image_bytes):
     fake_transport.register(
         "POST",
         "/v1/detect",
@@ -72,8 +71,14 @@ def test_detect_sorts_by_area_desc(adapter, fake_transport, sample_image_bytes):
         "/v1/detect",
         {
             "faces": [
-                {"bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}}, "detection_score": 0.9},
-                {"bbox": {"pixels": {"x": 0, "y": 0, "width": 200, "height": 200}}, "detection_score": 0.95},
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "detection_score": 0.9,
+                },
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 200, "height": 200}},
+                    "detection_score": 0.95,
+                },
             ],
             "processing_ms": 1.0,
         },
@@ -90,7 +95,10 @@ def test_detect_with_include_embeddings_calls_embeddings_endpoint(
         "/v1/detect",
         {
             "faces": [
-                {"bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}}, "detection_score": 0.9},
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "detection_score": 0.9,
+                },
             ],
             "processing_ms": 1.0,
         },
@@ -126,12 +134,16 @@ def test_search_converts_similarity_to_distance(adapter, fake_transport, sample_
                 "detection_score": 0.95,
             },
             "matches": [
-                {"person": {"id": "p_001", "name": "Alice", "metadata": {}},
-                "matched_face_id": "f_001",
-                "similarity": 0.9},
-                {"person": {"id": "p_002", "name": "Bob", "metadata": {}},
-                "matched_face_id": "f_002",
-                "similarity": 0.5},
+                {
+                    "person": {"id": "p_001", "name": "Alice", "metadata": {}},
+                    "matched_face_id": "f_001",
+                    "similarity": 0.9,
+                },
+                {
+                    "person": {"id": "p_002", "name": "Bob", "metadata": {}},
+                    "matched_face_id": "f_002",
+                    "similarity": 0.5,
+                },
             ],
             "threshold": 0.4,
         },
@@ -190,7 +202,11 @@ def test_search_handles_string_metadata(adapter, fake_transport, sample_image_by
         {
             "matches": [
                 {
-                    "person": {"id": "p_001", "name": "X", "metadata": json.dumps({"category": "c1"})},
+                    "person": {
+                        "id": "p_001",
+                        "name": "X",
+                        "metadata": json.dumps({"category": "c1"}),
+                    },
                     "matched_face_id": "f_001",
                     "similarity": 0.8,
                 }
@@ -217,9 +233,7 @@ def test_compare_returns_similarity(adapter, fake_transport, sample_image_bytes)
 # ----------------------------------------------------------------------
 # Register / delete / bbox
 # ----------------------------------------------------------------------
-def test_register_person_returns_person_and_face_ids(
-    adapter, fake_transport, sample_image_bytes
-):
+def test_register_person_returns_person_and_face_ids(adapter, fake_transport, sample_image_bytes):
     fake_transport.register(
         "POST",
         "/v1/collections/all-persons/persons",
@@ -239,9 +253,7 @@ def test_register_person_returns_person_and_face_ids(
     assert fid == "f_new"
 
 
-def test_register_person_raises_when_no_face_enrolled(
-    adapter, fake_transport, sample_image_bytes
-):
+def test_register_person_raises_when_no_face_enrolled(adapter, fake_transport, sample_image_bytes):
     fake_transport.register(
         "POST",
         "/v1/collections/all-persons/persons",

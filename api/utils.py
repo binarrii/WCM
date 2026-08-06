@@ -1,13 +1,10 @@
 # pyright: ignore[reportUnusedFunction]
 
-import asyncio
-import httpx
-import cv2
 import base64
 from pathlib import Path
 
-from wcm_facerec.config import settings
-from wcm_facerec import __version__
+import cv2
+import httpx
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
 MIN_FACE_PIXELS = 32 * 32
@@ -21,7 +18,7 @@ async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> 
             content_length = response.headers.get("Content-Length")
             if content_length and int(content_length) > max_size:
                 raise ValueError(f"File too large. Max allowed: {max_size} bytes")
-            
+
             chunks = bytearray()
             async for chunk in response.aiter_bytes():
                 chunks.extend(chunk)
@@ -38,7 +35,7 @@ def _download_video_safe_sync(url: str, file_path: Path, max_size: int, timeout:
             content_length = response.headers.get("Content-Length")
             if content_length and int(content_length) > max_size:
                 raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
-                
+
             downloaded = 0
             with open(file_path, "wb") as f:
                 for chunk in response.iter_bytes():
@@ -48,29 +45,29 @@ def _download_video_safe_sync(url: str, file_path: Path, max_size: int, timeout:
                         raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
 
 
-def _extract_video_frames_for_ocr(video_path: Path, sample_interval: float) -> list[tuple[float, str]]:
+def _extract_video_frames_for_ocr(
+    video_path: Path, sample_interval: float
+) -> list[tuple[float, str]]:
     """Extract frames from video and encode to base64 for OCR."""
     frames_b64 = []
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return frames_b64
-        
+
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps <= 0:
         fps = 25.0
-        
+
     frame_idx = 0
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-            
+
         if frame_idx % int(max(fps * sample_interval, 1)) == 0:
-            _, buffer = cv2.imencode('.jpg', frame)
-            b64_img = base64.b64encode(buffer).decode('utf-8')
-            frames_b64.append((frame_idx/fps, b64_img))
+            _, buffer = cv2.imencode(".jpg", frame)
+            b64_img = base64.b64encode(buffer).decode("utf-8")
+            frames_b64.append((frame_idx / fps, b64_img))
         frame_idx += 1
     cap.release()
     return frames_b64
-
-

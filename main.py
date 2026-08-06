@@ -1,4 +1,5 @@
 import asyncio
+
 #!/usr/bin/env python3
 """CLI tool for face detection and visualization.
 
@@ -9,8 +10,6 @@ Usage:
 """
 
 import argparse
-import sys
-from pathlib import Path
 
 import cv2
 import httpx
@@ -60,7 +59,7 @@ def draw_faces(img: np.ndarray, faces: list[dict], min_area: int) -> np.ndarray:
         area = w * h
         conf = face.get("confidence", 0)
 
-        label = f"#{i+1} {w}x{h} a={area} c={conf:.3f}"
+        label = f"#{i + 1} {w}x{h} a={area} c={conf:.3f}"
         if area < min_area:
             color = (128, 128, 128)  # gray for filtered
         else:
@@ -75,7 +74,9 @@ def draw_faces(img: np.ndarray, faces: list[dict], min_area: int) -> np.ndarray:
 
         # Draw label text
         text_color = (255, 255, 255) if color == (0, 0, 255) else (0, 0, 0)
-        cv2.putText(result, label, (x, y - baseline - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1)
+        cv2.putText(
+            result, label, (x, y - baseline - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1
+        )
 
     return result
 
@@ -103,9 +104,11 @@ def main():
         area = (fa.get("w", 0) or 0) * (fa.get("h", 0) or 0)
         conf = f.get("confidence", 0)
         print(f"Face #{i}:")
-        print(f"  bbox: x={fa.get('x')}, y={fa.get('y')}, w={fa.get('w')}, h={fa.get('h')}, area={area}")
+        print(
+            f"  bbox: x={fa.get('x')}, y={fa.get('y')}, w={fa.get('w')}, h={fa.get('h')}, area={area}"
+        )
         print(f"  confidence: {conf:.3f}")
-        print(f"  landmarks:")
+        print("  landmarks:")
         print(f"    left_eye:  {fa.get('left_eye')}")
         print(f"    right_eye: {fa.get('right_eye')}")
         print(f"    nose:      {fa.get('nose')}")
@@ -115,14 +118,20 @@ def main():
 
     result = draw_faces(img, faces, args.min_area or MIN_FACE_PIXELS)
 
-    passed = sum(1 for f in faces if (f.get("facial_area", {}).get("w", 0) or 0) * (f.get("facial_area", {}).get("h", 0) or 0) >= MIN_FACE_PIXELS)
+    passed = sum(
+        1
+        for f in faces
+        if (f.get("facial_area", {}).get("w", 0) or 0) * (f.get("facial_area", {}).get("h", 0) or 0)
+        >= MIN_FACE_PIXELS
+    )
     print(f"Faces passing area filter ({MIN_FACE_PIXELS}): {passed}/{len(faces)}")
 
     if args.output:
         output_path = args.output
     else:
         import datetime
-        timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
         output_path = f"/tmp/face_detection_result_{timestamp}.png"
     cv2.imwrite(output_path, result)
     print(f"Saved: {output_path}")

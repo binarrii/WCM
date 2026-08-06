@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 # InsightFace Server is a single-model service (currently buffalo_m v0.7,
 # 512-dim ArcFace R50). The legacy per-model dim lookup is kept only as a
 # reference; the engine now always uses 512.
@@ -49,7 +48,17 @@ class Settings(BaseSettings):
     # ---- Deprecated DeepFace settings (no-op; kept for one release) ----
     # These are NOT read by the new FaceEngine. They exist only so that an
     # operator who reverts the branch sees the old config still works.
-    deepface_model: Literal["VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace", "DeepID", "ArcFace", "Dlib", "SFace"] = "Facenet512"  # noqa: F841
+    deepface_model: Literal[
+        "VGG-Face",
+        "Facenet",
+        "Facenet512",
+        "OpenFace",
+        "DeepFace",
+        "DeepID",
+        "ArcFace",
+        "Dlib",
+        "SFace",
+    ] = "Facenet512"  # noqa: F841
     deepface_distance_metric: Literal["cosine", "euclidean", "euclidean_l2"] = "cosine"  # noqa: F841
     deepface_api_url: str = "http://127.0.0.1:5000"  # noqa: F841
     # Cosine-distance threshold kept for callers that still consult it.

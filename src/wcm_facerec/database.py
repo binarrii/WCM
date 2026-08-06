@@ -7,7 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text, create_engine
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, relationship
+from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
 from .config import settings
 
@@ -64,9 +64,7 @@ class SensitiveWord(Base):
     category = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        {"schema": None},
-    )
+    __table_args__ = ({"schema": None},)
 
     def __repr__(self) -> str:
         return f"<SensitiveWord(id={self.id}, word={self.word}, category={self.category})>"
@@ -106,6 +104,3 @@ def init_db():
     # Create tables
     Base.metadata.create_all(engine)
     conn.close()
-
-
-

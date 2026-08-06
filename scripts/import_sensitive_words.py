@@ -15,7 +15,7 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wcm_facerec.database import get_session, SensitiveWord
+from wcm_facerec.database import SensitiveWord, get_session
 
 
 def import_sensitive_words(directory: str | Path) -> dict:
@@ -39,17 +39,18 @@ def import_sensitive_words(directory: str | Path) -> dict:
             category = txt_file.stem  # filename without extension
             stats["files"] += 1
 
-            with open(txt_file, "r", encoding="utf-8") as f:
+            with open(txt_file, encoding="utf-8") as f:
                 for line in f:
                     word = line.strip()
                     if not word:
                         continue
 
                     # Check for duplicates within same category
-                    exists = session.query(SensitiveWord).filter(
-                        SensitiveWord.word == word,
-                        SensitiveWord.category == category
-                    ).first()
+                    exists = (
+                        session.query(SensitiveWord)
+                        .filter(SensitiveWord.word == word, SensitiveWord.category == category)
+                        .first()
+                    )
 
                     if exists:
                         stats["duplicates"] += 1

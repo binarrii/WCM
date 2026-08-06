@@ -43,7 +43,9 @@ def create_app() -> FastAPI:
 
     # Mount static files for face images
     import os
+
     from fastapi.staticfiles import StaticFiles
+
     os.makedirs("/tmp/wcm", exist_ok=True)
     app.mount("/images", StaticFiles(directory="/tmp/wcm"), name="images")
 
@@ -56,6 +58,7 @@ app = create_app()
 def main():
     """Run the application."""
     import uvicorn
+
     uvicorn.run(
         app,
         host=settings.api_host,

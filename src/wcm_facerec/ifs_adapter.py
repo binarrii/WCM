@@ -11,6 +11,7 @@ occupation, type, remarks, category. The WCM `Person` row (Postgres) still
 holds the canonical copy of those, but search results now need to surface
 them from the metadata.
 """
+
 from __future__ import annotations
 
 import io
@@ -21,7 +22,10 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from wcm_facerec.vendor.insightface_server import Client, ImageInput  # type: ignore  # noqa: F401  (ImageInput re-export)
+from wcm_facerec.vendor.insightface_server import (  # type: ignore  # noqa: F401  (ImageInput re-export)
+    Client,
+    ImageInput,
+)
 from wcm_facerec.vendor.insightface_server.exceptions import NotFoundError
 
 logger = logging.getLogger(__name__)
@@ -88,7 +92,7 @@ class InsightFaceAdapter:
         embeddings_by_index: list[np.ndarray | None] = []
         if include_embeddings and faces:
             emb_result = self._client.embeddings(image=image_bytes)
-            for ef in (emb_result.faces or []):
+            for ef in emb_result.faces or []:
                 e = ef.get("embedding")
                 embeddings_by_index.append(
                     np.asarray(e, dtype=np.float32) if e is not None else None
@@ -110,13 +114,15 @@ class InsightFaceAdapter:
             elif i < len(embeddings_by_index):
                 embedding = embeddings_by_index[i]
             face_crop = _crop_or_none(np_img, x, y, w, h)
-            out.append({
-                "face": face_crop,
-                "confidence": confidence,
-                "facial_area": {"x": x, "y": y, "w": w, "h": h},
-                "area": w * h,
-                "embedding": embedding,
-            })
+            out.append(
+                {
+                    "face": face_crop,
+                    "confidence": confidence,
+                    "facial_area": {"x": x, "y": y, "w": w, "h": h},
+                    "area": w * h,
+                    "embedding": embedding,
+                }
+            )
         out.sort(key=lambda d: d["area"], reverse=True)
         return out[:max_keep]
 
@@ -179,27 +185,29 @@ class InsightFaceAdapter:
                     metadata = json.loads(metadata)
                 except json.JSONDecodeError:
                     metadata = {}
-            out.append({
-                "id": person.get("external_id"),
-                "name": person.get("name"),
-                "person_name": person.get("name"),
-                "person_id": person.get("id"),
-                "similarity": similarity,
-                "distance": 1.0 - similarity,
-                "matched_face_id": m.get("matched_face_id"),
-                "created_at": person.get("created_at"),
-                "file_path": metadata.get("file_path"),
-                "category": metadata.get("category"),
-                "occupation": metadata.get("occupation"),
-                "type": metadata.get("type"),
-                "remarks": metadata.get("remarks"),
-                # source_x/y/w/h populated lazily by FaceEngine.search after a
-                # per-match list_faces round-trip; default to query bbox here.
-                "source_x": None,
-                "source_y": None,
-                "source_w": None,
-                "source_h": None,
-            })
+            out.append(
+                {
+                    "id": person.get("external_id"),
+                    "name": person.get("name"),
+                    "person_name": person.get("name"),
+                    "person_id": person.get("id"),
+                    "similarity": similarity,
+                    "distance": 1.0 - similarity,
+                    "matched_face_id": m.get("matched_face_id"),
+                    "created_at": person.get("created_at"),
+                    "file_path": metadata.get("file_path"),
+                    "category": metadata.get("category"),
+                    "occupation": metadata.get("occupation"),
+                    "type": metadata.get("type"),
+                    "remarks": metadata.get("remarks"),
+                    # source_x/y/w/h populated lazily by FaceEngine.search after a
+                    # per-match list_faces round-trip; default to query bbox here.
+                    "source_x": None,
+                    "source_y": None,
+                    "source_w": None,
+                    "source_h": None,
+                }
+            )
         return out
 
     # ------------------------------------------------------------------
@@ -233,9 +241,7 @@ class InsightFaceAdapter:
         faces = result.faces or []
         if not faces:
             rejected = result.rejected_images or []
-            raise RuntimeError(
-                f"InsightFace did not enroll any face; rejected={rejected}"
-            )
+            raise RuntimeError(f"InsightFace did not enroll any face; rejected={rejected}")
         return str(result.person["id"]), str(faces[0]["id"])
 
     def delete_person(self, person_id: str, *, collection_id: str | None = None) -> None:
