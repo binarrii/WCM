@@ -1,7 +1,7 @@
 [project]
 name = "wcm-facerec"
 version = "0.1.0"
-description = "Large Scale Face Recognition with DeepFace + pgvector"
+description = "Large Scale Face Recognition with InsightFace Server + pgvector"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,29 +9,26 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "gunicorn>=23.0.0",
     "pydantic>=2.10.0",
-    "deepface>=0.0.89",
     "psycopg2-binary>=2.9.10",
     "sqlalchemy>=2.0.36",
     "pgvector>=0.3.1",
     "numpy>=2.2.0",
     "pillow>=11.1.0",
     "httpx>=0.28.1",
+    # Used by FaceEngine._to_bytes for the legacy np.ndarray img_source
+    # overload. The InsightFace adapter itself uses PIL only, but the
+    # public FaceEngine API still accepts arrays for back-compat with
+    # main.py and scripts/.
     "opencv-python-headless>=4.10.0.20241230",
-    "numpy<2.2.1",
-    "tf-keras>=2.21.0",
-    "tensorflow>=2.21.0",
     "xlrd>=2.0.2",
     "pydantic-settings>=2.13.1",
     "python-multipart>=0.0.26",
-    "transformers>=5.12.1",
-    "torch>=2.12.1",
-    "torchvision>=0.27.1",
+    # The InsightFace Server Python SDK is vendored under
+    # src/wcm_facerec/vendor/insightface_server/. Upgrade by replacing the
+    # vendored directory contents and bumping _VENDORED.md.
 ]
 
 [project.optional-dependencies]
-cuda = [
-    "tensorflow[and-cuda]>=2.21.0",
-]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.25.0",
@@ -52,3 +49,8 @@ packages = ["src/wcm_facerec"]
 
 [tool.hatch.build.targets.wheel.sources]
 "wcm_facerec" = "src/wcm_facerec"
+
+[tool.pytest.ini_options]
+markers = [
+    "live: hits the live InsightFace Server — gated on RUN_LIVE=1",
+]

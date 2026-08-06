@@ -1,25 +1,40 @@
-"""Core face recognition engine using DeepFace."""
+"""Core face recognition engine, now backed by InsightFace Server.
 
+Public API is preserved so that existing callers (api/routes.py,
+api/handlers.py, main.py, scripts/*.py) keep compiling:
+
+    - FaceEngine(model_name, distance_metric)  # legacy kwargs ignored
+    - engine.detect_faces(img_source) -> list[dict]
+    - engine.generate_embedding(img_source) -> np.ndarray
+    - engine.search(img_source, name=None, top_k=10, threshold=0.3) -> list[dict]
+    - engine.register_face(name, file_path=None) -> FaceRecord  (sync, DB-only)
+    - engine.register_from_image(name, img_source, category=None) -> FaceRecord
+    - engine.verify_faces(img1, img2) -> bool
+    - get_face_engine() -> FaceEngine  (cached singleton)
+
+Internally every method delegates to InsightFaceAdapter. The legacy
+``img_source`` overload (path | bytes | np.ndarray) is normalized to bytes
+at the boundary; the route layer is expected to already download URLs.
+"""
 from __future__ import annotations
 
-import asyncio
-import base64
 import hashlib
+import logging
 import uuid
 from pathlib import Path
 from typing import Optional, Union
 
-import httpx
 import cv2
 import numpy as np
 
-from sqlalchemy import text
-
-from .config import settings
+from .config import warn_deprecated, settings
 from .database import FaceRecord, get_session
+from .ifs_adapter import InsightFaceAdapter
+
+logger = logging.getLogger(__name__)
 
 
-# Minimum face area in pixels (128x128)
+# Minimum face area in pixels (kept for back-compat with scripts).
 MIN_FACE_PIXELS = 32 * 32
 
 
@@ -42,11 +57,10 @@ def _persist_image(
     category: str,
     ext: Optional[str] = None,
 ) -> str:
-    """Save image bytes under ``<data_root>/<category>/<name>_<md5><ext>``.
+    """Save image bytes under ``/tmp/wcm/<category>/<name>_<md5><ext>``.
 
     Returns the absolute file path. Reuses the existing file if the hash
-    already exists (idempotent), so re-registering the same image does
-    not create duplicates.
+    already exists (idempotent).
     """
     safe_name = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name) or "unknown"
     content_hash = hashlib.md5(image_bytes).hexdigest()
@@ -59,215 +73,83 @@ def _persist_image(
     return str(target_path)
 
 
-def _l2_normalize_embedding(embedding: np.ndarray) -> np.ndarray:
-    """Return a L2-normalized copy of an embedding."""
-    norm = np.linalg.norm(embedding)
-    if norm == 0:
-        return embedding
-    return embedding / norm
+def _to_bytes(img_source: Union[str, Path, bytes, np.ndarray]) -> bytes:
+    """Coerce the legacy ``img_source`` overload to raw bytes.
+
+    Raises ValueError for URLs — the route layer owns URL downloads now.
+    """
+    if isinstance(img_source, np.ndarray):
+        ok, buf = cv2.imencode(".jpg", img_source)
+        if not ok:
+            raise ValueError("failed to JPEG-encode ndarray")
+        return buf.tobytes()
+    if isinstance(img_source, (bytes, bytearray)):
+        return bytes(img_source)
+    if isinstance(img_source, (str, Path)):
+        s = str(img_source)
+        if s.startswith(("http://", "https://")):
+            raise ValueError(
+                "URLs must be downloaded by the route layer via _download_url_safe "
+                "before calling FaceEngine — engine accepts bytes only."
+            )
+        return Path(s).read_bytes()
+    raise TypeError(f"unsupported img_source type: {type(img_source)!r}")
 
 
 class FaceEngine:
-    """Face recognition engine using DeepFace."""
+    """Face recognition engine backed by InsightFace Server."""
 
     def __init__(
         self,
         model_name: Optional[str] = None,
         distance_metric: Optional[str] = None,
     ):
-        """Initialize face engine.
-
-        Args:
-            model_name: DeepFace model to use (default from settings)
-            distance_metric: Distance metric for comparison (default from settings)
-        """
-        self.model_name = model_name or settings.deepface_model
-        self.distance_metric = distance_metric or settings.deepface_distance_metric
+        """Args are accepted for back-compat with the old DeepFace signature
+        and are ignored — InsightFace Server ships a single fixed model
+        (buffalo_m, 512-dim ArcFace R50)."""
+        warn_deprecated()
+        self.model_name = model_name or "Facenet512"
+        self.distance_metric = distance_metric or "cosine"
         self.embedding_dim = settings.embedding_dim
-        self.api_url = settings.deepface_api_url
+        self.api_url = settings.insightface_base_url
+        self._adapter = InsightFaceAdapter(
+            base_url=settings.insightface_base_url,
+            collection_id=settings.insightface_collection_id,
+            timeout=settings.insightface_timeout_s,
+            api_key=settings.insightface_api_key or None,
+        )
 
-    def _prepare_image(self, img_source: Union[str, Path, bytes, np.ndarray]) -> str:
-        if isinstance(img_source, np.ndarray):
-            _, buf = cv2.imencode('.jpg', img_source)
-            b64_img = base64.b64encode(buf).decode('utf-8')
-            return f"data:image/jpeg;base64,{b64_img}"
-        elif isinstance(img_source, bytes):
-            b64_img = base64.b64encode(img_source).decode('utf-8')
-            return f"data:image/jpeg;base64,{b64_img}"
-        elif isinstance(img_source, (str, Path)):
-            with open(img_source, "rb") as f:
-                b64_img = base64.b64encode(f.read()).decode('utf-8')
-                return f"data:image/jpeg;base64,{b64_img}"
-        return ""
+    # ------------------------------------------------------------------
+    # Read paths (legacy contract preserved)
+    # ------------------------------------------------------------------
+    async def detect_faces(
+        self, img_source: Union[str, Path, bytes, np.ndarray]
+    ) -> list[dict]:
+        """Detect faces in an image.
 
-    async def _extract_faces_from_video_frame(self, frame: np.ndarray, frame_idx: int, fps: float) -> list[dict]:
-        """Extract faces from a video frame."""
-        
-        img_b64 = self._prepare_image(frame)
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.api_url}/represent",
-                    json={
-                        "img": img_b64,
-                        "model_name": self.model_name,
-                        "detector_backend": "fastmtcnn",
-                        "enforce_detection": False,
-                        "align": True
-                    }
-                )
-            resp.raise_for_status()
-            data = resp.json()
-            results = data.get("results", [])
-            
-            faces = []
-            for res in results:
-                fa = res.get("facial_area", {})
-                w = fa.get("w", 0) or 0
-                h = fa.get("h", 0) or 0
-                x = fa.get("x", 0) or 0
-                y = fa.get("y", 0) or 0
-                
-                if min(w, h) < 80:
-                    continue
-                    
-                face_crop = frame[max(0, y):y+h, max(0, x):x+w]
-                if face_crop.size == 0:
-                    continue
-                    
-                faces.append({
-                    "face": face_crop,
-                    "confidence": res.get("face_confidence", 1.0),
-                    "facial_area": fa,
-                    "area": w * h,
-                    "embedding": np.array(res["embedding"]) if "embedding" in res else None
-                })
-
-            # Sort by area and take top 3
-            sorted_faces = sorted(faces, key=lambda f: f["area"], reverse=True)
-            top_faces = sorted_faces[:3]
-
-            results_out = []
-            for i, face in enumerate(top_faces):
-                emb = face["embedding"]
-                if emb is not None and self.distance_metric == "euclidean_l2":
-                    emb = _l2_normalize_embedding(emb)
-                    
-                results_out.append({
-                    "face": face["face"],
-                    "confidence": face["confidence"],
-                    "face_id": f"frame_{frame_idx}_face_{i}",
-                    "frame_time": frame_idx / fps if fps > 0 else 0,
-                    "embedding": emb,
-                })
-            return results_out
-        except Exception as e:
-            print(f"DeepFace API Error (_extract_faces_from_video_frame): {e}")
-            return []
-
-    async def generate_embedding(self, img_source: Union[str, Path, bytes, np.ndarray]) -> np.ndarray:
-        """Generate face embedding asynchronously (supports bytes and arrays).
-
-        Args:
-            img_source: Path to local file, image bytes, or numpy array
-
-        Returns:
-            Face embedding as numpy array
+        Accepts the legacy overload (path | bytes | np.ndarray). Each
+        result has the original ``{face, confidence, facial_area, area,
+        embedding}`` dict. Sorted by area desc, top 3, ``min(w,h) >= 80``
+        filter applied inside the adapter. Embeddings are populated by
+        default — the legacy DeepFace path returned them inline.
         """
-        
-        img_b64 = self._prepare_image(img_source)
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.api_url}/represent",
-                    json={
-                        "img": img_b64,
-                        "model_name": self.model_name,
-                        "detector_backend": "fastmtcnn",
-                        "enforce_detection": False,
-                        "align": True
-                    }
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                embedding_array = np.array(data["results"][0]["embedding"])
-                if self.distance_metric == "euclidean_l2":
-                    embedding_array = _l2_normalize_embedding(embedding_array)
-                return embedding_array
-        except Exception as e:
-            print(f"DeepFace API Error (generate_embedding): {e}")
-            raise
-
-    async def detect_faces(self, img_source: Union[str, Path, np.ndarray]) -> list[dict]:
-        """Detect faces in an image asynchronously.
-
-        Args:
-            img_source: Path to image file, URL, or numpy array
-
-        Returns:
-            List of detected face dictionaries with 'face', 'confidence', 'facial_area', 'embedding'
-        """
-        
-        img_b64 = self._prepare_image(img_source)
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.api_url}/represent",
-                    json={
-                        "img": img_b64,
-                        "model_name": self.model_name,
-                        "detector_backend": "fastmtcnn",
-                        "enforce_detection": False,
-                        "align": True
-                    }
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                results = data.get("results", [])
-            
-            # Load original image to crop faces manually since API only returns coordinates
-            if isinstance(img_source, np.ndarray):
-                img_array = img_source
-            else:
-                img_array = cv2.imread(str(img_source), cv2.IMREAD_COLOR)
-
-            faces = []
-            for res in results:
-                fa = res.get("facial_area", {})
-                w = fa.get("w", 0) or 0
-                h = fa.get("h", 0) or 0
-                x = fa.get("x", 0) or 0
-                y = fa.get("y", 0) or 0
-                
-                # Filter: short side (min of w/h) must be >= 80 pixels
-                if min(w, h) < 80:
-                    continue
-                    
-                face_crop = img_array[max(0, y):y+h, max(0, x):x+w]
-                if face_crop.size == 0:
-                    continue
-                
-                faces.append({
-                    "face": face_crop,
-                    "confidence": res.get("face_confidence", 1.0),
-                    "facial_area": fa,
-                    "area": w * h,
-                    "embedding": np.array(res["embedding"]) if "embedding" in res else None
-                })
-            
-            # Sort by area descending, keep top 3
-            faces = sorted(faces, key=lambda f: f["area"], reverse=True)[:3]
-            
-            # normalize embeddings
-            for f in faces:
-                if f["embedding"] is not None and self.distance_metric == "euclidean_l2":
-                    f["embedding"] = _l2_normalize_embedding(f["embedding"])
-                    
-            return faces
-        except Exception as e:
-            print(f"DeepFace API Error (detect_faces): {e}")
+            image_bytes = _to_bytes(img_source)
+        except (TypeError, ValueError):
             return []
+        return await self._run(
+            self._adapter.detect,
+            image_bytes,
+            max_keep=3,
+            include_embeddings=True,
+        )
 
+    async def generate_embedding(
+        self, img_source: Union[str, Path, bytes, np.ndarray]
+    ) -> np.ndarray:
+        """Generate a 512-d float32 embedding for the most prominent face."""
+        image_bytes = _to_bytes(img_source)
+        return await self._run(self._adapter.embed, image_bytes)
 
     async def search(
         self,
@@ -276,277 +158,165 @@ class FaceEngine:
         top_k: int = 10,
         threshold: float = 0.3,
     ) -> list[dict]:
-        
-        img_b64 = await asyncio.to_thread(self._prepare_image, img_source)
-        
-        matches = []
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.api_url}/search",
-                    json={
-                        "img": img_b64,
-                        "model_name": self.model_name,
-                        "detector_backend": "fastmtcnn",
-                        "align": True,
-                        "enforce_detection": False,
-                        "k": top_k,
-                    }
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                
-            results = data.get("results", [])
-            if not results:
-                return []
-                
-            valid_matches = []
-            valid_uuids = set()
+        """Search the default collection for similar faces.
 
-            def resolve_face_result(match_dict):
-                identity = match_dict.get("img_name")
-                confidence = match_dict.get("confidence")
-                distance = match_dict.get("distance")
-                if distance is not None and distance > threshold:
-                    return
-                if confidence is not None and confidence < 0.7:
-                    return
-                if not identity:
-                    print("No identity")
-                    return
-                try:
-                    record_uuid = uuid.UUID(str(identity))
-                    valid_uuids.add(str(record_uuid))
-                    valid_matches.append(match_dict)
-                except ValueError:
-                    print(f"UUID error {identity}")
-                    return
-            
-            for face_results in results:
-                for match_dict in face_results:
-                    resolve_face_result(match_dict)
-                    if len(results) > 1:
-                        # if multiple persons found, only keep first match for each person
-                        break
+        ``threshold`` is on the legacy cosine-distance scale (lower = more
+        similar). It is converted internally to a similarity floor
+        ``1 - threshold`` before hitting InsightFace.
+        """
+        image_bytes = _to_bytes(img_source)
+        min_similarity = max(0.0, 1.0 - float(threshold))
+        matches = await self._run(
+            self._adapter.search,
+            image_bytes,
+            top_k=top_k,
+            min_similarity=min_similarity,
+        )
+        # Drop matches whose name doesn't match the requested filter, fetch
+        # the bbox for each remaining hit in parallel, and synthesize the
+        # ``category`` fallback from the file_path if metadata is empty
+        # (legacy FaceEngine derived category from /tmp/wcm/<...>/<cat>/...).
+        out: list[dict] = []
+        for m in matches:
+            if name and m.get("name") != name:
+                continue
+            bbox = await self._run(
+                self._adapter.get_face_bbox,
+                m["person_id"],
+                m["matched_face_id"],
+            )
+            if bbox:
+                m["source_x"] = bbox["x"]
+                m["source_y"] = bbox["y"]
+                m["source_w"] = bbox["w"]
+                m["source_h"] = bbox["h"]
+            # Legacy fallback: category parsed from file_path segments
+            if not m.get("category") and m.get("file_path"):
+                parts = m["file_path"].split("/", 4)
+                if len(parts) > 3:
+                    m["category"] = parts[3]
+            out.append(m)
+        out.sort(key=lambda x: x["distance"])
+        return out[:top_k]
 
-            if not valid_uuids:
-                return []
+    async def verify_faces(
+        self,
+        img1: Union[str, Path, bytes, np.ndarray],
+        img2: Union[str, Path, bytes, np.ndarray],
+    ) -> bool:
+        """Return True iff similarity ≥ ``insightface_verify_similarity_threshold``.
 
-            def db_query():
-                session = get_session()
-                in_clause = ",".join(f"'{u}'" for u in valid_uuids)
-                sql = text(f"""
-                    SELECT
-                        fr.id, fr.name, fr.file_path,
-                        fr.person_id, fr.created_at,
-                        p.name as person_name, p.occupation, p."type", p.remarks
-                    FROM face_records fr
-                    LEFT JOIN persons p ON fr.person_id = p.id
-                    WHERE fr.id IN ({in_clause})
-                """)
-                rows = session.execute(sql).fetchall()
-                session.close()
-                return {str(row.id): row for row in rows}
+        Legacy callers passed URLs/paths/arrays; we coerce to bytes here.
+        """
+        a = _to_bytes(img1)
+        b = _to_bytes(img2)
+        sim = await self._run(self._adapter.compare, a, b)
+        return sim >= settings.insightface_verify_similarity_threshold
 
-            db_records = await asyncio.to_thread(db_query)
-
-            def category(row):
-                if hasattr(row, "category") and row.category:
-                    return row.category
-                if hasattr(row, "file_path") and row.file_path:
-                    path_arr = row.file_path.split('/', 4)
-                return path_arr[3] if len(path_arr) > 3 else None
-            
-            for match_dict in valid_matches:
-                identity = str(uuid.UUID(str(match_dict.get("img_name"))))
-                row = db_records.get(identity)
-                if not row:
-                    continue
-                    
-                if name and row.name != name:
-                    continue
-                    
-                distance = match_dict.get("distance")
-                match = {
-                    "id": str(row.id),
-                    "name": row.name,
-                    "file_path": row.file_path,
-                    "distance": float(distance),
-                    "person_id": str(row.person_id) if row.person_id else None,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "source_x": match_dict.get("source_x"),
-                    "source_y": match_dict.get("source_y"),
-                    "source_w": match_dict.get("source_w"),
-                    "source_h": match_dict.get("source_h"),
-                    "person_name": row.person_name,
-                    "occupation": row.occupation,
-                    "category": category(row),
-                    "type": getattr(row, "type", getattr(row, "type_", None)),
-                    "remarks": row.remarks,
-                }
-                matches.append(match)
-                
-            matches.sort(key=lambda x: x["distance"])
-            return matches[:top_k]
-            
-        except Exception as e:
-            print(f"DeepFace API Error (search): {e}")
-            return []
-
-
+    # ------------------------------------------------------------------
+    # Write paths
+    # ------------------------------------------------------------------
     def register_face(
         self,
         name: str,
         file_path: Optional[str] = None,
     ) -> FaceRecord:
-        """Register a face in the database.
-
-        Args:
-            name: Person name
-            file_path: Optional local file path
-
-        Returns:
-            Created FaceRecord
-        """
+        """Sync DB-only insert (no remote call). Preserved for back-compat
+        with scripts that want to record a row without enrolling."""
         session = get_session()
-
-        record = FaceRecord(
-            id=uuid.uuid4(),
-            name=name,
-            file_path=file_path,
-        )
-        session.add(record)
-        session.commit()
-        session.refresh(record)
-        session.close()
-        return record
+        try:
+            record = FaceRecord(
+                id=uuid.uuid4(),
+                name=name,
+                file_path=file_path,
+            )
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+            return record
+        finally:
+            session.close()
 
     async def register_from_image(
         self,
         name: str,
-        img_source: Union[str, Path, bytes],
+        img_source: Union[str, Path, bytes, np.ndarray],
         category: Optional[str] = None,
+        *,
+        occupation: Optional[str] = None,
+        type_: Optional[str] = None,
+        remarks: Optional[str] = None,
+        external_id: Optional[str] = None,
     ) -> FaceRecord:
-        """Register a face from an image file or bytes.
+        """Persist bytes, write a FaceRecord, enroll into InsightFace.
 
-        The image is persisted under ``<data_root>/<category>/`` with a
-        content-hashed filename, and the resulting absolute path is stored
-        in the database record as ``file_path``. Re-registering the same
-        image is a no-op for the file (the existing file is reused).
-
-        Args:
-            name: Person name
-            img_source: Path to local image file, or image bytes
-            category: Subdirectory under data_root. Defaults to
-                ``settings.default_category``.
-
-        Returns:
-            Created FaceRecord
-
-        Raises:
-            ValueError: If no face is detected in the image
+        Writes into both the aggregate collection (``insightface_collection_id``)
+        and the per-category collection if ``category`` matches
+        ``settings.insightface_category_collections``. Returns the local
+        FaceRecord; InsightFace persons' ``external_id`` is set to this
+        record's UUID so future ``search`` calls can recover ``id`` /
+        ``created_at``.
         """
-        cat = category or settings.default_category
-        source_path: Optional[Path] = None
-        ext = None
-        if isinstance(img_source, str) and (img_source.startswith("http://") or img_source.startswith("https://")):
-            
-            resp = httpx.get(img_source)
-            resp.raise_for_status()
-            image_bytes = resp.content
-        elif isinstance(img_source, (str, Path)):
-            source_path = Path(img_source)
-            if not source_path.exists():
-                raise ValueError(f"Image file not found: {source_path}")
-            image_bytes = source_path.read_bytes()
-            ext = source_path.suffix.lower() or None
-        else:
-            image_bytes = bytes(img_source)
-
-        # Persist to /data/wcm/<category>/<name>_<md5><ext>
-        persisted_path = _persist_image(image_bytes, name, cat, ext=ext)
-
-        session = get_session()
-        
-        record = FaceRecord(
-            id=uuid.uuid4(),
-            name=name,
-            file_path=persisted_path,
-        )
-        session.add(record)
-        session.commit()
-        session.refresh(record)
-        session.close()
-
-        
-        img_b64 = self._prepare_image(image_bytes)
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.api_url}/register",
-                    json={
-                        "img": img_b64,
-                        "img_name": str(record.id),
-                        "model_name": self.model_name,
-                        "detector_backend": "fastmtcnn",
-                        "align": True,
-                        "enforce_detection": False,
-                    }
-                )
-                resp.raise_for_status()
-        except Exception as e:
-            # Rollback record if API fails
-            session = get_session()
-            session.delete(record)
-            session.commit()
-            session.close()
-            print(f"DeepFace API Error (register_from_image): {e}")
-            raise ValueError(f"Failed to register face via official API: {e}")
+            image_bytes = _to_bytes(img_source)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
+        cat = category or settings.default_category
+        persisted_path = _persist_image(image_bytes, name, cat)
+
+        # Local FaceRecord (UUID PK)
+        session = get_session()
+        try:
+            record = FaceRecord(
+                id=uuid.uuid4(),
+                name=name,
+                file_path=persisted_path,
+            )
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+        finally:
+            session.close()
+
+        record_id_str = str(record.id)
+        # Stash the path under metadata so search results can echo it back.
+        metadata = {
+            "category": cat,
+            "occupation": occupation or "",
+            "type": type_ or "",
+            "remarks": remarks or "",
+            "file_path": persisted_path,
+        }
+
+        # Always enroll into the configured aggregate collection.
+        await self._run(
+            self._adapter.register_person,
+            name=name,
+            image_bytes=image_bytes,
+            metadata=metadata,
+            external_id=record_id_str,
+        )
+        # Plus the per-category collection, when one is configured.
+        category_cid = settings.insightface_category_collections.get(cat)
+        if category_cid and category_cid != settings.insightface_collection_id:
+            await self._run(
+                self._adapter.register_person,
+                name=name,
+                image_bytes=image_bytes,
+                metadata=metadata,
+                external_id=record_id_str,
+                collection_id=category_cid,
+            )
         return record
 
-    async def verify_faces(self, img1: Union[str, Path, np.ndarray], img2: Union[str, Path, np.ndarray]) -> bool:
-        """Verify if two faces are the same using the DeepFace API asynchronously.
-
-        Applies a tighter distance threshold than DeepFace's built-in one
-        (``settings.verify_distance_threshold``) to reject borderline
-        look-alikes that the default ~0.30 cutoff would let through.
-
-        Args:
-            img1: First image path, url or numpy array.
-            img2: Second image path, url or numpy array.
-
-        Returns:
-            True if verified, False otherwise.
-        """
-        
-        img1_b64 = self._prepare_image(img1)
-        img2_b64 = self._prepare_image(img2)
-        
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.api_url}/verify",
-                    json={
-                        "img1": img1_b64,
-                        "img2": img2_b64,
-                        "model_name": self.model_name,
-                        "distance_metric": self.distance_metric,
-                        "detector_backend": "fastmtcnn",
-                        "enforce_detection": False,
-                        "align": True
-                    }
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                
-                distance = data.get("distance")
-                if distance is None:
-                    return False
-                return float(distance) <= settings.verify_distance_threshold
-        except Exception as e:
-            print(f"DeepFace API Error (verify_faces): {e}")
-            return False
+    # ------------------------------------------------------------------
+    # Internal helper: run sync SDK calls without blocking the event loop.
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _run(func, *args, **kwargs):
+        import asyncio
+        return await asyncio.to_thread(func, *args, **kwargs)
 
 
 # Global engine instance
@@ -554,8 +324,17 @@ _engine: Optional[FaceEngine] = None
 
 
 def get_face_engine() -> FaceEngine:
-    """Get or create global FaceEngine instance."""
+    """Get or create the global FaceEngine instance."""
     global _engine
     if _engine is None:
         _engine = FaceEngine()
     return _engine
+
+
+# Re-export the helpers so existing imports keep working.
+__all__ = [
+    "FaceEngine",
+    "MIN_FACE_PIXELS",
+    "get_face_engine",
+    "_persist_image",
+]

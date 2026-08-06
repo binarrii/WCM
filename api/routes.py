@@ -114,60 +114,21 @@ async def detect_faces(request: Request):
             temp_path.unlink()
 
 
-@api_bp.post("/register")
+@api_bp.post("/register", status_code=410)
 async def register_face(request: Request):
-    """Register a face in the database.
+    """Deprecated. Use ``POST /face_records`` instead.
 
-    Accepts form data with name and either file or url.
+    The original endpoint was broken (referenced ``record.face_file_path``
+    which the FaceRecord model never had, and passed a non-existent
+    ``file_url=`` kwarg into ``register_from_image``). After the move to
+    InsightFace Server this route is permanently retired; the new
+    ``/face_records`` endpoint enforces single-face registration server-side
+    and supports the same form fields.
     """
-    engine = get_face_engine()
-
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" in content_type:
-        form = await request.form()
-        name = form.get("name")
-        if not name:
-            raise HTTPException(status_code=400, detail="name is required")
-
-        if "file" in form:
-            file = form.get("file")
-            if file and file.filename:
-                contents = await file.read()
-                if len(contents) > settings.max_file_size_mb * 1024 * 1024:
-                    raise HTTPException(status_code=413, detail="File too large")
-                img_source = contents
-            else:
-                raise HTTPException(status_code=400, detail="Either file or url must be provided")
-        elif form.get("url"):
-            url = form.get("url")
-            try:
-                img_source = await _download_url_safe(url, settings.max_file_size_mb * 1024 * 1024)
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
-        else:
-            raise HTTPException(status_code=400, detail="Either file or url must be provided")
-
-        try:
-            file_url = form.get("url") if "file" in form else None
-            category = form.get("category") or None
-            record = await engine.register_from_image(
-                name=name,
-                img_source=img_source,
-                file_url=file_url,
-                category=category,
-            )
-            return {
-                "id": str(record.id),
-                "name": record.name,
-                "file_path": record.file_path,
-                "face_file_path": record.face_file_path,
-                "category": category or settings.default_category,
-                "message": "Face registered successfully",
-            }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
-    else:
-        raise HTTPException(status_code=400, detail="Content-Type must be multipart/form-data")
+    raise HTTPException(
+        status_code=410,
+        detail="POST /register has been retired. Use POST /face_records instead.",
+    )
 
 
 @api_bp.post("/search")
@@ -655,41 +616,24 @@ async def create_face_record(request: Request):
     if len(contents) > settings.max_file_size_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail="文件过大")
         
-    # Decode image to numpy array
+    # Decode + single-face enforcement via InsightFace Server. We don't
+    # need the decoded ndarray here — the engine accepts bytes directly —
+    # but we still confirm the image is well-formed before paying for a
+    # round-trip.
     nparr = np.frombuffer(contents, np.uint8)
     img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img_array is None:
         raise HTTPException(status_code=400, detail="图片格式错误，无法解析")
-        
-    # Detect faces locally
+
     try:
-        import asyncio
-        from deepface import DeepFace
-        
-        def run_local_detect():
-            try:
-                return DeepFace.extract_faces(img_array, detector_backend='fastmtcnn', enforce_detection=False)
-            except Exception:
-                return DeepFace.extract_faces(img_array, detector_backend='opencv', enforce_detection=False)
-                
-        local_faces = await asyncio.to_thread(run_local_detect)
-        
-        faces = []
-        for res in local_faces:
-            fa = res.get("facial_area", {})
-            w = fa.get("w", 0) or 0
-            h = fa.get("h", 0) or 0
-            # Filter: short side must be >= 80 pixels
-            if min(w, h) < 80:
-                continue
-            faces.append(res)
+        local_faces = await engine.detect_faces(contents)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"本地人脸检测失败: {str(e)}")
-        
-    if len(faces) == 0:
+        raise HTTPException(status_code=500, detail=f"人脸检测失败: {str(e)}")
+
+    if len(local_faces) == 0:
         raise HTTPException(status_code=400, detail="未检测到人脸，请上传包含单张清晰人脸的图片")
-    elif len(faces) > 1:
-        raise HTTPException(status_code=400, detail=f"检测到多个人脸({len(faces)}个)，请上传仅包含单张清晰人脸的图片")
+    elif len(local_faces) > 1:
+        raise HTTPException(status_code=400, detail=f"检测到多个人脸({len(local_faces)}个)，请上传仅包含单张清晰人脸的图片")
         
     # Exactly 1 face, proceed to registration
     session = get_session()
@@ -710,7 +654,10 @@ async def create_face_record(request: Request):
         record = await engine.register_from_image(
             name=name,
             img_source=contents,
-            category=category
+            category=category,
+            occupation=occupation,
+            type_=type_val,
+            remarks=remarks,
         )
         
         # 3. Associate FaceRecord with the Person record

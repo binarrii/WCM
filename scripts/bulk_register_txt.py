@@ -16,7 +16,24 @@ import numpy as np
 import httpx
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from deepface import DeepFace
+
+# Legacy one-shot batch script that talks directly to the DeepFace library.
+# The main API no longer depends on DeepFace (see CLAUDE.md — the live
+# service uses InsightFace Server). If you need to rerun this script,
+# install the legacy venv that still pins deepface + tensorflow:
+#     uv venv .venv-legacy  --python 3.10
+#     uv pip install --python .venv-legacy/bin/python deepface tensorflow tf-keras
+#     .venv-legacy/bin/python scripts/bulk_register_txt.py
+try:
+    from deepface import DeepFace  # type: ignore
+except ImportError:
+    DeepFace = None
+    print(
+        "WARNING: scripts/bulk_register_txt.py requires `deepface` but it is not\n"
+        "installed in this environment. The WCM API no longer depends on\n"
+        "DeepFace; see the comment above to set up a legacy venv.",
+        file=sys.stderr,
+    )
 
 # Add project src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -171,6 +188,8 @@ def main():
                     image_bytes = f.read()
                     image_array = np.frombuffer(image_bytes, np.uint8)
                     img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                if DeepFace is None:
+                    raise RuntimeError("deepface is not installed in this venv")
                 face_objs = DeepFace.extract_faces(
                     img, detector_backend="fastmtcnn", enforce_detection=False
                 )

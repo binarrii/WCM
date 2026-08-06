@@ -11,26 +11,7 @@ RUN pip install uv --no-cache-dir
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies to local directory
-ARG INSTALL_CUDA=false
-RUN if [ "$INSTALL_CUDA" = "true" ]; then \
-        uv sync --frozen --extra cuda --no-install-project; \
-    else \
-        uv sync --frozen --no-install-project; \
-    fi
-
-# Make TensorFlow see CUDA libraries installed by the tensorflow[and-cuda] extra.
-RUN if [ "$INSTALL_CUDA" = "true" ]; then \
-        tf_dir="$(/app/.venv/bin/python -c 'import os, tensorflow; print(os.path.dirname(tensorflow.__file__))')" && \
-        mkdir -p /app/.venv/lib/cuda /app/.venv/bin && \
-        find /app/.venv/lib/python3.12/site-packages/nvidia -path "*/lib/*.so*" -exec ln -svf {} "$tf_dir" \; && \
-        find /app/.venv/lib/python3.12/site-packages/nvidia -path "*/lib/*.so*" -exec ln -svf {} /app/.venv/lib/cuda/ \; && \
-        ptxas="$(find /app/.venv/lib/python3.12/site-packages/nvidia -name ptxas -type f | head -n 1)" && \
-        if [ -n "$ptxas" ]; then ln -svf "$ptxas" /app/.venv/bin/ptxas; fi; \
-    fi
-
-# Force opencv-python-headless (opencv-python may be installed as deepface dependency)
-RUN uv pip uninstall --python /app/.venv/bin/python opencv-python opencv-python-headless 2>/dev/null || true
-RUN uv pip install --python /app/.venv/bin/python --no-cache opencv-python-headless
+RUN uv sync --frozen --no-install-project
 
 # Clean venv in builder (before COPY to reduce stage-2 size)
 RUN find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*test*" -exec rm -rf {} + 2>/dev/null || true && \
@@ -73,10 +54,9 @@ COPY --from=builder /app/scripts ./scripts
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
 ENV PYTHONPATH="/app/src"
-ENV LD_LIBRARY_PATH="/app/.venv/lib/cuda:${LD_LIBRARY_PATH}"
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
-ENV TF_FORCE_GPU_ALLOW_GROWTH=true
+# InsightFace Server runs in its own container (host 10.252.25.251:18097 by
+# default). GPU access is no longer needed by the API container itself.
+ENV WCM_INSIGHTFACE_BASE_URL=""
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
