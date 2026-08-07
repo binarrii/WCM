@@ -428,14 +428,21 @@ class InsightFaceAdapter:
         At least one of ``name`` / ``metadata`` must be supplied (the SDK
         raises ``ValueError`` otherwise). Returns the updated person as a
         flat record-item dict.
+
+        Note: we forward kwargs conditionally so a ``None`` value is not
+        serialized as JSON ``null``. IFS interprets ``null`` for these
+        fields as "clear the value", which would wipe the name on a
+        metadata-only update.
         """
         cid = collection_id or self._collection_id
-        result = self._client.update_person(
-            cid,
-            person_id,
-            name=name,
-            metadata=metadata,
-        )
+        kwargs: dict[str, object] = {}
+        if name is not None:
+            kwargs["name"] = name
+        if metadata is not None:
+            kwargs["metadata"] = metadata
+        if not kwargs:
+            raise ValueError("at least one of name / metadata must be supplied")
+        result = self._client.update_person(cid, person_id, **kwargs)
         return _person_to_item(result.person)
 
     # ------------------------------------------------------------------

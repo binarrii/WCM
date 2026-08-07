@@ -516,11 +516,11 @@ async def websocket_analyze_media(websocket: WebSocket):
 # --- CRUD Endpoints for Face Records (IFS-backed) ---
 
 
-# How many persons to fetch per IFS page when listing. The legacy
-# Postgres-backed endpoint emitted up to 12 records per page; we round up
-# so a single IFS page can usually satisfy a page request even after the
-# client-side `type` filter drops some rows.
-_LIST_PAGE_FETCH = 12
+# How many persons to fetch per IFS page when listing. IFS caps
+# ``list_persons`` at ``limit <= 100``; pulling 100 per page keeps the
+# client-side `type=` filter efficient (fewer round-trips when most rows
+# get dropped).
+_LIST_PAGE_FETCH = 100
 
 
 @api_bp.get("/face_records")
@@ -574,8 +574,8 @@ async def get_face_records_stats():
     """Aggregate counts from IFS ``all-persons`` by ``metadata.type``.
 
     Walks every person (cursor-paginated) and buckets into the three
-    Chinese category strings the webui surfaces. ~5k records fit in a few
-    IFS pages at limit=2000.
+    Chinese category strings the webui surfaces. IFS caps
+    ``list_persons`` at ``limit <= 100`` per page, so we page in 100s.
     """
     engine = get_face_engine()
     counts = {
@@ -589,7 +589,7 @@ async def get_face_records_stats():
     try:
         while True:
             page_items, cursor = await engine._run(
-                engine._adapter.list_persons, limit=2000, cursor=cursor
+                engine._adapter.list_persons, limit=100, cursor=cursor
             )
             if not page_items:
                 break
@@ -693,11 +693,21 @@ async def update_face_record(record_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     new_name = data.get("name")
-    new_meta: dict[str, object] = {}
+    # IFS PATCH replaces the entire ``metadata`` dict, so we must read the
+    # current metadata and merge in only the keys the client sent. Without
+    # this merge the other keys (category, occupation, type, file_path)
+    # would silently disappear from the record on update.
+    current = await engine._run(engine._adapter.get_person, record_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="人脸记录不存在")
+    merged_meta = {
+        k: current.get(k)
+        for k in ("category", "occupation", "type", "remarks", "file_path")
+    }
     for key in ("occupation", "type", "remarks"):
         if key in data:
-            new_meta[key] = data[key]
-    if not new_name and not new_meta:
+            merged_meta[key] = data[key]
+    if not new_name and all(merged_meta[k] == current.get(k) for k in merged_meta):
         raise HTTPException(status_code=400, detail="no fields to update")
 
     try:
@@ -705,7 +715,7 @@ async def update_face_record(record_id: str, request: Request):
             engine._adapter.update_person,
             record_id,
             name=new_name,
-            metadata=new_meta or None,
+            metadata=merged_meta,
         )
         if not updated:
             raise HTTPException(status_code=404, detail="人脸记录不存在")
