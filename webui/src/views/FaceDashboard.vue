@@ -481,7 +481,7 @@ const executeImageSearch = async () => {
     const data = await faceService.searchFaces(formData);
     imageSearchResults.value = data.results || [];
     isImageSearchActive.value = true;
-    const matchCount = imageSearchResults.value.filter(r => (1 - (r.distance || 0)) >= 0.9).length;
+    const matchCount = imageSearchResults.value.filter(r => (1 - (r.distance || 0)) >= 0.6).length;
     showToast(`检索成功，共找到 ${matchCount} 个相似人脸`);
     closeImageSearchModal();
   } catch (error) {
