@@ -164,7 +164,7 @@ def test_search_extracts_metadata_fields(adapter, fake_transport, sample_image_b
             "matches": [
                 {
                     "person": {
-                        "id": "p_001",
+                        "id": "ifs-uuid-1",
                         "name": "张三",
                         "external_id": "fr-uuid-1",
                         "created_at": "2026-08-06T00:00:00Z",
@@ -190,7 +190,9 @@ def test_search_extracts_metadata_fields(adapter, fake_transport, sample_image_b
     assert m["type"] == "敏感"
     assert m["remarks"] == "备注"
     assert m["file_path"] == "/tmp/wcm/时政敏感/x_y.jpg"
-    assert m["id"] == "fr-uuid-1"
+    # After the IFS-as-source-of-truth refactor, the match id is the
+    # IFS Person.id (not the local FaceRecord.external_id).
+    assert m["id"] == "ifs-uuid-1"
     assert m["created_at"] == "2026-08-06T00:00:00Z"
 
 
@@ -421,3 +423,137 @@ def test_search_multi_face_handles_no_faces(adapter, fake_transport, sample_imag
     assert result["all_results"] == []
     # No /search call was issued.
     assert not any("/search" in c[1] for c in fake_transport.calls)
+
+
+# ----------------------------------------------------------------------
+# Person CRUD (list / get / update)
+# ----------------------------------------------------------------------
+def test_list_persons_returns_flat_items_and_next_cursor(adapter, fake_transport):
+    fake_transport.register(
+        "GET",
+        "/v1/collections/all-persons/persons",
+        {
+            "persons": [
+                {
+                    "id": "p_001",
+                    "name": "张三",
+                    "external_id": "ext-1",
+                    "face_count": 2,
+                    "created_at": "2026-08-06T00:00:00Z",
+                    "metadata": {
+                        "category": "时政敏感",
+                        "occupation": "教师",
+                        "type": "时政敏感",
+                        "remarks": "",
+                        "file_path": "/tmp/wcm/时政敏感/张三_md5.jpg",
+                    },
+                },
+            ],
+            "next_cursor": "cur_2",
+        },
+    )
+    items, cursor = adapter.list_persons(limit=50)
+    assert cursor == "cur_2"
+    assert len(items) == 1
+    item = items[0]
+    assert item["id"] == "p_001"
+    assert item["name"] == "张三"
+    assert item["category"] == "时政敏感"
+    assert item["occupation"] == "教师"
+    assert item["type"] == "时政敏感"
+    assert item["file_path"] == "/tmp/wcm/时政敏感/张三_md5.jpg"
+    assert item["created_at"] == "2026-08-06T00:00:00Z"
+
+
+def test_list_persons_returns_none_cursor_when_exhausted(adapter, fake_transport):
+    fake_transport.register(
+        "GET",
+        "/v1/collections/all-persons/persons",
+        {"persons": [], "next_cursor": None},
+    )
+    items, cursor = adapter.list_persons(limit=50)
+    assert items == []
+    assert cursor is None
+
+
+def test_list_persons_passes_search_param(adapter, fake_transport):
+    """Server-side name filter is forwarded via the `search=` query param."""
+    fake_transport.register(
+        "GET",
+        "/v1/collections/all-persons/persons",
+        {"persons": [], "next_cursor": None},
+    )
+    adapter.list_persons(limit=10, search="张三")
+    # Verify the request URL included `?search=...` (httpx percent-encodes CJK).
+    last = fake_transport.calls[-1]
+    assert "search=" in last[1]
+
+
+def test_get_person_returns_flat_dict(adapter, fake_transport):
+    fake_transport.register(
+        "GET",
+        "/v1/collections/all-persons/persons/p_001",
+        {
+            "person": {
+                "id": "p_001",
+                "name": "李四",
+                "external_id": "ext-2",
+                "face_count": 1,
+                "created_at": "2026-08-07T00:00:00Z",
+                "metadata": {
+                    "category": "落马官员",
+                    "occupation": "官员",
+                    "type": "落马官员",
+                    "remarks": "严重违纪",
+                    "file_path": "/tmp/wcm/落马官员/李四_md5.jpg",
+                },
+            }
+        },
+    )
+    item = adapter.get_person("p_001")
+    assert item is not None
+    assert item["id"] == "p_001"
+    assert item["name"] == "李四"
+    assert item["category"] == "落马官员"
+    assert item["type"] == "落马官员"
+    assert item["remarks"] == "严重违纪"
+
+
+def test_get_person_returns_none_on_404(adapter, fake_transport):
+    """A 404 from IFS surfaces as ``None``; transport 5xx still raises."""
+    # The vendored SDK converts 404 → NotFoundError. The fake transport
+    # returns 404 by default for unmocked routes, so we just hit a path
+    # we didn't register.
+    assert adapter.get_person("p_missing") is None
+
+
+def test_update_person_passes_name_and_metadata(adapter, fake_transport):
+    fake_transport.register(
+        "PATCH",
+        "/v1/collections/all-persons/persons/p_001",
+        {
+            "person": {
+                "id": "p_001",
+                "name": "李四 (renamed)",
+                "external_id": "ext-2",
+                "face_count": 1,
+                "created_at": "2026-08-07T00:00:00Z",
+                "updated_at": "2026-08-07T01:00:00Z",
+                "metadata": {
+                    "category": "落马官员",
+                    "occupation": "官员",
+                    "type": "落马官员",
+                    "remarks": "updated",
+                    "file_path": "/tmp/wcm/落马官员/李四_md5.jpg",
+                },
+            }
+        },
+    )
+    updated = adapter.update_person(
+        "p_001", name="李四 (renamed)", metadata={"remarks": "updated"}
+    )
+    assert updated["name"] == "李四 (renamed)"
+    assert updated["remarks"] == "updated"
+    # Confirm we hit the PATCH endpoint.
+    methods = [c[0] for c in fake_transport.calls]
+    assert "PATCH" in methods

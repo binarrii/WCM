@@ -8,14 +8,17 @@ api/handlers.py, main.py, scripts/*.py) keep compiling:
     - engine.generate_embedding(img_source) -> np.ndarray
     - engine.search(img_source, name=None, top_k=10, threshold=0.3) -> list[dict]
     - engine.search_multi_face(img_source, ...) -> dict  # new multi-face shape
-    - engine.register_face(name, file_path=None) -> FaceRecord  (sync, DB-only)
-    - engine.register_from_image(name, img_source, category=None) -> FaceRecord
+    - engine.register_from_image(name, img_source, category=None, ...) -> dict
+      (flat record-item dict from IFS; no SQL row written)
     - engine.verify_faces(img1, img2) -> bool
     - get_face_engine() -> FaceEngine  (cached singleton)
 
 Internally every method delegates to InsightFaceAdapter. The legacy
 ``img_source`` overload (path | bytes | np.ndarray) is normalized to bytes
 at the boundary; the route layer is expected to already download URLs.
+
+Note: ``register_face`` (sync, DB-only) has been removed — there is no
+local SQL table to write to anymore. IFS Person is the canonical record.
 """
 
 from __future__ import annotations
@@ -23,14 +26,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import uuid
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from .config import settings, warn_deprecated
-from .database import FaceRecord, get_session
 from .ifs_adapter import InsightFaceAdapter
 
 logger = logging.getLogger(__name__)
@@ -211,8 +212,6 @@ class FaceEngine:
         # threshold on the legacy cosine-distance scale (lower=more similar).
         # 0.0 means "no filter" — pass through as no-op rather than a
         # min_similarity of 1.0 (which would silently return nothing).
-        import asyncio
-
         if float(threshold) <= 0.0:
             min_similarity = 0.0
         else:
@@ -281,27 +280,6 @@ class FaceEngine:
     # ------------------------------------------------------------------
     # Write paths
     # ------------------------------------------------------------------
-    def register_face(
-        self,
-        name: str,
-        file_path: str | None = None,
-    ) -> FaceRecord:
-        """Sync DB-only insert (no remote call). Preserved for back-compat
-        with scripts that want to record a row without enrolling."""
-        session = get_session()
-        try:
-            record = FaceRecord(
-                id=uuid.uuid4(),
-                name=name,
-                file_path=file_path,
-            )
-            session.add(record)
-            session.commit()
-            session.refresh(record)
-            return record
-        finally:
-            session.close()
-
     async def register_from_image(
         self,
         name: str,
@@ -311,16 +289,20 @@ class FaceEngine:
         occupation: str | None = None,
         type_: str | None = None,
         remarks: str | None = None,
-        external_id: str | None = None,
-    ) -> FaceRecord:
-        """Persist bytes, write a FaceRecord, enroll into InsightFace.
+    ) -> dict:
+        """Persist bytes to ``/tmp/wcm`` and enroll into InsightFace Server.
 
-        Writes into both the aggregate collection (``insightface_collection_id``)
-        and the per-category collection if ``category`` matches
-        ``settings.insightface_category_collections``. Returns the local
-        FaceRecord; InsightFace persons' ``external_id`` is set to this
-        record's UUID so future ``search`` calls can recover ``id`` /
-        ``created_at``.
+        Writes into the aggregate collection (``insightface_collection_id``)
+        and, when ``category`` is mapped in
+        ``settings.insightface_category_collections``, also into the
+        per-category collection. The per-category duplicate carries
+        ``external_id=<aggregate_person_id>`` so an admin backfill can
+        correlate them later.
+
+        No local SQL row is written — IFS Person is the canonical record.
+        Returns a flat record-item dict (see
+        ``ifs_adapter._person_to_item``) keyed by the aggregate IFS
+        ``Person.id`` (which becomes the webui's ``record.id``).
         """
         try:
             image_bytes = _to_bytes(img_source)
@@ -330,22 +312,8 @@ class FaceEngine:
         cat = category or settings.default_category
         persisted_path = _persist_image(image_bytes, name, cat)
 
-        # Local FaceRecord (UUID PK)
-        session = get_session()
-        try:
-            record = FaceRecord(
-                id=uuid.uuid4(),
-                name=name,
-                file_path=persisted_path,
-            )
-            session.add(record)
-            session.commit()
-            session.refresh(record)
-        finally:
-            session.close()
-
-        record_id_str = str(record.id)
-        # Stash the path under metadata so search results can echo it back.
+        # Metadata shared by both enrollments so list / search results
+        # can echo the form fields back without a DB lookup.
         metadata = {
             "category": cat,
             "occupation": occupation or "",
@@ -355,14 +323,14 @@ class FaceEngine:
         }
 
         # Always enroll into the configured aggregate collection.
-        await self._run(
+        person_id, _face_id = await self._run(
             self._adapter.register_person,
             name=name,
             image_bytes=image_bytes,
             metadata=metadata,
-            external_id=record_id_str,
         )
-        # Plus the per-category collection, when one is configured.
+        # Plus the per-category collection, when one is configured. Tag
+        # the duplicate with external_id=<aggregate_id> for correlation.
         category_cid = settings.insightface_category_collections.get(cat)
         if category_cid and category_cid != settings.insightface_collection_id:
             await self._run(
@@ -370,9 +338,17 @@ class FaceEngine:
                 name=name,
                 image_bytes=image_bytes,
                 metadata=metadata,
-                external_id=record_id_str,
+                external_id=person_id,
                 collection_id=category_cid,
             )
+
+        # Read back the canonical aggregate record so we surface the
+        # server-assigned `created_at` (and any server-side normalization
+        # of name / metadata).
+        record = await self._run(self._adapter.get_person, person_id)
+        if not record:
+            # Should not happen — we just created it — but be defensive.
+            record = {"id": person_id, "name": name}
         return record
 
     # ------------------------------------------------------------------

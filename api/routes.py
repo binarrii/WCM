@@ -9,12 +9,9 @@ import cv2
 import httpx
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
-from wcm_facerec.database import FaceRecord, Person, get_session
 from wcm_facerec.face_engine import get_face_engine
 
 from .handlers import (
@@ -26,6 +23,42 @@ from .handlers import (
 from .utils import VIDEO_EXTENSIONS, _download_url_safe
 
 api_bp = APIRouter()
+
+
+# ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
+def _path_to_image_url(file_path: str | None) -> str | None:
+    """Map an absolute ``/tmp/wcm/<cat>/<name>_<md5>.<ext>`` path to the
+    web-served ``/images/...`` URL that Nginx fronts."""
+    if not file_path:
+        return None
+    p = Path(file_path)
+    try:
+        rel = p.relative_to("/tmp/wcm")
+        return f"/images/{rel}"
+    except ValueError:
+        return f"/images/{p.name}"
+
+
+def _item_with_person(item: dict) -> dict:
+    """Wrap an IFS person-item dict into the {id, name, file_path,
+    image_url, created_at, person: {...}} shape the webui expects."""
+    image_url = _path_to_image_url(item.get("file_path"))
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "file_path": item.get("file_path"),
+        "image_url": image_url,
+        "created_at": item.get("created_at"),
+        "person": {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "occupation": item.get("occupation"),
+            "type": item.get("type"),
+            "remarks": item.get("remarks"),
+        },
+    }
 
 
 @api_bp.get("/health")
@@ -480,144 +513,111 @@ async def websocket_analyze_media(websocket: WebSocket):
             await websocket.send_json({"status": "error", "error": str(e)})
 
 
-# --- CRUD Endpoints for Face Records ---
+# --- CRUD Endpoints for Face Records (IFS-backed) ---
+
+
+# How many persons to fetch per IFS page when listing. The legacy
+# Postgres-backed endpoint emitted up to 12 records per page; we round up
+# so a single IFS page can usually satisfy a page request even after the
+# client-side `type` filter drops some rows.
+_LIST_PAGE_FETCH = 12
 
 
 @api_bp.get("/face_records")
 async def list_face_records(page: int = 1, limit: int = 12, search: str = None, type: str = None):
-    """List face records with pagination, search, and type filtering."""
-    session = get_session()
+    """List face records, paginated, with optional name search and type filter.
+
+    Backed by IFS ``all-persons``. The ``search=`` parameter matches names
+    server-side; ``type=`` is a client-side filter on ``metadata.type``
+    (IFS does not currently support metadata-based filtering on
+    ``/persons``). The `total` field is the count of items returned on
+    this page (not a global count) — the dashboard's pagination uses
+    ``has_more`` exclusively.
+    """
+    engine = get_face_engine()
+    items: list[dict] = []
+    cursor: str | None = None
+    fetch_limit = max(_LIST_PAGE_FETCH, limit)
+
     try:
-        # Base query joining FaceRecord and Person
-        stmt = select(FaceRecord).outerjoin(Person)
-
-        # Apply type filter
-        if type and type != "All":
-            stmt = stmt.where(Person.type_ == type)
-
-        # Apply search filter
-        if search:
-            search_clause = f"%{search}%"
-            stmt = stmt.where(
-                (FaceRecord.name.ilike(search_clause))
-                | (Person.occupation.ilike(search_clause))
-                | (Person.remarks.ilike(search_clause))
+        while len(items) < limit:
+            page_items, cursor = await engine._run(
+                engine._adapter.list_persons,
+                limit=fetch_limit,
+                cursor=cursor,
+                search=search or None,
             )
-
-        # Get total count before pagination
-        from sqlalchemy import func
-
-        count_stmt = select(func.count(FaceRecord.id)).select_from(FaceRecord).outerjoin(Person)
-        if type and type != "All":
-            count_stmt = count_stmt.where(Person.type_ == type)
-        if search:
-            count_stmt = count_stmt.where(
-                (FaceRecord.name.ilike(search_clause))
-                | (Person.occupation.ilike(search_clause))
-                | (Person.remarks.ilike(search_clause))
-            )
-        total = session.scalar(count_stmt) or 0
-
-        # Apply offset and limit
-        offset = (page - 1) * limit
-        stmt = (
-            stmt.options(joinedload(FaceRecord.person))
-            .order_by(FaceRecord.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
-        records = session.scalars(stmt).all()
-
-        results = []
-        for r in records:
-            image_url = None
-            if r.file_path:
-                p = Path(r.file_path)
-                try:
-                    rel_path = p.relative_to("/tmp/wcm")
-                    image_url = f"/images/{rel_path}"
-                except ValueError:
-                    image_url = f"/images/{p.name}"
-
-            results.append(
-                {
-                    "id": str(r.id),
-                    "name": r.name,
-                    "file_path": r.file_path,
-                    "image_url": image_url,
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
-                    "person": {
-                        "id": str(r.person.id),
-                        "name": r.person.name,
-                        "occupation": r.person.occupation,
-                        "type": r.person.type_,
-                        "remarks": r.person.remarks,
-                    }
-                    if r.person
-                    else None,
-                }
-            )
-
-        has_more = (offset + len(records)) < total
+            if not page_items:
+                break
+            for p in page_items:
+                if type and type != "All" and (p.get("type") or "") != type:
+                    continue
+                items.append(_item_with_person(p))
+                if len(items) >= limit:
+                    break
+            if not cursor:
+                break
 
         return {
-            "items": results,
-            "total": total,
+            "items": items,
+            "total": len(items),
             "page": page,
             "limit": limit,
-            "has_more": has_more,
+            "has_more": bool(cursor),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
 
 @api_bp.get("/face_records/stats")
 async def get_face_records_stats():
-    """Get overall statistics for face records database."""
-    session = get_session()
+    """Aggregate counts from IFS ``all-persons`` by ``metadata.type``.
+
+    Walks every person (cursor-paginated) and buckets into the three
+    Chinese category strings the webui surfaces. ~5k records fit in a few
+    IFS pages at limit=2000.
+    """
+    engine = get_face_engine()
+    counts = {
+        "total": 0,
+        "bad_artists": 0,
+        "political": 0,
+        "officials": 0,
+    }
+    cursor: str | None = None
+
     try:
-        from sqlalchemy import func
-
-        total = session.scalar(select(func.count(FaceRecord.id))) or 0
-
-        bad_artists = (
-            session.scalar(
-                select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "劣迹艺人")
+        while True:
+            page_items, cursor = await engine._run(
+                engine._adapter.list_persons, limit=2000, cursor=cursor
             )
-            or 0
-        )
-
-        political = (
-            session.scalar(
-                select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "时政敏感")
-            )
-            or 0
-        )
-
-        officials = (
-            session.scalar(
-                select(func.count(FaceRecord.id)).join(Person).where(Person.type_ == "落马官员")
-            )
-            or 0
-        )
-
-        return {
-            "total": total,
-            "bad_artists": bad_artists,
-            "political": political,
-            "officials": officials,
-        }
+            if not page_items:
+                break
+            for p in page_items:
+                counts["total"] += 1
+                t = p.get("type")
+                if t == "劣迹艺人":
+                    counts["bad_artists"] += 1
+                elif t == "时政敏感":
+                    counts["political"] += 1
+                elif t == "落马官员":
+                    counts["officials"] += 1
+            if not cursor:
+                break
+        return counts
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
 
 @api_bp.post("/face_records")
 async def create_face_record(request: Request):
-    """Create a new face record and register it, requiring exactly 1 face, and records person info."""
+    """Create a new face record by enrolling it into InsightFace Server.
+
+    Requires exactly 1 face (single-face enforcement runs against IFS via
+    ``engine.detect_faces``). All form fields become IFS Person
+    ``name`` / ``metadata``; the webui's record id is the IFS aggregate
+    ``Person.id`` returned by the engine.
+    """
     engine = get_face_engine()
 
     content_type = request.headers.get("content-type", "")
@@ -642,10 +642,7 @@ async def create_face_record(request: Request):
     if len(contents) > settings.max_file_size_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail="文件过大")
 
-    # Decode + single-face enforcement via InsightFace Server. We don't
-    # need the decoded ndarray here — the engine accepts bytes directly —
-    # but we still confirm the image is well-formed before paying for a
-    # round-trip.
+    # Validate the image is well-formed before paying for an IFS round-trip.
     nparr = np.frombuffer(contents, np.uint8)
     img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img_array is None:
@@ -664,18 +661,7 @@ async def create_face_record(request: Request):
             detail=f"检测到多个人脸({len(local_faces)}个)，请上传仅包含单张清晰人脸的图片",
         )
 
-    # Exactly 1 face, proceed to registration
-    session = get_session()
     try:
-        # 1. Create Person record
-        person = Person(
-            id=uuid.uuid4(), name=name, occupation=occupation, type_=type_val, remarks=remarks
-        )
-        session.add(person)
-        session.commit()
-        session.refresh(person)
-
-        # 2. Call register_from_image
         record = await engine.register_from_image(
             name=name,
             img_source=contents,
@@ -684,145 +670,76 @@ async def create_face_record(request: Request):
             type_=type_val,
             remarks=remarks,
         )
-
-        # 3. Associate FaceRecord with the Person record
-        db_record = session.get(FaceRecord, record.id)
-        if db_record:
-            db_record.person_id = person.id
-            session.commit()
-            session.refresh(db_record)
-        else:
-            raise HTTPException(status_code=500, detail="人脸记录创建失败")
-
-        image_url = None
-        if db_record.file_path:
-            p = Path(db_record.file_path)
-            try:
-                rel_path = p.relative_to("/tmp/wcm")
-                image_url = f"/images/{rel_path}"
-            except ValueError:
-                image_url = f"/images/{p.name}"
-
-        return {
-            "id": str(db_record.id),
-            "name": db_record.name,
-            "file_path": db_record.file_path,
-            "image_url": image_url,
-            "created_at": db_record.created_at.isoformat() if db_record.created_at else None,
-            "person": {
-                "id": str(person.id),
-                "name": person.name,
-                "occupation": person.occupation,
-                "type": person.type_,
-                "remarks": person.remarks,
-            },
-        }
+        return _item_with_person(record)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"注册人脸失败: {str(e)}")
-    finally:
-        session.close()
 
 
 @api_bp.put("/face_records/{record_id}")
 async def update_face_record(record_id: str, request: Request):
-    """Update face record and its associated person profile."""
-    session = get_session()
+    """Update an existing record's name and ``metadata`` fields on IFS.
+
+    The webui treats ``record_id`` as opaque (the IFS aggregate
+    ``Person.id``). Only the aggregate ``all-persons`` Person is patched;
+    per-category mirrors are intentionally NOT re-keyed on type change —
+    delete + re-register to recategorize.
+    """
+    engine = get_face_engine()
     try:
         data = await request.json()
-        r_uuid = uuid.UUID(record_id)
-        db_record = session.get(FaceRecord, r_uuid)
-        if not db_record:
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    new_name = data.get("name")
+    new_meta: dict[str, object] = {}
+    for key in ("occupation", "type", "remarks"):
+        if key in data:
+            new_meta[key] = data[key]
+    if not new_name and not new_meta:
+        raise HTTPException(status_code=400, detail="no fields to update")
+
+    try:
+        updated = await engine._run(
+            engine._adapter.update_person,
+            record_id,
+            name=new_name,
+            metadata=new_meta or None,
+        )
+        if not updated:
             raise HTTPException(status_code=404, detail="人脸记录不存在")
-
-        name = data.get("name")
-        if name:
-            db_record.name = name
-
-        if db_record.person:
-            if name:
-                db_record.person.name = name
-            if "occupation" in data:
-                db_record.person.occupation = data["occupation"]
-            if "type" in data:
-                db_record.person.type_ = data["type"]
-            if "remarks" in data:
-                db_record.person.remarks = data["remarks"]
-        else:
-            if name:
-                person = Person(
-                    id=uuid.uuid4(),
-                    name=name,
-                    occupation=data.get("occupation"),
-                    type_=data.get("type"),
-                    remarks=data.get("remarks"),
-                )
-                session.add(person)
-                db_record.person_id = person.id
-
-        session.commit()
-        session.refresh(db_record)
-
-        image_url = None
-        if db_record.file_path:
-            p = Path(db_record.file_path)
-            try:
-                rel_path = p.relative_to("/tmp/wcm")
-                image_url = f"/images/{rel_path}"
-            except ValueError:
-                image_url = f"/images/{p.name}"
-
-        return {
-            "id": str(db_record.id),
-            "name": db_record.name,
-            "file_path": db_record.file_path,
-            "image_url": image_url,
-            "created_at": db_record.created_at.isoformat() if db_record.created_at else None,
-            "person": {
-                "id": str(db_record.person.id),
-                "name": db_record.person.name,
-                "occupation": db_record.person.occupation,
-                "type": db_record.person.type_,
-                "remarks": db_record.person.remarks,
-            }
-            if db_record.person
-            else None,
-        }
+        return _item_with_person(updated)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
 
 @api_bp.delete("/face_records/{record_id}")
 async def delete_face_record(record_id: str):
-    """Delete a face record and its associated person profile."""
-    session = get_session()
+    """Delete an IFS Person (aggregate) and its /tmp/wcm image file.
+
+    Per-category mirrors (when present from legacy batch-script imports)
+    are not removed by this endpoint — they remain on the server until an
+    admin backfill is run. The webui treats this as acceptable.
+    """
+    engine = get_face_engine()
     try:
-        r_uuid = uuid.UUID(record_id)
-        db_record = session.get(FaceRecord, r_uuid)
-        if not db_record:
+        person = await engine._run(engine._adapter.get_person, record_id)
+        if not person:
             raise HTTPException(status_code=404, detail="人脸记录不存在")
-
-        person = db_record.person
-        if person:
-            session.delete(person)
-
-        if db_record.file_path:
-            p = Path(db_record.file_path)
+        file_path = person.get("file_path")
+        if file_path:
+            p = Path(file_path)
             if p.exists():
                 try:
                     p.unlink()
                 except Exception as e:
                     print(f"Warning: Failed to delete file {p}: {e}")
-
-        session.delete(db_record)
-        session.commit()
+        await engine._run(engine._adapter.delete_person, record_id)
         return {"message": "人脸记录及人物信息删除成功"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()

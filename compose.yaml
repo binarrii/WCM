@@ -8,46 +8,17 @@ services:
       - "8000:8000"
     environment:
       - GUNICORN_WORKERS=4
-      - WCM_DB_HOST=db
-      - WCM_DB_PORT=5432
-      - WCM_DB_NAME=facerec
-      - WCM_DB_USER=postgres
-      - WCM_DB_PASSWORD=postgres
       - WCM_API_HOST=0.0.0.0
       - WCM_API_PORT=8000
-    depends_on:
-      db:
-        condition: service_healthy
     restart: unless-stopped
     networks:
       - wcm-network
-    volumes:
-      - /home/aigc/.deepface/weights:/home/appuser/.deepface
-      - /data/wcm:/data/wcm
-
-  db:
-    image: pgvector/pgvector:pg17
-    container_name: wcm-facerec-db
-    environment:
-      - POSTGRES_DB=facerec
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    ports:
-      - "5433:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - wcm-network
+    # /tmp/wcm is hardcoded as the upload directory by FaceEngine._persist_image
+    # (see src/wcm_facerec/face_engine.py). Nginx / FastAPI's /images static
+    # mount serves it from the same path inside the container.
+    tmpfs:
+      - /tmp/wcm:size=2G
 
 networks:
   wcm-network:
     driver: bridge
-
-volumes:
-  pgdata:

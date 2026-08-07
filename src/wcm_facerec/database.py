@@ -1,13 +1,20 @@
-"""Database connection and models for pgvector."""
+"""Database connection and models.
+
+As of the IFS-as-source-of-truth refactor, this module owns only the
+``sensitive_words`` table (used by ``scripts/import_sensitive_words.py``).
+The former ``Person`` and ``FaceRecord`` tables — and the ``init_db()``
+hook in ``api/main.py`` — have been removed; InsightFace Server is now
+the canonical store for face/person data.
+"""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text, create_engine
+from sqlalchemy import Column, DateTime, String, create_engine
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
 
@@ -16,42 +23,6 @@ class Base(DeclarativeBase):
     """SQLAlchemy declarative base."""
 
     pass
-
-
-class Person(Base):
-    """Person model with basic information."""
-
-    __tablename__ = "persons"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, nullable=False, index=True)
-    occupation = Column(String, nullable=True)
-    type_ = Column("type", String, nullable=True)
-    remarks = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    faces = relationship("FaceRecord", back_populates="person")
-
-    def __repr__(self) -> str:
-        return f"<Person(id={self.id}, name={self.name})>"
-
-
-class FaceRecord(Base):
-    """Face record model with pgvector embedding."""
-
-    __tablename__ = "face_records"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, nullable=False, index=True)
-    file_path = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    # Foreign key to person
-    person_id = Column(UUID(as_uuid=True), ForeignKey("persons.id"), nullable=True)
-    person = relationship("Person", back_populates="faces")
-
-    def __repr__(self) -> str:
-        return f"<FaceRecord(id={self.id}, name={self.name})>"
 
 
 class SensitiveWord(Base):
@@ -97,10 +68,10 @@ def get_session() -> Session:
 
 
 def init_db():
-    """Initialize database."""
-    engine = get_engine()
-    conn = engine.connect()
+    """Create any tables declared on :class:`Base`.
 
-    # Create tables
-    Base.metadata.create_all(engine)
-    conn.close()
+    Kept for backwards compatibility with offline tooling that still calls
+    it on first import. The runtime API container no longer wires this into
+    its lifespan hook (Postgres is no longer a deploy dependency).
+    """
+    Base.metadata.create_all(get_engine())

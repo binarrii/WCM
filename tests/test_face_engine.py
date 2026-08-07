@@ -207,7 +207,13 @@ def test_verify_uses_similarity_threshold(engine, fake_transport, monkeypatch, s
 def test_register_writes_to_both_aggregate_and_category_collection(
     engine, fake_transport, monkeypatch, sample_image_bytes
 ):
-    # Map "时政敏感" -> "political"
+    """Per-category fan-out: aggregate ``all-persons`` + mapped category.
+
+    The per-category duplicate carries ``external_id=<aggregate_id>`` so an
+    admin backfill can correlate the two IFS Persons. The returned
+    record-item dict's ``id`` is the aggregate IFS ``Person.id`` (no SQL
+    row is written).
+    """
     monkeypatch.setattr(
         settings,
         "insightface_category_collections",
@@ -231,6 +237,27 @@ def test_register_writes_to_both_aggregate_and_category_collection(
             "rejected_images": [],
         },
     )
+    # The engine reads the aggregate Person back to surface created_at.
+    fake_transport.register(
+        "GET",
+        "/v1/collections/all-persons/persons/p_agg",
+        {
+            "person": {
+                "id": "p_agg",
+                "name": "测试",
+                "external_id": None,
+                "face_count": 1,
+                "created_at": "2026-08-07T00:00:00Z",
+                "metadata": {
+                    "category": "时政敏感",
+                    "occupation": "教师",
+                    "type": "敏感",
+                    "remarks": "备注",
+                    "file_path": "/tmp/wcm/时政敏感/测试_md5.jpg",
+                },
+            }
+        },
+    )
     import asyncio
 
     record = asyncio.run(
@@ -243,13 +270,17 @@ def test_register_writes_to_both_aggregate_and_category_collection(
             remarks="备注",
         )
     )
-    # Local FaceRecord exists and has a UUID.
-    assert record.id is not None
-    # The metadata for both calls included our form fields.
+    # Returned dict is a flat record-item from IFS; ``id`` is the
+    # aggregate Person.id, not a local UUID.
+    assert record["id"] == "p_agg"
+    assert record["name"] == "测试"
+    assert record["category"] == "时政敏感"
+    # Two POSTs were made — one to each collection.
     posts = [c for c in fake_transport.calls if c[0] == "POST" and c[1].endswith("/persons")]
     assert len(posts) == 2
-    # Both should mention "category" in metadata. We can't easily assert on
-    # the multipart body here; the live round-trip test covers that.
+    # And one GET to read the aggregate back.
+    gets = [c for c in fake_transport.calls if c[0] == "GET" and c[1].endswith("/persons/p_agg")]
+    assert len(gets) == 1
 
 
 # ----------------------------------------------------------------------

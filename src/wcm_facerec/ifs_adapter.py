@@ -187,7 +187,7 @@ class InsightFaceAdapter:
                     metadata = {}
             out.append(
                 {
-                    "id": person.get("external_id"),
+                    "id": person.get("id"),
                     "name": person.get("name"),
                     "person_name": person.get("name"),
                     "person_id": person.get("id"),
@@ -307,7 +307,7 @@ class InsightFaceAdapter:
                     except json.JSONDecodeError:
                         metadata = {}
                 match = {
-                    "id": person.get("external_id"),
+                    "id": person.get("id"),
                     "name": person.get("name"),
                     "person_name": person.get("name"),
                     "person_id": person.get("id"),
@@ -350,8 +350,9 @@ class InsightFaceAdapter:
         """Enroll one person with one face into a collection.
 
         Returns ``(person_id, face_id)`` from the server. The caller is
-        responsible for persisting bytes via ``_persist_image`` and writing
-        the local FaceRecord row.
+        responsible for persisting bytes via ``_persist_image`` (the engine
+        does this before calling). No local SQL row is written — IFS Person
+        is the canonical record.
         """
         cid = collection_id or self._collection_id
         result = self._client.create_person(
@@ -371,6 +372,71 @@ class InsightFaceAdapter:
     def delete_person(self, person_id: str, *, collection_id: str | None = None) -> None:
         cid = collection_id or self._collection_id
         self._client.delete_person(cid, person_id)
+
+    # ------------------------------------------------------------------
+    # Person CRUD (list / get / update)
+    # ------------------------------------------------------------------
+    def list_persons(
+        self,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+        search: str | None = None,
+        collection_id: str | None = None,
+    ) -> tuple[list[dict], str | None]:
+        """List persons in a collection, returning flat record-item dicts.
+
+        Calls ``GET /v1/collections/{cid}/persons`` (server-side cursor
+        pagination). Returns ``(items, next_cursor)`` — ``next_cursor`` is
+        ``None`` when there are no more pages. ``search=`` matches names
+        server-side; IFS does not currently filter by metadata.
+        """
+        cid = collection_id or self._collection_id
+        page = self._client.list_persons(
+            cid, limit=limit, cursor=cursor, search=search
+        )
+        items = [_person_to_item(p) for p in (page.persons or [])]
+        return items, page.next_cursor
+
+    def get_person(
+        self,
+        person_id: str,
+        *,
+        collection_id: str | None = None,
+    ) -> dict | None:
+        """Read a single person by id. Returns ``None`` on 404.
+
+        Other transport errors (5xx, auth) propagate.
+        """
+        cid = collection_id or self._collection_id
+        try:
+            result = self._client.get_person(cid, person_id)
+        except NotFoundError:
+            return None
+        return _person_to_item(result.person)
+
+    def update_person(
+        self,
+        person_id: str,
+        *,
+        name: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        collection_id: str | None = None,
+    ) -> dict:
+        """PATCH /v1/collections/{cid}/persons/{id}.
+
+        At least one of ``name`` / ``metadata`` must be supplied (the SDK
+        raises ``ValueError`` otherwise). Returns the updated person as a
+        flat record-item dict.
+        """
+        cid = collection_id or self._collection_id
+        result = self._client.update_person(
+            cid,
+            person_id,
+            name=name,
+            metadata=metadata,
+        )
+        return _person_to_item(result.person)
 
     # ------------------------------------------------------------------
     # Per-match enrichment (bbox for the matched face)
@@ -435,3 +501,45 @@ def _encode_crop(img: np.ndarray | None, x: int, y: int, w: int, h: int) -> byte
     buf = io.BytesIO()
     pil.save(buf, format="JPEG", quality=92)
     return buf.getvalue()
+
+
+# ----------------------------------------------------------------------
+# Person flattening
+# ----------------------------------------------------------------------
+def _person_to_item(person: dict[str, Any] | None) -> dict[str, Any]:
+    """Flatten an IFS ``Person`` (dict) into the legacy record-item shape.
+
+    The IFS server returns ``metadata`` as a parsed dict for
+    ``get_person`` / ``list_persons`` / ``update_person`` (see
+    ``results.py:44-51``); the JSON-string fallback here is defensive for
+    unexpected server payloads.
+
+    The returned dict keys mirror what ``api/routes.py`` writes to the
+    webui: ``id`` is the IFS aggregate ``Person.id`` (used as the webui's
+    record identifier), with the WCM-specific fields
+    (``category`` / ``occupation`` / ``type`` / ``remarks`` / ``file_path``)
+    lifted from ``metadata``.
+    """
+    if not person:
+        return {}
+    metadata = person.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    pid = person.get("id")
+    return {
+        "id": str(pid) if pid is not None else None,
+        "name": person.get("name"),
+        "external_id": person.get("external_id"),
+        "face_count": person.get("face_count"),
+        "created_at": person.get("created_at"),
+        "updated_at": person.get("updated_at"),
+        # WCM-specific fields lifted from metadata
+        "category": metadata.get("category"),
+        "occupation": metadata.get("occupation"),
+        "type": metadata.get("type"),
+        "remarks": metadata.get("remarks"),
+        "file_path": metadata.get("file_path"),
+    }

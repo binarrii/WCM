@@ -1,4 +1,9 @@
-"""FastAPI application for face recognition service."""
+"""FastAPI application for face recognition service.
+
+As of the IFS-as-source-of-truth refactor, no Postgres connection is
+required at runtime. The lifespan hook is empty (kept as a placeholder
+for future startup wiring).
+"""
 
 from contextlib import asynccontextmanager
 
@@ -7,18 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
-from wcm_facerec.database import init_db
 
 from .routes import api_bp
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler."""
-    try:
-        init_db()
-    except Exception as e:
-        print(f"Warning: Database initialization failed: {e}")
+    """Application lifespan handler (no-op now that Postgres is gone)."""
     yield
 
 
