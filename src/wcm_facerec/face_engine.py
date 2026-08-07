@@ -19,6 +19,7 @@ at the boundary; the route layer is expected to already download URLs.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -313,8 +314,6 @@ class FaceEngine:
     # ------------------------------------------------------------------
     @staticmethod
     async def _run(func, *args, **kwargs):
-        import asyncio
-
         return await asyncio.to_thread(func, *args, **kwargs)
 
 
