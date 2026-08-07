@@ -56,7 +56,27 @@ def test_detect_rejects_url_gr_source():
 # ----------------------------------------------------------------------
 # Search results stay sorted by distance (legacy contract)
 # ----------------------------------------------------------------------
+def _register_detect_one_face(fake_transport, x=0, y=0, w=120, h=120, score=0.9):
+    """Mock /v1/detect with a single face large enough to pass the 80px floor."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {
+                        "pixels": {"x": x, "y": y, "width": w, "height": h},
+                    },
+                    "detection_score": score,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+
+
 def test_search_returns_results_in_distance_order(engine, fake_transport, sample_image_bytes):
+    _register_detect_one_face(fake_transport, x=10, y=20, w=120, h=120)
     fake_transport.register(
         "POST",
         "/v1/collections/all-persons/search",
@@ -109,6 +129,7 @@ def test_search_threshold_filters_by_distance(engine, fake_transport, sample_ima
     The SDK applies the threshold server-side. We mimic that here by only
     registering a single-pass match in the canned response.
     """
+    _register_detect_one_face(fake_transport)
     fake_transport.register(
         "POST",
         "/v1/collections/all-persons/search",
@@ -139,6 +160,7 @@ def test_search_threshold_filters_by_distance(engine, fake_transport, sample_ima
 
 def test_search_passes_similarity_threshold_to_sdk(engine, fake_transport, sample_image_bytes):
     """threshold=0.3 → SDK receives threshold=0.7 (1 - 0.3)."""
+    _register_detect_one_face(fake_transport)
     fake_transport.register(
         "POST",
         "/v1/collections/all-persons/search",
@@ -228,3 +250,105 @@ def test_register_writes_to_both_aggregate_and_category_collection(
     assert len(posts) == 2
     # Both should mention "category" in metadata. We can't easily assert on
     # the multipart body here; the live round-trip test covers that.
+
+
+# ----------------------------------------------------------------------
+# search_multi_face engine-level integration
+# ----------------------------------------------------------------------
+def test_engine_search_multi_face_returns_grouped_shape(engine, fake_transport, sample_image_bytes):
+    """search_multi_face returns {face_count, faces, all_results}."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "detection_score": 0.9,
+                },
+                {
+                    "bbox": {"pixels": {"x": 200, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.85,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p1", "name": "Alice", "metadata": {}},
+                    "matched_face_id": "f1",
+                    "similarity": 0.95,
+                },
+            ]
+        },
+    )
+    import asyncio
+
+    grouped = asyncio.run(
+        engine.search_multi_face(
+            sample_image_bytes,
+            top_k=5,
+            threshold=0.5,
+            min_face_pixels=80,
+            max_faces=10,
+        )
+    )
+    assert grouped["face_count"] == 2
+    assert len(grouped["faces"]) == 2
+    assert len(grouped["all_results"]) == 2
+    # Each face's matches have face_index + query_face_bbox set.
+    for f in grouped["faces"]:
+        for m in f["matches"]:
+            assert "face_index" in m
+            assert "query_face_bbox" in m
+
+
+def test_engine_search_returns_flat_for_backcompat(engine, fake_transport, sample_image_bytes):
+    """The legacy `engine.search` still returns a single flat list of dicts."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "detection_score": 0.9,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p1", "name": "Alice", "metadata": {}},
+                    "matched_face_id": "f1",
+                    "similarity": 0.9,
+                },
+            ]
+        },
+    )
+    fake_transport.register(
+        "GET",
+        "/v1/collections/all-persons/persons/p1/faces",
+        {
+            "faces": [
+                {"id": "f1", "bounding_box": {"pixels": {"x": 0, "y": 0, "width": 1, "height": 1}}}
+            ]
+        },
+    )
+    import asyncio
+
+    matches = asyncio.run(engine.search(sample_image_bytes, top_k=5, threshold=0.4))
+    # Legacy contract: list of dicts with name/distance fields.
+    assert isinstance(matches, list)
+    assert matches[0]["name"] == "Alice"
+    assert matches[0]["distance"] == pytest.approx(0.1)

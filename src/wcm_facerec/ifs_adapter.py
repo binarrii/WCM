@@ -211,6 +211,130 @@ class InsightFaceAdapter:
         return out
 
     # ------------------------------------------------------------------
+    # Multi-face search
+    # ------------------------------------------------------------------
+    def search_multi_face(
+        self,
+        image_bytes: bytes,
+        *,
+        top_k: int = 5,
+        min_similarity: float = 0.0,
+        min_face_pixels: int = 80,
+        max_faces: int = 10,
+    ) -> dict:
+        """Detect every face in an image and search the collection for each one.
+
+        InsightFace Server's /search endpoint takes one query image and
+        returns matches for the *most prominent* face only — there is no
+        server-side fan-out. To support multi-face queries we:
+
+        1. POST /v1/detect (or /v1/embeddings) to enumerate every face in
+           the image along with its bounding box.
+        2. For each face, JPEG-encode a tight crop and POST
+           /v1/collections/{cid}/search with the crop as the query image.
+        3. Merge the per-face match lists, tagging each result with the
+           originating face's index and bbox so the caller can render the
+           original image with one frame per matched face.
+
+        Returns a dict with the shape:
+
+            {
+              "query_dim": 512,
+              "face_count": int,
+              "faces": [
+                {
+                  "face_index": int,
+                  "bbox": {"x", "y", "w", "h"},
+                  "detection_score": float,
+                  "matches": [<same shape as single-face search>],
+                },
+                ...
+              ],
+              "all_results": [<flat list of every match, sorted by distance>],
+            }
+
+        ``all_results`` is a convenience for callers that just want the
+        single ranked list; ``faces`` is the structured multi-face result.
+        Each match in both views carries ``face_index`` and
+        ``query_face_bbox`` so callers can correlate.
+        """
+        detected = self._client.detect(image=image_bytes, max_faces=max_faces)
+        faces_raw = detected.faces or []
+        np_img = _decode(image_bytes)
+
+        out_faces: list[dict] = []
+        all_results: list[dict] = []
+        for idx, f in enumerate(faces_raw):
+            bb = (f.get("bbox") or {}).get("pixels") or {}
+            x = int(bb.get("x", 0))
+            y = int(bb.get("y", 0))
+            w = int(bb.get("width", 0))
+            h = int(bb.get("height", 0))
+            if min(w, h) < min_face_pixels:
+                continue
+            confidence = float(f.get("detection_score") or 0.0)
+            # Crop the face and JPEG-encode it; the server expects JPEG/PNG
+            # bytes, not raw ndarray.
+            crop_bytes = _encode_crop(np_img, x, y, w, h) if np_img is not None else None
+            if crop_bytes is None:
+                # Decoder failed (unusual): fall back to the whole image,
+                # which still produces one round of matches.
+                crop_bytes = image_bytes
+            try:
+                result = self._client.search(
+                    self._collection_id,
+                    image=crop_bytes,
+                    limit=top_k,
+                    threshold=min_similarity,
+                )
+            except Exception as exc:  # noqa: BLE001 — surface a per-face error
+                logger.warning("IFS search failed for face %s: %s", idx, exc)
+                continue
+
+            face_view = {
+                "face_index": idx,
+                "bbox": {"x": x, "y": y, "w": w, "h": h},
+                "detection_score": confidence,
+                "matches": [],
+            }
+            for m in result.matches or []:
+                person = m.get("person") or {}
+                similarity = float(m.get("similarity") or 0.0)
+                metadata = person.get("metadata") or {}
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        metadata = {}
+                match = {
+                    "id": person.get("external_id"),
+                    "name": person.get("name"),
+                    "person_name": person.get("name"),
+                    "person_id": person.get("id"),
+                    "similarity": similarity,
+                    "distance": 1.0 - similarity,
+                    "matched_face_id": m.get("matched_face_id"),
+                    "created_at": person.get("created_at"),
+                    "file_path": metadata.get("file_path"),
+                    "category": metadata.get("category"),
+                    "occupation": metadata.get("occupation"),
+                    "type": metadata.get("type"),
+                    "remarks": metadata.get("remarks"),
+                    "face_index": idx,
+                    "query_face_bbox": {"x": x, "y": y, "w": w, "h": h},
+                }
+                face_view["matches"].append(match)
+                all_results.append(match)
+            out_faces.append(face_view)
+
+        all_results.sort(key=lambda r: r["distance"])
+        return {
+            "face_count": len(out_faces),
+            "faces": out_faces,
+            "all_results": all_results,
+        }
+
+    # ------------------------------------------------------------------
     # Register / delete
     # ------------------------------------------------------------------
     def register_person(
@@ -300,3 +424,14 @@ def _crop_or_none(img: np.ndarray | None, x: int, y: int, w: int, h: int) -> np.
     if x1 <= x0 or y1 <= y0:
         return None
     return img[y0:y1, x0:x1]
+
+
+def _encode_crop(img: np.ndarray | None, x: int, y: int, w: int, h: int) -> bytes | None:
+    """Crop a region of the decoded image and return JPEG bytes."""
+    crop = _crop_or_none(img, x, y, w, h)
+    if crop is None:
+        return None
+    pil = Image.fromarray(crop)
+    buf = io.BytesIO()
+    pil.save(buf, format="JPEG", quality=92)
+    return buf.getvalue()

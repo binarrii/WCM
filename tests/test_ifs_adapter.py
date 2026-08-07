@@ -299,3 +299,125 @@ def test_get_face_bbox_returns_none_when_face_missing(adapter, fake_transport):
         {"faces": [{"id": "f_other", "bounding_box": {"pixels": {}}}]},
     )
     assert adapter.get_face_bbox("p_001", "f_nope") is None
+
+
+# ----------------------------------------------------------------------
+# search_multi_face
+# ----------------------------------------------------------------------
+def test_search_multi_face_returns_one_block_per_face(adapter, fake_transport, sample_image_bytes):
+    """3 faces detected → 3 face blocks; each gets its own search result."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "detection_score": 0.95,
+                },
+                {
+                    "bbox": {"pixels": {"x": 200, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.91,
+                },
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 200, "width": 90, "height": 90}},
+                    "detection_score": 0.88,
+                },
+            ],
+            "processing_ms": 12.0,
+        },
+    )
+    # Each face triggers a /search call. We can't easily distinguish which
+    # request corresponds to which face in the fake transport (the SDK
+    # sends the cropped bytes), so we register the same response for
+    # each call and rely on per-call request-count assertions.
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p_match", "name": "Match", "metadata": {}},
+                    "matched_face_id": "f_match",
+                    "similarity": 0.9,
+                },
+            ]
+        },
+    )
+
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=1,
+        min_similarity=0.0,
+        min_face_pixels=80,
+        max_faces=10,
+    )
+    assert result["face_count"] == 3
+    assert len(result["faces"]) == 3
+    # Each face gets exactly one match and the face_index round-trips
+    # through the response so callers can correlate.
+    indices = [f["face_index"] for f in result["faces"]]
+    assert indices == [0, 1, 2]
+    for f in result["faces"]:
+        assert f["matches"][0]["face_index"] == f["face_index"]
+        assert f["matches"][0]["query_face_bbox"] == f["bbox"]
+    # all_results concatenates every face's matches in encounter order
+    assert len(result["all_results"]) == 3
+    assert all(r["face_index"] in (0, 1, 2) for r in result["all_results"])
+
+
+def test_search_multi_face_drops_tiny_faces(adapter, fake_transport, sample_image_bytes):
+    """min_face_pixels filters faces whose short side < threshold."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "detection_score": 0.9,
+                },
+                {
+                    "bbox": {"pixels": {"x": 200, "y": 0, "width": 30, "height": 30}},
+                    "detection_score": 0.5,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {"matches": []},
+    )
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=1,
+        min_similarity=0.0,
+        min_face_pixels=80,
+        max_faces=10,
+    )
+    # Only the 100x100 face passes the 80px floor.
+    assert result["face_count"] == 1
+    assert result["faces"][0]["face_index"] == 0
+
+
+def test_search_multi_face_handles_no_faces(adapter, fake_transport, sample_image_bytes):
+    """No faces detected → empty structured result, no /search call."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {"faces": [], "processing_ms": 1.0},
+    )
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=5,
+        min_similarity=0.0,
+        min_face_pixels=80,
+        max_faces=10,
+    )
+    assert result["face_count"] == 0
+    assert result["faces"] == []
+    assert result["all_results"] == []
+    # No /search call was issued.
+    assert not any("/search" in c[1] for c in fake_transport.calls)

@@ -130,3 +130,28 @@ def test_live_engine_register_and_cleanup(engine, sample_bytes):
                 ]:
                     with contextlib.suppress(Exception):
                         engine._adapter.delete_person(m["person_id"], collection_id=cid)
+
+
+def test_live_engine_search_multi_face_separates_matches(engine, sample_bytes):
+    """Multi-face image → multiple independent match blocks, each with face_index."""
+    with open("/tmp/wcm/落马官员/赵亚忠_e49b12ee9d9eddc05e1a170d137cbcc0.png", "rb") as f:
+        img = f.read()
+    import asyncio
+
+    grouped = asyncio.run(
+        engine.search_multi_face(img, top_k=2, threshold=0.0, min_face_pixels=20, max_faces=10)
+    )
+    # The 7-face image: at least 2 faces should produce matches.
+    assert grouped["face_count"] >= 2, f"expected ≥2 faces; got {grouped['face_count']}"
+    # Each face block has its own bbox + a list of matches.
+    for face in grouped["faces"]:
+        assert {"x", "y", "w", "h"} <= set(face["bbox"].keys())
+        assert isinstance(face["matches"], list)
+        for m in face["matches"]:
+            assert "face_index" in m
+            assert "query_face_bbox" in m
+    # all_results is a flat list of every match across every face.
+    assert len(grouped["all_results"]) == sum(len(f["matches"]) for f in grouped["faces"])
+    # Self-match for the subject (赵亚忠) is the strongest hit somewhere.
+    names = [m["name"] for m in grouped["all_results"]]
+    assert "赵亚忠" in names, f"expected self-match for 赵亚忠; got {names}"

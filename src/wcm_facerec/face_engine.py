@@ -7,6 +7,7 @@ api/handlers.py, main.py, scripts/*.py) keep compiling:
     - engine.detect_faces(img_source) -> list[dict]
     - engine.generate_embedding(img_source) -> np.ndarray
     - engine.search(img_source, name=None, top_k=10, threshold=0.3) -> list[dict]
+    - engine.search_multi_face(img_source, ...) -> dict  # new multi-face shape
     - engine.register_face(name, file_path=None) -> FaceRecord  (sync, DB-only)
     - engine.register_from_image(name, img_source, category=None) -> FaceRecord
     - engine.verify_faces(img1, img2) -> bool
@@ -159,44 +160,109 @@ class FaceEngine:
     ) -> list[dict]:
         """Search the default collection for similar faces.
 
+        For backward compatibility this still returns a single flat list of
+        matches sorted by distance. The implementation now scans every face
+        in the query image (per the adapter) and concatenates the per-face
+        match lists. The per-match ``face_index`` and ``query_face_bbox``
+        fields identify which query face produced the match.
+
         ``threshold`` is on the legacy cosine-distance scale (lower = more
         similar). It is converted internally to a similarity floor
         ``1 - threshold`` before hitting InsightFace.
         """
+        grouped = await self.search_multi_face(
+            img_source,
+            name=name,
+            top_k=top_k,
+            threshold=threshold,
+        )
+        return grouped["all_results"]
+
+    async def search_multi_face(
+        self,
+        img_source: str | Path | bytes | np.ndarray,
+        *,
+        name: str | None = None,
+        top_k: int = 10,
+        threshold: float = 0.3,
+        min_face_pixels: int = 80,
+        max_faces: int = 10,
+    ) -> dict:
+        """Search the default collection for similar faces, every face in
+        the query image at once.
+
+        Returns a dict with:
+
+            {
+              "face_count": int,
+              "faces": [
+                {
+                  "face_index": int,
+                  "bbox": {"x", "y", "w", "h"},
+                  "detection_score": float,
+                  "matches": [<legacy match dict with face_index>],
+                },
+                ...
+              ],
+              "all_results": [<flat list, sorted by distance>],
+            }
+        """
         image_bytes = _to_bytes(img_source)
-        min_similarity = max(0.0, 1.0 - float(threshold))
-        matches = await self._run(
-            self._adapter.search,
+        # threshold on the legacy cosine-distance scale (lower=more similar).
+        # 0.0 means "no filter" — pass through as no-op rather than a
+        # min_similarity of 1.0 (which would silently return nothing).
+        import asyncio
+
+        if float(threshold) <= 0.0:
+            min_similarity = 0.0
+        else:
+            min_similarity = max(0.0, 1.0 - float(threshold))
+        grouped = await asyncio.to_thread(
+            self._adapter.search_multi_face,
             image_bytes,
             top_k=top_k,
             min_similarity=min_similarity,
+            min_face_pixels=min_face_pixels,
+            max_faces=max_faces,
         )
-        # Drop matches whose name doesn't match the requested filter, fetch
-        # the bbox for each remaining hit in parallel, and synthesize the
-        # ``category`` fallback from the file_path if metadata is empty
-        # (legacy FaceEngine derived category from /tmp/wcm/<...>/<cat>/...).
-        out: list[dict] = []
-        for m in matches:
-            if name and m.get("name") != name:
-                continue
-            bbox = await self._run(
-                self._adapter.get_face_bbox,
-                m["person_id"],
-                m["matched_face_id"],
-            )
-            if bbox:
-                m["source_x"] = bbox["x"]
-                m["source_y"] = bbox["y"]
-                m["source_w"] = bbox["w"]
-                m["source_h"] = bbox["h"]
-            # Legacy fallback: category parsed from file_path segments
-            if not m.get("category") and m.get("file_path"):
-                parts = m["file_path"].split("/", 4)
-                if len(parts) > 3:
-                    m["category"] = parts[3]
-            out.append(m)
-        out.sort(key=lambda x: x["distance"])
-        return out[:top_k]
+
+        # For each per-face match, fetch the matched face's bbox in IFS
+        # (per face — keyed by matched_face_id) and synthesize a category
+        # fallback from the file_path when metadata is empty.
+        for face in grouped["faces"]:
+            for m in face["matches"]:
+                if name and m.get("name") != name:
+                    m["_filtered"] = True
+                    continue
+                bbox = await self._run(
+                    self._adapter.get_face_bbox,
+                    m["person_id"],
+                    m["matched_face_id"],
+                )
+                if bbox:
+                    m["source_x"] = bbox["x"]
+                    m["source_y"] = bbox["y"]
+                    m["source_w"] = bbox["w"]
+                    m["source_h"] = bbox["h"]
+                if not m.get("category") and m.get("file_path"):
+                    parts = m["file_path"].split("/", 4)
+                    if len(parts) > 3:
+                        m["category"] = parts[3]
+
+        # Drop filtered matches from the structured view and rebuild the
+        # flat list so the legacy shape is identical to the single-face
+        # contract.
+        for face in grouped["faces"]:
+            face["matches"] = [m for m in face["matches"] if not m.pop("_filtered", False)]
+        grouped["all_results"] = []
+        for face in grouped["faces"]:
+            grouped["all_results"].extend(face["matches"])
+        grouped["all_results"].sort(key=lambda x: x["distance"])
+        # Cap each face's matches to top_k (the adapter already does this
+        # but the filter step may have removed some).
+        for face in grouped["faces"]:
+            face["matches"] = face["matches"][:top_k]
+        return grouped
 
     async def verify_faces(
         self,
