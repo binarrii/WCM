@@ -298,6 +298,16 @@ class InsightFaceAdapter:
                         probe_norm = float(_np.linalg.norm(raw_emb))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("IFS /embeddings failed; norm scoring disabled: %s", exc)
+            # Auto-disable when the server returns L2-normalized
+            # embeddings (norm ≈ 1.0 always). The MagFace-style quality
+            # signal is only meaningful for *un-normalized* embeddings.
+            if probe_norm is not None and probe_norm < 1.05:
+                logger.debug(
+                    "IFS returned L2-normalized embeddings (norm=%.3f); "
+                    "disabling #2 norm-aware scoring",
+                    probe_norm,
+                )
+                probe_norm = None
 
         out_faces: list[dict] = []
         all_results: list[dict] = []

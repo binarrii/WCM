@@ -51,7 +51,13 @@ class Settings(BaseSettings):
     # a quality signal (MagFace). factor = min(norm / ref, 1.0).
     # ref=30 is typical for ArcFace R50; tune against your embeddings.
     # Set to 0 to disable the /embeddings round-trip entirely.
-    insightface_norm_reference: float = 30.0
+    #
+    # NOTE: default is 0.0 because the upstream IFS Server 0.2.0 returns
+    # L2-normalized embeddings (norm=1.0 always), so there is no norm
+    # signal to extract. Opt in only when self-hosting an IFS variant
+    # that exposes raw (un-normalized) embeddings. The adapter also
+    # auto-disables this path if probe_norm comes back ≈ 1.0.
+    insightface_norm_reference: float = 0.0
 
     # Map a WCM Person category (Chinese strings) to the per-category
     # InsightFace collection. Each register writes twice: once into
