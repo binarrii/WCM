@@ -211,6 +211,26 @@ class InsightFaceAdapter:
         return out
 
     # ------------------------------------------------------------------
+    # Collection stats
+    # ------------------------------------------------------------------
+    def collection_stats(self, collection_id: str) -> dict:
+        """Return person/face counts for a single IFS collection.
+
+        Uses the server's ``get_collection`` (``person_count`` /
+        ``face_count`` fields) — a single call, no pagination. Callers
+        that need per-category counts should call this once per category
+        collection and sum the ``person_count`` values.
+
+        Returns ``{"person_count": int, "face_count": int}``.
+        """
+        result = self._client.get_collection(collection_id)
+        coll = result.collection if hasattr(result, "collection") else result
+        return {
+            "person_count": int(coll.get("person_count") or 0),
+            "face_count": int(coll.get("face_count") or 0),
+        }
+
+    # ------------------------------------------------------------------
     # Multi-face search
     # ------------------------------------------------------------------
     def search_multi_face(

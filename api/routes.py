@@ -600,11 +600,20 @@ async def list_face_records(page: int = 1, limit: int = 12, search: str = None, 
 
 @api_bp.get("/face_records/stats")
 async def get_face_records_stats():
-    """Aggregate counts from IFS ``all-persons`` by ``metadata.type``.
+    """Return per-category person counts from the three IFS category
+    collections.
 
-    Walks every person (cursor-paginated) and buckets into the three
-    Chinese category strings the webui surfaces. IFS caps
-    ``list_persons`` at ``limit <= 100`` per page, so we page in 100s.
+    The webui's three category cards (劣迹艺人 / 时政敏感 / 落马官员)
+    map to the ``insightface_category_collections`` setting. The
+    ``total`` is the **sum of the three category collections' person
+    counts**, not the ``all-persons`` aggregate count.
+
+    We deliberately do NOT count ``all-persons`` by ``metadata.type``:
+    historical imports left most of that aggregate snapshot with an
+    empty ``type``, so a type-bucket walk undercounts badly (it showed
+    4 where the real category data holds ~4700). Reading each category
+    collection's authoritative ``person_count`` (one call each, no
+    pagination) makes the webui match the database.
     """
     engine = get_face_engine()
     counts = {
@@ -613,26 +622,20 @@ async def get_face_records_stats():
         "political": 0,
         "officials": 0,
     }
-    cursor: str | None = None
-
+    # (settings key, stats output key)
+    buckets = [
+        ("劣迹艺人", "bad_artists"),
+        ("时政敏感", "political"),
+        ("落马官员", "officials"),
+    ]
     try:
-        while True:
-            page_items, cursor = await engine._run(
-                engine._adapter.list_persons, limit=100, cursor=cursor
-            )
-            if not page_items:
-                break
-            for p in page_items:
-                counts["total"] += 1
-                t = p.get("type")
-                if t == "劣迹艺人":
-                    counts["bad_artists"] += 1
-                elif t == "时政敏感":
-                    counts["political"] += 1
-                elif t == "落马官员":
-                    counts["officials"] += 1
-            if not cursor:
-                break
+        for category, out_key in buckets:
+            cid = settings.insightface_category_collections.get(category)
+            if not cid:
+                continue
+            stats = await engine._run(engine._adapter.collection_stats, cid)
+            counts[out_key] = stats["person_count"]
+            counts["total"] += stats["person_count"]
         return counts
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

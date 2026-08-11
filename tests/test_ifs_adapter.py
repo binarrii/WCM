@@ -937,3 +937,43 @@ def test_update_person_omits_none_fields_from_payload(adapter, fake_transport):
     # fake_transport stores (method, url, body) — body is None for our
     # recorder; check the URL didn't smuggle in `?name=null` either.
     assert "name=" not in last_call[1].lower() or "name=null" not in last_call[1].lower()
+
+
+# ----------------------------------------------------------------------
+# Collection stats
+# ----------------------------------------------------------------------
+def test_collection_stats_returns_person_and_face_counts(adapter, fake_transport):
+    """collection_stats reads person_count/face_count from IFS get_collection
+    (a single call, no pagination)."""
+    fake_transport.register(
+        "GET",
+        "/v1/collections/corrupt-officials",
+        {
+            "collection": {
+                "id": "corrupt-officials",
+                "name": "落马官员",
+                "person_count": 4424,
+                "face_count": 9407,
+            }
+        },
+    )
+    stats = adapter.collection_stats("corrupt-officials")
+    assert stats["person_count"] == 4424
+    assert stats["face_count"] == 9407
+    # One GET to the collection path, nothing else.
+    calls = [c for c in fake_transport.calls if c[0] == "GET"]
+    assert len(calls) == 1
+    assert calls[0][1].endswith("/v1/collections/corrupt-officials")
+
+
+def test_collection_stats_missing_collection_returns_zero(adapter, fake_transport):
+    """A 404 (unmocked collection) surfaces as zero counts rather than
+    raising — the stats endpoint should degrade gracefully."""
+    fake_transport.register(
+        "GET",
+        "/v1/collections/unknown",
+        {"error": {"code": "not_found", "message": "no such collection"}},
+    )
+    stats = adapter.collection_stats("unknown")
+    assert stats["person_count"] == 0
+    assert stats["face_count"] == 0
