@@ -158,6 +158,9 @@ class FaceEngine:
         name: str | None = None,
         top_k: int = 10,
         threshold: float = 0.3,
+        quality_weight: float | None = None,
+        norm_reference: float | None = None,
+        adaptive_threshold_step: float | None = None,
     ) -> list[dict]:
         """Search the default collection for similar faces.
 
@@ -170,12 +173,20 @@ class FaceEngine:
         ``threshold`` is on the legacy cosine-distance scale (lower = more
         similar). It is converted internally to a similarity floor
         ``1 - threshold`` before hitting InsightFace.
+
+        Optional scoring knobs (each ``None`` = use ``Settings`` value):
+        ``quality_weight`` (#3), ``norm_reference`` (#2), and
+        ``adaptive_threshold_step`` (#1). See ``search_multi_face`` for
+        semantics; this method forwards them through.
         """
         grouped = await self.search_multi_face(
             img_source,
             name=name,
             top_k=top_k,
             threshold=threshold,
+            quality_weight=quality_weight,
+            norm_reference=norm_reference,
+            adaptive_threshold_step=adaptive_threshold_step,
         )
         return grouped["all_results"]
 
@@ -188,9 +199,21 @@ class FaceEngine:
         threshold: float = 0.3,
         min_face_pixels: int = 80,
         max_faces: int = 10,
+        quality_weight: float | None = None,
+        norm_reference: float | None = None,
+        adaptive_threshold_step: float | None = None,
     ) -> dict:
         """Search the default collection for similar faces, every face in
         the query image at once.
+
+        Optional scoring knobs (each ``None`` = use ``Settings`` value,
+        which itself defaults to ``0.0`` = off):
+
+        * ``quality_weight`` (#3): weight matches by query detection_score.
+        * ``norm_reference`` (#2): MagFace-style norm scoring on probe.
+          Pass ``0`` to disable.
+        * ``adaptive_threshold_step`` (#1): per-Person adaptive threshold
+          derived from Person.face_count.
 
         Returns a dict with:
 
@@ -205,7 +228,7 @@ class FaceEngine:
                 },
                 ...
               ],
-              "all_results": [<flat list, sorted by distance>],
+              "all_results": [<flat list, sorted by effective_distance>],
             }
         """
         image_bytes = _to_bytes(img_source)
@@ -223,6 +246,9 @@ class FaceEngine:
             min_similarity=min_similarity,
             min_face_pixels=min_face_pixels,
             max_faces=max_faces,
+            quality_weight=quality_weight,
+            norm_reference=norm_reference,
+            adaptive_threshold_step=adaptive_threshold_step,
         )
 
         # For each per-face match, fetch the matched face's bbox in IFS
@@ -250,13 +276,14 @@ class FaceEngine:
 
         # Drop filtered matches from the structured view and rebuild the
         # flat list so the legacy shape is identical to the single-face
-        # contract.
+        # contract. Use ``effective_distance`` when present (sort key for
+        # quality/norm-weighted matches); fall back to legacy ``distance``.
         for face in grouped["faces"]:
             face["matches"] = [m for m in face["matches"] if not m.pop("_filtered", False)]
         grouped["all_results"] = []
         for face in grouped["faces"]:
             grouped["all_results"].extend(face["matches"])
-        grouped["all_results"].sort(key=lambda x: x["distance"])
+        grouped["all_results"].sort(key=lambda x: x.get("effective_distance", x["distance"]))
         # Cap each face's matches to top_k (the adapter already does this
         # but the filter step may have removed some).
         for face in grouped["faces"]:

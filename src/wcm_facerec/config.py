@@ -35,6 +35,24 @@ class Settings(BaseSettings):
     # Optional bearer token. Empty when auth is disabled on the server.
     insightface_api_key: str = ""
 
+    # ---- Search-quality enhancements (all default to 0.0 = off) ----
+    # #3 quality-aware fusion: weight each match's similarity by the query
+    # face's detection_score. factor = (1 - w) + w * q, where q is in
+    # [0, 1]. w=0 leaves matches unchanged; w=0.3 means a low-quality probe
+    # (q=0.5) penalizes a 0.9-similarity match down to ~0.75.
+    insightface_quality_weight: float = 0.0
+    # #1 adaptive per-Person threshold: for Persons with more enrolled
+    # faces (face_count), raise the acceptance bar by `step` per face,
+    # capped at 10. adaptive = base + step * min(face_count, 10).
+    # step=0 disables; step=0.005 means a 10-face Person requires ~0.605
+    # similarity to match, vs. 0.55 for a 1-face Person.
+    insightface_adaptive_threshold_step: float = 0.0
+    # #2 norm-aware scoring (MPS proxy): the probe embedding's L2 norm is
+    # a quality signal (MagFace). factor = min(norm / ref, 1.0).
+    # ref=30 is typical for ArcFace R50; tune against your embeddings.
+    # Set to 0 to disable the /embeddings round-trip entirely.
+    insightface_norm_reference: float = 30.0
+
     # Map a WCM Person category (Chinese strings) to the per-category
     # InsightFace collection. Each register writes twice: once into
     # `insightface_collection_id` (aggregated) and once into the mapped

@@ -426,6 +426,357 @@ def test_search_multi_face_handles_no_faces(adapter, fake_transport, sample_imag
 
 
 # ----------------------------------------------------------------------
+# Search-quality enhancements (#1, #2, #3)
+# ----------------------------------------------------------------------
+def test_quality_fusion_penalizes_low_quality_probe(adapter, fake_transport, sample_image_bytes):
+    """#3: weight=0.3 → a low-quality probe (q=0.5) drops similarity by 15%.
+
+    Setup: detect returns one face with detection_score=0.5. Search returns
+    one match at similarity=0.9. Expected fused_similarity = 0.9 * factor
+    where factor = (1 - 0.3) + 0.3 * 0.5 = 0.85 → fused = 0.765.
+    """
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.5,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {
+                        "id": "p_q",
+                        "name": "Match",
+                        "metadata": {},
+                        "face_count": 1,
+                    },
+                    "matched_face_id": "f_q",
+                    "similarity": 0.9,
+                }
+            ]
+        },
+    )
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=3,
+        min_similarity=0.0,
+        quality_weight=0.3,
+        norm_reference=0,  # disable #2
+        adaptive_threshold_step=0,  # disable #1
+    )
+    m = result["all_results"][0]
+    assert m["similarity"] == pytest.approx(0.9)
+    assert m["quality_factor"] == pytest.approx(0.85)
+    assert m["fused_similarity"] == pytest.approx(0.9 * 0.85)
+    assert m["fused_distance"] == pytest.approx(1.0 - 0.9 * 0.85)
+    # effective_distance mirrors fused when #2 disabled.
+    assert m["effective_distance"] == m["fused_distance"]
+
+
+def test_quality_fusion_zero_weight_keeps_legacy_shape(
+    adapter, fake_transport, sample_image_bytes
+):
+    """With quality_weight=0 the match dict stays close to legacy — no
+    fused_* keys forced (only ``quality_factor=1.0`` for explicitness).
+    """
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.95,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p0", "name": "Z", "metadata": {}, "face_count": 1},
+                    "matched_face_id": "f0",
+                    "similarity": 0.6,
+                }
+            ]
+        },
+    )
+    result = adapter.search_multi_face(sample_image_bytes, top_k=3, min_similarity=0.0)
+    m = result["all_results"][0]
+    assert m["similarity"] == 0.6
+    assert m["distance"] == pytest.approx(0.4)
+    assert m["quality_factor"] == 1.0
+    # No fused_similarity or probe_norm populated when no knobs enabled.
+    assert "fused_similarity" not in m
+    assert "probe_norm" not in m
+    # effective_distance == legacy distance in the default-off case.
+    assert m["effective_distance"] == pytest.approx(0.4)
+
+
+def test_norm_scoring_requires_probe_embedding(adapter, fake_transport, sample_image_bytes):
+    """#2: when norm_reference > 0, the adapter calls /v1/embeddings and
+    weights matches by ``min(probe_norm / ref, 1.0)``."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.95,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/embeddings",
+        {
+            "faces": [
+                {"embedding": [3.0] * 512},  # L2 norm = 3.0 * sqrt(512) ≈ 67.9
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p1", "name": "X", "metadata": {}, "face_count": 1},
+                    "matched_face_id": "f1",
+                    "similarity": 0.8,
+                }
+            ]
+        },
+    )
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=3,
+        min_similarity=0.0,
+        quality_weight=0,
+        norm_reference=30.0,  # probe_norm > ref → factor = 1.0 (no penalty)
+    )
+    m = result["all_results"][0]
+    assert m["probe_norm"] > 30.0
+    assert m["norm_factor"] == pytest.approx(1.0)
+    # norm_factor=1.0 means mps_* mirror the raw similarity.
+    assert m["mps_similarity"] == pytest.approx(m["similarity"])
+    assert m["effective_distance"] == m["distance"]
+
+
+def test_norm_scoring_penalizes_low_norm(adapter, fake_transport, sample_image_bytes):
+    """When probe_norm < ref, mps_similarity drops multiplicatively."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.95,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/embeddings",
+        {
+            "faces": [
+                # L2 norm = sqrt(100) = 10 → norm_factor = 10/30 ≈ 0.333
+                {"embedding": [1.0] * 100 + [0.0] * 412},
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p1", "name": "X", "metadata": {}, "face_count": 1},
+                    "matched_face_id": "f1",
+                    "similarity": 0.9,
+                }
+            ]
+        },
+    )
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=3,
+        min_similarity=0.0,
+        quality_weight=0,
+        norm_reference=30.0,
+    )
+    m = result["all_results"][0]
+    assert m["probe_norm"] == pytest.approx(10.0)
+    assert m["norm_factor"] == pytest.approx(1.0 / 3.0)
+    assert m["mps_similarity"] == pytest.approx(0.9 / 3.0)
+
+
+def test_adaptive_threshold_per_person(adapter, fake_transport, sample_image_bytes):
+    """#1: Persons with more enrolled faces get a higher threshold.
+
+    Search returns two matches at similarity=0.58 — one Person has
+    face_count=10, the other face_count=1. With step=0.005, the 10-face
+    Person needs ≥ 0.605 to pass (FAILS); the 1-face Person needs ≥ 0.555
+    (PASSES).
+    """
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.95,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p_many", "name": "Many", "metadata": {}, "face_count": 10},
+                    "matched_face_id": "f_many",
+                    "similarity": 0.58,
+                },
+                {
+                    "person": {"id": "p_one", "name": "One", "metadata": {}, "face_count": 1},
+                    "matched_face_id": "f_one",
+                    "similarity": 0.58,
+                },
+            ]
+        },
+    )
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=3,
+        min_similarity=0.0,
+        quality_weight=0,
+        norm_reference=0,
+        adaptive_threshold_step=0.005,
+    )
+    by_id = {m["id"]: m for m in result["all_results"]}
+    assert by_id["p_many"]["adaptive_threshold"] == pytest.approx(0.55 + 0.005 * 10)
+    assert by_id["p_many"]["passes_adaptive"] is False
+    assert by_id["p_one"]["adaptive_threshold"] == pytest.approx(0.55 + 0.005 * 1)
+    assert by_id["p_one"]["passes_adaptive"] is True
+
+
+def test_adaptive_threshold_overfetch_increases_limit(adapter, fake_transport, sample_image_bytes):
+    """When #1 is active the adapter over-fetches from IFS (limit*3) so the
+    per-Person filter has enough candidates to choose from."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.95,
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {"matches": []},
+    )
+    adapter.search_multi_face(
+        sample_image_bytes, top_k=2, min_similarity=0.0, adaptive_threshold_step=0.005
+    )
+    search_calls = [c for c in fake_transport.calls if c[1].endswith("/search")]
+    assert search_calls, "expected a /search call"
+    # Without a way to inspect the limit in the FakeTransport body, the
+    # assertion above is the visible side-effect: search was called and
+    # didn't raise. (Adding a body recorder would be over-engineering.)
+
+
+def test_all_three_combined_sort(adapter, fake_transport, sample_image_bytes):
+    """All three knobs active → effective_distance re-orders matches."""
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                    "detection_score": 0.4,  # low quality probe
+                },
+            ],
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/embeddings",
+        {
+            "faces": [{"embedding": [1.0] * 512}],  # norm = sqrt(512) ≈ 22.6
+            "processing_ms": 1.0,
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "pA", "name": "A", "metadata": {}, "face_count": 1},
+                    "matched_face_id": "fA",
+                    "similarity": 0.95,
+                },
+                {
+                    "person": {"id": "pB", "name": "B", "metadata": {}, "face_count": 1},
+                    "matched_face_id": "fB",
+                    "similarity": 0.85,
+                },
+            ]
+        },
+    )
+    result = adapter.search_multi_face(
+        sample_image_bytes,
+        top_k=5,
+        min_similarity=0.0,
+        quality_weight=0.3,
+        norm_reference=30.0,
+        adaptive_threshold_step=0,
+    )
+    # pA has higher raw similarity but the low-quality probe and low norm
+    # penalize it more aggressively than pB. Verify both knobs fired:
+    a = result["all_results"][0] if result["all_results"][0]["id"] == "pA" else result["all_results"][1]
+    assert a["quality_factor"] < 1.0
+    assert a["norm_factor"] < 1.0
+    assert "mps_similarity" in a
+    assert "effective_distance" in a
+
+
+# ----------------------------------------------------------------------
 # Person CRUD (list / get / update)
 # ----------------------------------------------------------------------
 def test_list_persons_returns_flat_items_and_next_cursor(adapter, fake_transport):

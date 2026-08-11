@@ -221,6 +221,9 @@ class InsightFaceAdapter:
         min_similarity: float = 0.0,
         min_face_pixels: int = 80,
         max_faces: int = 10,
+        quality_weight: float | None = None,
+        norm_reference: float | None = None,
+        adaptive_threshold_step: float | None = None,
     ) -> dict:
         """Detect every face in an image and search the collection for each one.
 
@@ -236,6 +239,21 @@ class InsightFaceAdapter:
            originating face's index and bbox so the caller can render the
            original image with one frame per matched face.
 
+        Optional scoring enhancements (all default to ``None`` = use the
+        ``Settings`` value, which itself defaults to ``0.0`` = off):
+
+        * ``quality_weight`` (#3): multiply similarity by
+          ``(1 - w) + w * query_detection_score``. Penalizes matches
+          against low-quality probe faces.
+        * ``norm_reference`` (#2 MPS proxy): fetch the probe embedding
+          via ``/v1/embeddings`` and weight matches by
+          ``min(probe_norm / norm_reference, 1.0)``. MagFace-style
+          quality signal. Pass ``0`` to disable even when the setting
+          is non-zero.
+        * ``adaptive_threshold_step`` (#1): for each matched Person,
+          compute ``adaptive = base + step * min(face_count, 10)`` and
+          drop matches below their per-Person threshold.
+
         Returns a dict with the shape:
 
             {
@@ -250,17 +268,36 @@ class InsightFaceAdapter:
                 },
                 ...
               ],
-              "all_results": [<flat list of every match, sorted by distance>],
+              "all_results": [<flat list, sorted by effective_distance>],
             }
-
-        ``all_results`` is a convenience for callers that just want the
-        single ranked list; ``faces`` is the structured multi-face result.
-        Each match in both views carries ``face_index`` and
-        ``query_face_bbox`` so callers can correlate.
         """
+        # Resolve scoring knobs against Settings when caller passed None.
+        from .config import settings as _settings
+
+        if quality_weight is None:
+            quality_weight = _settings.insightface_quality_weight
+        if norm_reference is None:
+            norm_reference = _settings.insightface_norm_reference
+        if adaptive_threshold_step is None:
+            adaptive_threshold_step = _settings.insightface_adaptive_threshold_step
+
         detected = self._client.detect(image=image_bytes, max_faces=max_faces)
         faces_raw = detected.faces or []
         np_img = _decode(image_bytes)
+
+        # #2 norm-aware scoring: fetch probe embedding once if enabled.
+        probe_norm: float | None = None
+        if norm_reference and norm_reference > 0:
+            try:
+                emb_result = self._client.embeddings(image=image_bytes)
+                if emb_result.faces:
+                    raw_emb = emb_result.faces[0].get("embedding")
+                    if raw_emb:
+                        import numpy as _np
+
+                        probe_norm = float(_np.linalg.norm(raw_emb))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("IFS /embeddings failed; norm scoring disabled: %s", exc)
 
         out_faces: list[dict] = []
         all_results: list[dict] = []
@@ -280,11 +317,14 @@ class InsightFaceAdapter:
                 # Decoder failed (unusual): fall back to the whole image,
                 # which still produces one round of matches.
                 crop_bytes = image_bytes
+            # Over-fetch when adaptive threshold is on — the global filter
+            # passes matches through, we re-filter per-Person below.
+            server_limit = top_k * 3 if adaptive_threshold_step else top_k
             try:
                 result = self._client.search(
                     self._collection_id,
                     image=crop_bytes,
-                    limit=top_k,
+                    limit=server_limit,
                     threshold=min_similarity,
                 )
             except Exception as exc:  # noqa: BLE001 — surface a per-face error
@@ -320,14 +360,26 @@ class InsightFaceAdapter:
                     "occupation": metadata.get("occupation"),
                     "type": metadata.get("type"),
                     "remarks": metadata.get("remarks"),
+                    "face_count": person.get("face_count"),
                     "face_index": idx,
                     "query_face_bbox": {"x": x, "y": y, "w": w, "h": h},
                 }
+                # Apply scoring enhancements in-place.
+                _apply_match_scoring(
+                    match,
+                    quality_weight=quality_weight,
+                    query_detection_score=confidence,
+                    probe_norm=probe_norm,
+                    norm_reference=norm_reference,
+                    adaptive_threshold_step=adaptive_threshold_step,
+                    base_similarity=_settings.insightface_verify_similarity_threshold,
+                )
                 face_view["matches"].append(match)
                 all_results.append(match)
             out_faces.append(face_view)
 
-        all_results.sort(key=lambda r: r["distance"])
+        # Sort by effective distance (legacy = raw distance when no weights).
+        all_results.sort(key=lambda r: r.get("effective_distance", r["distance"]))
         return {
             "face_count": len(out_faces),
             "faces": out_faces,
@@ -508,6 +560,78 @@ def _encode_crop(img: np.ndarray | None, x: int, y: int, w: int, h: int) -> byte
     buf = io.BytesIO()
     pil.save(buf, format="JPEG", quality=92)
     return buf.getvalue()
+
+
+# ----------------------------------------------------------------------
+# Match scoring enhancements (#1, #2, #3)
+# ----------------------------------------------------------------------
+def _apply_match_scoring(
+    match: dict[str, Any],
+    *,
+    quality_weight: float,
+    query_detection_score: float,
+    probe_norm: float | None,
+    norm_reference: float | None,
+    adaptive_threshold_step: float,
+    base_similarity: float,
+) -> None:
+    """Mutate ``match`` in place to add the per-match scoring fields.
+
+    Populates the following dict keys (all optional / conditional):
+
+    * ``quality_factor`` (#3): ``(1 - quality_weight) + quality_weight * q``
+      where ``q = query_detection_score``. Equals ``1.0`` when weight=0.
+    * ``fused_similarity`` / ``fused_distance`` (#3): quality-weighted score.
+    * ``probe_norm`` / ``norm_factor`` (#2): L2 norm of the probe embedding
+      and the multiplicative weight. ``None`` when norm scoring disabled.
+    * ``mps_similarity`` / ``mps_distance`` (#3 × #2 combined).
+    * ``adaptive_threshold`` / ``passes_adaptive`` (#1): per-Person
+      threshold derived from Person.face_count, and whether this match
+      passes it.
+    * ``effective_distance``: the value downstream code should sort by.
+      Equals ``distance`` when no scoring is active; the combined quality
+      + norm score otherwise.
+    """
+    similarity = float(match.get("similarity") or 0.0)
+
+    # #3 quality-aware fusion
+    if quality_weight and quality_weight > 0.0:
+        q = float(query_detection_score or 0.0)
+        quality_factor = (1.0 - quality_weight) + quality_weight * q
+        fused_similarity = similarity * quality_factor
+        fused_distance = 1.0 - fused_similarity
+        match["quality_factor"] = quality_factor
+        match["fused_similarity"] = fused_similarity
+        match["fused_distance"] = fused_distance
+        effective_similarity = fused_similarity
+    else:
+        match["quality_factor"] = 1.0
+        effective_similarity = similarity
+
+    # #2 norm-aware scoring (MPS proxy)
+    if probe_norm is not None and norm_reference and norm_reference > 0:
+        norm_factor = min(probe_norm / float(norm_reference), 1.0)
+        mps_similarity = effective_similarity * norm_factor
+        mps_distance = 1.0 - mps_similarity
+        match["probe_norm"] = probe_norm
+        match["norm_factor"] = norm_factor
+        match["mps_similarity"] = mps_similarity
+        match["mps_distance"] = mps_distance
+        effective_similarity = mps_similarity
+    # When #2 is disabled we don't add probe_norm/norm_factor — keeps the
+    # legacy match shape clean for callers that don't opt in.
+
+    match["effective_similarity"] = effective_similarity
+    match["effective_distance"] = 1.0 - effective_similarity
+
+    # #1 adaptive per-Person threshold (post-scoring filter, not a score)
+    if adaptive_threshold_step and adaptive_threshold_step > 0.0:
+        face_count = int(match.get("face_count") or 0)
+        adaptive_threshold = base_similarity + adaptive_threshold_step * min(face_count, 10)
+        match["adaptive_threshold"] = adaptive_threshold
+        match["passes_adaptive"] = similarity >= adaptive_threshold
+    else:
+        match["passes_adaptive"] = True
 
 
 # ----------------------------------------------------------------------

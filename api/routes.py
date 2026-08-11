@@ -28,6 +28,23 @@ api_bp = APIRouter()
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+def _opt_float(source, key: str) -> float | None:
+    """Read an optional float from a form/dict, returning None when absent.
+
+    Empty strings and missing keys both yield ``None``. Used by the search
+    endpoints to plumb the optional scoring knobs (#1/#2/#3).
+    """
+    if source is None:
+        return None
+    val = source.get(key)
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def _path_to_image_url(file_path: str | None) -> str | None:
     """Map an absolute ``/tmp/wcm/<cat>/<name>_<md5>.<ext>`` path to the
     web-served ``/images/...`` URL that Nginx fronts."""
@@ -179,6 +196,9 @@ async def search_faces(request: Request):
     name = None
     top_k = 10
     threshold = 0.4
+    quality_weight: float | None = None
+    norm_reference: float | None = None
+    adaptive_threshold_step: float | None = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -189,6 +209,9 @@ async def search_faces(request: Request):
         name = form.get("name")
         top_k = int(form.get("top_k", 10))
         threshold = float(form.get("threshold", 0.4))
+        quality_weight = _opt_float(form, "quality_weight")
+        norm_reference = _opt_float(form, "norm_reference")
+        adaptive_threshold_step = _opt_float(form, "adaptive_threshold_step")
     else:
         # JSON body
         try:
@@ -206,6 +229,9 @@ async def search_faces(request: Request):
         name = data.get("name")
         top_k = int(data.get("top_k", 10))
         threshold = float(data.get("threshold", 0.4))
+        quality_weight = _opt_float(data, "quality_weight")
+        norm_reference = _opt_float(data, "norm_reference")
+        adaptive_threshold_step = _opt_float(data, "adaptive_threshold_step")
 
         # Download from URL
         try:
@@ -237,6 +263,9 @@ async def search_faces(request: Request):
             name=name,
             top_k=max(min(top_k, 10), 1),
             threshold=max(min(threshold, 1.0), 0.0),
+            quality_weight=quality_weight,
+            norm_reference=norm_reference,
+            adaptive_threshold_step=adaptive_threshold_step,
         )
         return {
             "results": results,
