@@ -551,22 +551,47 @@ async def websocket_analyze_media(websocket: WebSocket):
 # get dropped).
 _LIST_PAGE_FETCH = 100
 
+# The three webui category tabs map directly to IFS category collections
+# via ``insightface_category_collections``. The ``其它`` tab and ``All``
+# read the ``all-persons`` aggregate. A record "belongs to" a category if
+# its ``metadata.type`` equals one of these labels; empty/unknown types
+# fall into ``其它``.
+_CATEGORY_LABELS = ("劣迹艺人", "时政敏感", "落马官员")
+
 
 @api_bp.get("/face_records")
 async def list_face_records(page: int = 1, limit: int = 12, search: str = None, type: str = None):
     """List face records, paginated, with optional name search and type filter.
 
-    Backed by IFS ``all-persons``. The ``search=`` parameter matches names
-    server-side; ``type=`` is a client-side filter on ``metadata.type``
-    (IFS does not currently support metadata-based filtering on
-    ``/persons``). The `total` field is the count of items returned on
-    this page (not a global count) — the dashboard's pagination uses
-    ``has_more`` exclusively.
+    Category tabs read their own IFS collection (authoritative), rather
+    than filtering the ``all-persons`` aggregate by ``metadata.type`` —
+    that snapshot has empty ``type`` on almost every row, so category tabs
+    matched nothing. The ``type`` label is injected into each record so
+    the webui badge/filter still works.
+
+    * ``type ∈ 劣迹艺人/时政敏感/落马官员`` → its category collection.
+    * ``type = 其它`` → ``all-persons`` rows whose type is empty/unknown.
+    * ``type = All`` (or absent) → all ``all-persons`` rows.
+
+    ``search=`` matches names server-side. ``total`` is the count returned
+    on this page (not a global count); pagination uses ``has_more``.
     """
     engine = get_face_engine()
     items: list[dict] = []
     cursor: str | None = None
     fetch_limit = max(_LIST_PAGE_FETCH, limit)
+
+    # Resolve the (collection_id, inject_type) for this tab.
+    cid: str | None = None
+    inject_type: str | None = None
+    if type and type != "All":
+        if type in _CATEGORY_LABELS:
+            cid = settings.insightface_category_collections.get(type)
+            inject_type = type
+        else:
+            # 其它 / unknown label: scan all-persons for rows with no
+            # recognized type (skip the type-injection; we filter below).
+            pass
 
     try:
         while len(items) < limit:
@@ -575,11 +600,17 @@ async def list_face_records(page: int = 1, limit: int = 12, search: str = None, 
                 limit=fetch_limit,
                 cursor=cursor,
                 search=search or None,
+                collection_id=cid,
             )
             if not page_items:
                 break
             for p in page_items:
-                if type and type != "All" and (p.get("type") or "") != type:
+                if inject_type:
+                    # Category tab: force the label so the badge renders.
+                    p["type"] = inject_type
+                elif (type not in (None, "All") and type not in _CATEGORY_LABELS
+                      and (p.get("type") or "") in _CATEGORY_LABELS):
+                    # 其它 (or unknown) tab: only rows with no recognized type.
                     continue
                 items.append(_item_with_person(p))
                 if len(items) >= limit:
