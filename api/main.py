@@ -5,10 +5,12 @@ required at runtime. The lifespan hook is empty (kept as a placeholder
 for future startup wiring).
 """
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
@@ -42,10 +44,6 @@ def create_app() -> FastAPI:
     app.include_router(api_bp, prefix="/api/v1")
 
     # Mount static files for face images
-    import os
-
-    from fastapi.staticfiles import StaticFiles
-
     os.makedirs("/tmp/wcm", exist_ok=True)
     app.mount("/images", StaticFiles(directory="/tmp/wcm"), name="images")
 

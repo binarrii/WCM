@@ -38,8 +38,6 @@ def test_detect_rejects_url_gr_source():
     """URLs must be downloaded by the route layer; engine refuses them."""
     import asyncio
 
-    from wcm_facerec.face_engine import FaceEngine
-
     e = FaceEngine()
     e._adapter.detect = lambda *_a, **_kw: [
         {"facial_area": {}, "confidence": 0, "area": 0, "embedding": None}

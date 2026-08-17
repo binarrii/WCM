@@ -28,6 +28,8 @@ from wcm_facerec.vendor.insightface_server import (  # type: ignore  # noqa: F40
 )
 from wcm_facerec.vendor.insightface_server.exceptions import NotFoundError
 
+from .config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -292,14 +294,12 @@ class InsightFaceAdapter:
             }
         """
         # Resolve scoring knobs against Settings when caller passed None.
-        from .config import settings as _settings
-
         if quality_weight is None:
-            quality_weight = _settings.insightface_quality_weight
+            quality_weight = settings.insightface_quality_weight
         if norm_reference is None:
-            norm_reference = _settings.insightface_norm_reference
+            norm_reference = settings.insightface_norm_reference
         if adaptive_threshold_step is None:
-            adaptive_threshold_step = _settings.insightface_adaptive_threshold_step
+            adaptive_threshold_step = settings.insightface_adaptive_threshold_step
 
         detected = self._client.detect(image=image_bytes, max_faces=max_faces)
         faces_raw = detected.faces or []
@@ -402,7 +402,7 @@ class InsightFaceAdapter:
                     probe_norm=probe_norm,
                     norm_reference=norm_reference,
                     adaptive_threshold_step=adaptive_threshold_step,
-                    base_similarity=_settings.insightface_verify_similarity_threshold,
+                    base_similarity=settings.insightface_verify_similarity_threshold,
                 )
                 face_view["matches"].append(match)
                 all_results.append(match)
