@@ -1,7 +1,7 @@
 [project]
 name = "wcm-facerec"
 version = "0.1.0"
-description = "Large Scale Face Recognition with InsightFace Server + pgvector"
+description = "Face recognition and media moderation with InsightFace Server"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -17,7 +17,6 @@ dependencies = [
     # public FaceEngine API still accepts arrays for back-compat with
     # main.py and scripts/.
     "opencv-python-headless>=4.10.0.20241230",
-    "xlrd>=2.0.2",
     "pydantic-settings>=2.13.1",
     "python-multipart>=0.0.26",
     # The InsightFace Server Python SDK is vendored under
@@ -52,6 +51,7 @@ packages = ["src/wcm_facerec"]
 "wcm_facerec" = "src/wcm_facerec"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "live: hits the live InsightFace Server — gated on RUN_LIVE=1",
 ]
@@ -99,9 +99,7 @@ ignore = [
 # is held to the strict rule.
 "scripts/*" = ["B", "E402", "E722", "F401", "F841", "PLC0415"]
 "main.py" = ["E402", "PLC0415"]      # CLI tool — imports after shebang / inside main()
-"app_wrapper.py" = ["E402", "PLC0415"] # legacy DeepFace entry point
 "docs/*" = ["B", "E402", "E711", "E722", "F401", "F841", "PLC0415"]
-"test_tensorflow_init.py" = ["E402"] # legacy one-shot probe
 "tests/*" = ["B", "F401", "F811", "PLC0415", "SIM105"]  # test files import & reimport freely
 "src/wcm_facerec/vendor/**" = ["ALL"]
 

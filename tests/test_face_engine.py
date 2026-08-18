@@ -381,3 +381,212 @@ def test_engine_search_returns_flat_for_backcompat(engine, fake_transport, sampl
     assert isinstance(matches, list)
     assert matches[0]["name"] == "Alice"
     assert matches[0]["distance"] == pytest.approx(0.1)
+
+
+def test_register_uses_type_for_category_and_reuses_aggregate_id(
+    monkeypatch, tmp_path, sample_image_bytes
+):
+    import asyncio
+
+    import wcm_facerec.face_engine as face_engine_module
+
+    image_path = tmp_path / "face.jpg"
+
+    def persist(image_bytes, _name, _category):
+        image_path.write_bytes(image_bytes)
+        return str(image_path)
+
+    class Adapter:
+        def __init__(self):
+            self.calls = []
+
+        def register_person(self, **kwargs):
+            self.calls.append(kwargs)
+            return ("aggregate-id", "face-id")
+
+        def get_person(self, _person_id):
+            return {
+                "id": "aggregate-id",
+                "name": "测试",
+                "type": "时政敏感",
+                "category": "时政敏感",
+                "file_path": str(image_path),
+            }
+
+    monkeypatch.setattr(face_engine_module, "_persist_image", persist)
+    monkeypatch.setattr(
+        face_engine_module,
+        "_image_target_path",
+        lambda _image_bytes, _name, _category: image_path,
+    )
+    monkeypatch.setattr(settings, "insightface_collection_id", "all-persons")
+    monkeypatch.setattr(settings, "insightface_category_collections", {"时政敏感": "political"})
+    engine = FaceEngine.__new__(FaceEngine)
+    engine._adapter = Adapter()
+
+    record = asyncio.run(
+        engine.register_from_image(
+            "测试",
+            sample_image_bytes,
+            type_="时政敏感",
+        )
+    )
+    aggregate, mirror = engine._adapter.calls
+    assert record["id"] == "aggregate-id"
+    assert aggregate["metadata"]["category"] == "时政敏感"
+    assert mirror["collection_id"] == "political"
+    assert mirror["person_id"] == "aggregate-id"
+    assert mirror["external_id"] == "aggregate-id"
+
+
+def test_register_rolls_back_aggregate_and_file_when_mirror_fails(
+    monkeypatch, tmp_path, sample_image_bytes
+):
+    import asyncio
+
+    import wcm_facerec.face_engine as face_engine_module
+
+    image_path = tmp_path / "face.jpg"
+
+    def persist(image_bytes, _name, _category):
+        image_path.write_bytes(image_bytes)
+        return str(image_path)
+
+    class Adapter:
+        def __init__(self):
+            self.deleted = []
+
+        def register_person(self, *, collection_id=None, **_kwargs):
+            if collection_id:
+                raise RuntimeError("mirror unavailable")
+            return ("aggregate-id", "face-id")
+
+        def delete_person(self, person_id):
+            self.deleted.append(person_id)
+
+    monkeypatch.setattr(face_engine_module, "_persist_image", persist)
+    monkeypatch.setattr(
+        face_engine_module,
+        "_image_target_path",
+        lambda _image_bytes, _name, _category: image_path,
+    )
+    monkeypatch.setattr(settings, "insightface_collection_id", "all-persons")
+    monkeypatch.setattr(settings, "insightface_category_collections", {"时政敏感": "political"})
+    engine = FaceEngine.__new__(FaceEngine)
+    engine._adapter = Adapter()
+
+    with pytest.raises(RuntimeError, match="mirror unavailable"):
+        asyncio.run(
+            engine.register_from_image(
+                "测试",
+                sample_image_bytes,
+                type_="时政敏感",
+            )
+        )
+    assert engine._adapter.deleted == ["aggregate-id"]
+    assert not image_path.exists()
+
+
+def test_update_moves_legacy_category_mirror(monkeypatch, tmp_path, sample_image_bytes):
+    import asyncio
+
+    image_path = tmp_path / "face.jpg"
+    image_path.write_bytes(sample_image_bytes)
+    current = {
+        "id": "aggregate-id",
+        "name": "旧名字",
+        "category": "时政敏感",
+        "type": "时政敏感",
+        "occupation": "",
+        "remarks": "",
+        "file_path": str(image_path),
+    }
+    old_mirror = {**current, "id": "legacy-mirror", "external_id": "aggregate-id"}
+
+    class Adapter:
+        def __init__(self):
+            self.registered = []
+            self.deleted = []
+
+        def get_person(self, person_id, *, collection_id=None):
+            return current if collection_id is None and person_id == "aggregate-id" else None
+
+        def find_person_by_external_id(self, _person_id, *, collection_id):
+            return old_mirror if collection_id == "political" else None
+
+        def register_person(self, **kwargs):
+            self.registered.append(kwargs)
+            return (kwargs["person_id"], "face-id")
+
+        def update_person(self, person_id, *, name=None, metadata=None, collection_id=None):
+            assert collection_id is None
+            return {"id": person_id, "name": name or current["name"], **metadata}
+
+        def delete_person(self, person_id, *, collection_id=None):
+            self.deleted.append((collection_id, person_id))
+
+    monkeypatch.setattr(
+        settings,
+        "insightface_category_collections",
+        {"时政敏感": "political", "落马官员": "officials"},
+    )
+    engine = FaceEngine.__new__(FaceEngine)
+    engine._adapter = Adapter()
+    updated = asyncio.run(
+        engine.update_person_record(
+            "aggregate-id",
+            name="新名字",
+            metadata={"type": "落马官员"},
+        )
+    )
+    assert updated["type"] == "落马官员"
+    assert engine._adapter.registered[0]["collection_id"] == "officials"
+    assert engine._adapter.registered[0]["person_id"] == "aggregate-id"
+    assert engine._adapter.deleted == [("political", "legacy-mirror")]
+
+
+def test_delete_removes_category_mirror_before_aggregate(monkeypatch, tmp_path, sample_image_bytes):
+    import asyncio
+
+    image_path = tmp_path / "face.jpg"
+    image_path.write_bytes(sample_image_bytes)
+    current = {
+        "id": "aggregate-id",
+        "name": "测试",
+        "category": "时政敏感",
+        "type": "时政敏感",
+        "file_path": str(image_path),
+    }
+    mirror = {**current, "external_id": "aggregate-id"}
+
+    class Adapter:
+        def __init__(self):
+            self.deleted = []
+
+        def get_person(self, person_id, *, collection_id=None):
+            if collection_id is None:
+                return current
+            if collection_id == "political" and person_id == "aggregate-id":
+                return mirror
+            return None
+
+        def find_person_by_external_id(self, _person_id, *, collection_id):
+            return None
+
+        def delete_person(self, person_id, *, collection_id=None):
+            self.deleted.append((collection_id, person_id))
+
+    monkeypatch.setattr(
+        settings,
+        "insightface_category_collections",
+        {"时政敏感": "political", "落马官员": "officials"},
+    )
+    engine = FaceEngine.__new__(FaceEngine)
+    engine._adapter = Adapter()
+    deleted = asyncio.run(engine.delete_person_record("aggregate-id"))
+    assert deleted["id"] == "aggregate-id"
+    assert engine._adapter.deleted == [
+        ("political", "aggregate-id"),
+        (None, "aggregate-id"),
+    ]
+    assert not image_path.exists()

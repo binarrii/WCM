@@ -36,8 +36,12 @@ async def _search_video_frames(
         should_unlink = False
     else:
         video_path = Path(f"/tmp/ws_video_{os.urandom(8).hex()}.mp4")
-        _download_video_safe_sync(
-            url, video_path, settings.max_file_size_mb * 100 * 1024 * 1024, timeout=900.0
+        await asyncio.to_thread(
+            _download_video_safe_sync,
+            url,
+            video_path,
+            settings.max_file_size_mb * 100 * 1024 * 1024,
+            timeout=900.0,
         )
         should_unlink = True
 
@@ -47,6 +51,9 @@ async def _search_video_frames(
             raise Exception("Could not open video file")
 
         fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = 25.0
+        frame_step = max(int(fps * max(sample_interval, 0.01)), 1)
         all_results = []
         frame_idx = 0
 
@@ -55,12 +62,10 @@ async def _search_video_frames(
             if not ret:
                 break
 
-            if frame_idx % int(fps * sample_interval) == 0:
-                current_frame_time = frame_idx / fps if fps > 0 else 0
+            if frame_idx % frame_step == 0:
+                current_frame_time = frame_idx / fps
                 try:
-                    # Send entire frame to DeepFace /search API directly
-                    results = await asyncio.to_thread(
-                        engine.search,
+                    results = await engine.search(
                         img_source=frame,
                         name=name,
                         top_k=top_k,
@@ -69,7 +74,7 @@ async def _search_video_frames(
 
                     for r in results:
                         r["frame_time"] = current_frame_time
-                        # Try to extract the cropped face from the bounding box if provided by DeepFace
+                        # Include a JSON-safe crop when a matched-face bbox is available.
                         x, y, w, h = (
                             r.get("source_x"),
                             r.get("source_y"),
@@ -81,11 +86,12 @@ async def _search_video_frames(
                             y1, y2 = max(0, y), min(frame.shape[0], y + h)
                             x1, x2 = max(0, x), min(frame.shape[1], x + w)
                             if y2 > y1 and x2 > x1:
-                                r["source_face"] = frame[y1:y2, x1:x2]
+                                ok, encoded = cv2.imencode(".jpg", frame[y1:y2, x1:x2])
+                                if ok:
+                                    r["source_face_b64"] = base64.b64encode(encoded).decode("ascii")
                         all_results.append(r)
                 except Exception as e:
                     print(f"Error searching frame: {e}")
-                    pass
 
             frame_idx += 1
 

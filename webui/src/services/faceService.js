@@ -2,9 +2,9 @@ import api from './api';
 
 export const faceService = {
   // Get face records with pagination, search, and type filters
-  async getRecords({ page = 1, limit = 12, search = '', type = 'All' }) {
+  async getRecords({ cursor = null, limit = 12, search = '', type = 'All' }) {
     const response = await api.get('/face_records', {
-      params: { page, limit, search, type }
+      params: { cursor, limit, search, type }
     });
     return response.data;
   },

@@ -483,9 +483,7 @@ def test_quality_fusion_penalizes_low_quality_probe(adapter, fake_transport, sam
     assert m["effective_distance"] == m["fused_distance"]
 
 
-def test_quality_fusion_zero_weight_keeps_legacy_shape(
-    adapter, fake_transport, sample_image_bytes
-):
+def test_quality_fusion_zero_weight_keeps_legacy_shape(adapter, fake_transport, sample_image_bytes):
     """With quality_weight=0 the match dict stays close to legacy — no
     fused_* keys forced (only ``quality_factor=1.0`` for explicitness).
     """
@@ -769,7 +767,11 @@ def test_all_three_combined_sort(adapter, fake_transport, sample_image_bytes):
     )
     # pA has higher raw similarity but the low-quality probe and low norm
     # penalize it more aggressively than pB. Verify both knobs fired:
-    a = result["all_results"][0] if result["all_results"][0]["id"] == "pA" else result["all_results"][1]
+    a = (
+        result["all_results"][0]
+        if result["all_results"][0]["id"] == "pA"
+        else result["all_results"][1]
+    )
     assert a["quality_factor"] < 1.0
     assert a["norm_factor"] < 1.0
     assert "mps_similarity" in a
@@ -900,9 +902,7 @@ def test_update_person_passes_name_and_metadata(adapter, fake_transport):
             }
         },
     )
-    updated = adapter.update_person(
-        "p_001", name="李四 (renamed)", metadata={"remarks": "updated"}
-    )
+    updated = adapter.update_person("p_001", name="李四 (renamed)", metadata={"remarks": "updated"})
     assert updated["name"] == "李四 (renamed)"
     assert updated["remarks"] == "updated"
     # Confirm we hit the PATCH endpoint.

@@ -77,11 +77,11 @@ def extract_faces_from_directory(
         if not overwrite and output_path.exists():
             return False
 
-        # Convert to uint8 if needed (DeepFace may return float 0-1 images)
+        # Convert to uint8 if an adapter returns normalized float images.
         if face_img.dtype != np.uint8:
             face_img = (face_img * 255).astype(np.uint8)
 
-        # FaceEngine requests BGR crops from DeepFace, matching cv2.imwrite.
+        # FaceEngine returns image crops compatible with cv2.imwrite.
         cv2.imwrite(str(output_path), face_img)
         return True
 

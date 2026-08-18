@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
 
+from .face_records import face_records_bp
 from .routes import api_bp
 
 
@@ -42,10 +43,16 @@ def create_app() -> FastAPI:
 
     # Register blueprints
     app.include_router(api_bp, prefix="/api/v1")
+    app.include_router(face_records_bp, prefix="/api/v1")
 
-    # Mount static files for face images
+    # Mount persisted face images before the SPA catch-all.
     os.makedirs("/tmp/wcm", exist_ok=True)
     app.mount("/images", StaticFiles(directory="/tmp/wcm"), name="images")
+
+    # The Docker image includes the built Vue dashboard at /www. Local API
+    # development still works without that directory.
+    if os.path.isdir("/www"):
+        app.mount("/", StaticFiles(directory="/www", html=True), name="webui")
 
     return app
 

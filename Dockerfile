@@ -1,4 +1,15 @@
-# Stage 1: Build dependencies
+# Stage 1: Build the Vue dashboard
+FROM node:22-slim AS web-builder
+
+WORKDIR /webui
+RUN corepack enable
+COPY webui/package.json webui/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY webui/ ./
+RUN pnpm build
+
+
+# Stage 2: Build Python dependencies
 FROM python:3.12-slim AS builder
 
 
@@ -11,7 +22,7 @@ RUN pip install uv --no-cache-dir
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies to local directory
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Clean venv in builder (before COPY to reduce stage-2 size)
 RUN find /app/.venv/lib/python3.12/site-packages/ -maxdepth 1 -type d -name "*test*" -exec rm -rf {} + 2>/dev/null || true && \
@@ -28,7 +39,7 @@ COPY api/ ./api/
 COPY scripts/ ./scripts/
 
 
-# Stage 2: Minimal runtime image
+# Stage 3: Minimal runtime image
 FROM python:3.12-slim
 
 
@@ -49,24 +60,24 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/api ./api
 COPY --from=builder /app/scripts ./scripts
+COPY --from=web-builder /webui/dist /www
 
 # Use virtual environment python
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
 ENV PYTHONPATH="/app/src"
-# InsightFace Server runs in its own container (host 10.252.25.251:18097 by
-# default). GPU access is no longer needed by the API container itself.
-ENV WCM_INSIGHTFACE_BASE_URL=""
+# InsightFace Server runs separately. The default can be overridden by
+# compose or the container runtime.
+ENV WCM_INSIGHTFACE_BASE_URL="http://10.252.25.251:18097"
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Create the non-root user and seed the named-volume mount point with writable
+# ownership (Docker preserves it when initializing a new volume).
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /tmp/wcm \
+    && chown -R appuser:appuser /app /tmp/wcm
 USER appuser
 
 # Default environment variables (override with -e at runtime)
-ENV WCM_DB_HOST=db
-ENV WCM_DB_PORT=5432
-ENV WCM_DB_NAME=facerec
-ENV WCM_DB_USER=postgres
 ENV WCM_API_HOST=0.0.0.0
 ENV WCM_API_PORT=8000
 

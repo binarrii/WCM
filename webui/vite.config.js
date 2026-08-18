@@ -6,5 +6,9 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     allowedHosts: ['.trycloudflare.com'],
+    proxy: {
+      '/api': 'http://localhost:8000',
+      '/images': 'http://localhost:8000',
+    },
   },
 })

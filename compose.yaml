@@ -10,15 +10,17 @@ services:
       - GUNICORN_WORKERS=4
       - WCM_API_HOST=0.0.0.0
       - WCM_API_PORT=8000
+      - WCM_INSIGHTFACE_BASE_URL=${WCM_INSIGHTFACE_BASE_URL:-http://10.252.25.251:18097}
+      - WCM_INSIGHTFACE_API_KEY=${WCM_INSIGHTFACE_API_KEY:-}
     restart: unless-stopped
     networks:
       - wcm-network
-    # /tmp/wcm is hardcoded as the upload directory by FaceEngine._persist_image
-    # (see src/wcm_facerec/face_engine.py). Nginx / FastAPI's /images static
-    # mount serves it from the same path inside the container.
-    tmpfs:
-      - /tmp/wcm:size=2G
+    volumes:
+      - wcm-images:/tmp/wcm
 
 networks:
   wcm-network:
     driver: bridge
+
+volumes:
+  wcm-images:

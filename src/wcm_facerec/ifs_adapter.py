@@ -6,10 +6,8 @@ FaceEngine dict contract that api/routes.py and api/handlers.py consume:
     InsightFace.search → matches[i].similarity (∈ [0,1], higher=better)
     FaceEngine.search  → matches[i]["distance"] (lower=better, cos-distance scale)
 
-Plus the legacy fields that InsightFace carries in Person.metadata JSON:
-occupation, type, remarks, category. The WCM `Person` row (Postgres) still
-holds the canonical copy of those, but search results now need to surface
-them from the metadata.
+Person profile fields (occupation, type, remarks, category and file_path)
+live in InsightFace Person.metadata and are flattened for API consumers.
 """
 
 from __future__ import annotations
@@ -472,9 +470,7 @@ class InsightFaceAdapter:
         server-side; IFS does not currently filter by metadata.
         """
         cid = collection_id or self._collection_id
-        page = self._client.list_persons(
-            cid, limit=limit, cursor=cursor, search=search
-        )
+        page = self._client.list_persons(cid, limit=limit, cursor=cursor, search=search)
         items = [_person_to_item(p) for p in (page.persons or [])]
         return items, page.next_cursor
 
@@ -494,6 +490,33 @@ class InsightFaceAdapter:
         except NotFoundError:
             return None
         return _person_to_item(result.person)
+
+    def find_person_by_external_id(
+        self,
+        external_id: str,
+        *,
+        collection_id: str,
+        page_size: int = 100,
+    ) -> dict | None:
+        """Find a legacy category mirror by its aggregate Person id.
+
+        New mirrors reuse the aggregate id and can be fetched directly. This
+        paginated fallback keeps update/delete compatible with older mirrors
+        whose server-generated id differs and stores the aggregate id in
+        ``external_id``.
+        """
+        cursor: str | None = None
+        while True:
+            items, cursor = self.list_persons(
+                limit=page_size,
+                cursor=cursor,
+                collection_id=collection_id,
+            )
+            for item in items:
+                if item.get("external_id") == external_id:
+                    return item
+            if not cursor:
+                return None
 
     def update_person(
         self,

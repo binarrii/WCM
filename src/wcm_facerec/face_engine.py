@@ -31,7 +31,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .config import settings, warn_deprecated
+from .config import settings
 from .ifs_adapter import InsightFaceAdapter
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,20 @@ def _detect_image_ext(image_bytes: bytes) -> str:
     return ".jpg"
 
 
+def _image_target_path(
+    image_bytes: bytes,
+    name: str,
+    category: str,
+    ext: str | None = None,
+) -> Path:
+    safe_name = (
+        "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name) or "unknown"
+    )
+    content_hash = hashlib.md5(image_bytes).hexdigest()
+    final_ext = ext or _detect_image_ext(image_bytes)
+    return Path("/tmp/wcm") / category / f"{safe_name}_{content_hash}{final_ext}"
+
+
 def _persist_image(
     image_bytes: bytes,
     name: str,
@@ -65,14 +79,9 @@ def _persist_image(
     Returns the absolute file path. Reuses the existing file if the hash
     already exists (idempotent).
     """
-    safe_name = (
-        "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name) or "unknown"
-    )
-    content_hash = hashlib.md5(image_bytes).hexdigest()
-    final_ext = ext or _detect_image_ext(image_bytes)
-    target_dir = Path("/tmp/wcm") / category
+    target_path = _image_target_path(image_bytes, name, category, ext)
+    target_dir = target_path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"{safe_name}_{content_hash}{final_ext}"
     if not target_path.exists():
         target_path.write_bytes(image_bytes)
     return str(target_path)
@@ -109,11 +118,10 @@ class FaceEngine:
         model_name: str | None = None,
         distance_metric: str | None = None,
     ):
-        """Args are accepted for back-compat with the old DeepFace signature
-        and are ignored — InsightFace Server ships a single fixed model
+        """Optional legacy args are accepted for caller compatibility and are
+        otherwise ignored — InsightFace Server ships a single fixed model
         (buffalo_m, 512-dim ArcFace R50)."""
-        warn_deprecated()
-        self.model_name = model_name or "Facenet512"
+        self.model_name = model_name or settings.insightface_model_name
         self.distance_metric = distance_metric or "cosine"
         self.embedding_dim = settings.embedding_dim
         self.api_url = settings.insightface_base_url
@@ -134,7 +142,7 @@ class FaceEngine:
         result has the original ``{face, confidence, facial_area, area,
         embedding}`` dict. Sorted by area desc, top 3, ``min(w,h) >= 80``
         filter applied inside the adapter. Embeddings are populated by
-        default — the legacy DeepFace path returned them inline.
+        default to preserve the public engine contract.
         """
         try:
             image_bytes = _to_bytes(img_source)
@@ -336,7 +344,13 @@ class FaceEngine:
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
 
-        cat = category or settings.default_category
+        # ``type`` is the dashboard's canonical classification. Keep
+        # ``category`` as a compatibility alias for older scripts, but make
+        # both metadata fields and collection routing agree for new writes.
+        cat = category or type_ or settings.default_category
+        record_type = type_ or (cat if cat in settings.insightface_category_collections else "")
+        image_target = _image_target_path(image_bytes, name, cat)
+        image_existed = image_target.exists()
         persisted_path = _persist_image(image_bytes, name, cat)
 
         # Metadata shared by both enrollments so list / search results
@@ -344,30 +358,47 @@ class FaceEngine:
         metadata = {
             "category": cat,
             "occupation": occupation or "",
-            "type": type_ or "",
+            "type": record_type,
             "remarks": remarks or "",
             "file_path": persisted_path,
         }
 
         # Always enroll into the configured aggregate collection.
-        person_id, _face_id = await self._run(
-            self._adapter.register_person,
-            name=name,
-            image_bytes=image_bytes,
-            metadata=metadata,
-        )
-        # Plus the per-category collection, when one is configured. Tag
-        # the duplicate with external_id=<aggregate_id> for correlation.
-        category_cid = settings.insightface_category_collections.get(cat)
-        if category_cid and category_cid != settings.insightface_collection_id:
-            await self._run(
+        try:
+            person_id, _face_id = await self._run(
                 self._adapter.register_person,
                 name=name,
                 image_bytes=image_bytes,
                 metadata=metadata,
-                external_id=person_id,
-                collection_id=category_cid,
             )
+        except Exception:
+            if not image_existed:
+                Path(persisted_path).unlink(missing_ok=True)
+            raise
+
+        # Mirror into the category collection using the same Person id. The
+        # external_id is retained for compatibility with legacy mirrors.
+        category_cid = settings.insightface_category_collections.get(cat)
+        if category_cid and category_cid != settings.insightface_collection_id:
+            try:
+                await self._run(
+                    self._adapter.register_person,
+                    name=name,
+                    image_bytes=image_bytes,
+                    metadata=metadata,
+                    external_id=person_id,
+                    person_id=person_id,
+                    collection_id=category_cid,
+                )
+            except Exception:
+                # Compensate the aggregate write so the caller never receives
+                # an error for a partially enrolled record.
+                try:
+                    await self._run(self._adapter.delete_person, person_id)
+                finally:
+                    if not image_existed:
+                        Path(persisted_path).unlink(missing_ok=True)
+                raise
 
         # Read back the canonical aggregate record so we surface the
         # server-assigned `created_at` (and any server-side normalization
@@ -377,6 +408,187 @@ class FaceEngine:
             # Should not happen — we just created it — but be defensive.
             record = {"id": person_id, "name": name}
         return record
+
+    async def _find_category_mirror(self, person_id: str, collection_id: str) -> dict | None:
+        mirror = await self._run(
+            self._adapter.get_person,
+            person_id,
+            collection_id=collection_id,
+        )
+        if mirror:
+            return mirror
+        return await self._run(
+            self._adapter.find_person_by_external_id,
+            person_id,
+            collection_id=collection_id,
+        )
+
+    @staticmethod
+    def _item_metadata(item: dict) -> dict:
+        return {
+            key: item.get(key) or ""
+            for key in ("category", "occupation", "type", "remarks", "file_path")
+        }
+
+    async def update_person_record(
+        self,
+        person_id: str,
+        *,
+        name: str | None,
+        metadata: dict,
+    ) -> dict | None:
+        """Update aggregate and category mirror with compensating rollback."""
+        current = await self._run(self._adapter.get_person, person_id)
+        if not current:
+            return None
+
+        old_metadata = self._item_metadata(current)
+        new_metadata = {**old_metadata, **metadata}
+        new_category = new_metadata.get("type") or new_metadata.get("category")
+        new_metadata["category"] = new_category or settings.default_category
+        new_name = name or current.get("name")
+
+        old_category = old_metadata.get("type") or old_metadata.get("category")
+        old_cid = settings.insightface_category_collections.get(old_category)
+        new_cid = settings.insightface_category_collections.get(new_category)
+        old_mirror = await self._find_category_mirror(person_id, old_cid) if old_cid else None
+
+        file_path = current.get("file_path")
+        image_path = Path(str(file_path)) if file_path else None
+        image_bytes: bytes | None = (
+            image_path.read_bytes() if image_path and image_path.is_file() else None
+        )
+        prepared_new_mirror: dict | None = None
+
+        try:
+            if new_cid == old_cid and new_cid:
+                if old_mirror:
+                    prepared_new_mirror = await self._run(
+                        self._adapter.update_person,
+                        old_mirror["id"],
+                        name=new_name,
+                        metadata=new_metadata,
+                        collection_id=new_cid,
+                    )
+                elif image_bytes is not None:
+                    await self._run(
+                        self._adapter.register_person,
+                        name=new_name,
+                        image_bytes=image_bytes,
+                        metadata=new_metadata,
+                        external_id=person_id,
+                        person_id=person_id,
+                        collection_id=new_cid,
+                    )
+                    prepared_new_mirror = {"id": person_id, "_created": True}
+                else:
+                    raise RuntimeError("cannot restore category mirror: persisted image is missing")
+            elif new_cid:
+                if image_bytes is None:
+                    raise RuntimeError("cannot move category: persisted face image is missing")
+                await self._run(
+                    self._adapter.register_person,
+                    name=new_name,
+                    image_bytes=image_bytes,
+                    metadata=new_metadata,
+                    external_id=person_id,
+                    person_id=person_id,
+                    collection_id=new_cid,
+                )
+                prepared_new_mirror = {"id": person_id, "_created": True}
+
+            updated = await self._run(
+                self._adapter.update_person,
+                person_id,
+                name=name,
+                metadata=new_metadata,
+            )
+
+            if old_cid and old_cid != new_cid and old_mirror:
+                await self._run(
+                    self._adapter.delete_person,
+                    old_mirror["id"],
+                    collection_id=old_cid,
+                )
+            return updated
+        except Exception:
+            # Restore the old aggregate snapshot if it may already have been
+            # patched, then restore/remove the category mirror we prepared.
+            try:
+                await self._run(
+                    self._adapter.update_person,
+                    person_id,
+                    name=current.get("name"),
+                    metadata=old_metadata,
+                )
+            except Exception:
+                logger.exception("failed to roll back aggregate Person %s", person_id)
+
+            if new_cid and prepared_new_mirror:
+                try:
+                    if prepared_new_mirror.get("_created"):
+                        await self._run(
+                            self._adapter.delete_person,
+                            prepared_new_mirror["id"],
+                            collection_id=new_cid,
+                        )
+                    elif old_mirror:
+                        await self._run(
+                            self._adapter.update_person,
+                            old_mirror["id"],
+                            name=current.get("name"),
+                            metadata=old_metadata,
+                            collection_id=new_cid,
+                        )
+                except Exception:
+                    logger.exception("failed to roll back category mirror for %s", person_id)
+            raise
+
+    async def delete_person_record(self, person_id: str) -> dict | None:
+        """Delete category mirrors and aggregate, restoring mirrors on failure."""
+        current = await self._run(self._adapter.get_person, person_id)
+        if not current:
+            return None
+
+        file_path = current.get("file_path")
+        image_path = Path(str(file_path)) if file_path else None
+        image_bytes = image_path.read_bytes() if image_path and image_path.is_file() else None
+        mirrors: list[tuple[str, dict]] = []
+        for cid in dict.fromkeys(settings.insightface_category_collections.values()):
+            mirror = await self._find_category_mirror(person_id, cid)
+            if mirror:
+                mirrors.append((cid, mirror))
+
+        deleted: list[tuple[str, dict]] = []
+        try:
+            for cid, mirror in mirrors:
+                await self._run(
+                    self._adapter.delete_person,
+                    mirror["id"],
+                    collection_id=cid,
+                )
+                deleted.append((cid, mirror))
+            await self._run(self._adapter.delete_person, person_id)
+        except Exception:
+            if image_bytes is not None:
+                for cid, mirror in deleted:
+                    try:
+                        await self._run(
+                            self._adapter.register_person,
+                            name=mirror.get("name") or current.get("name") or "",
+                            image_bytes=image_bytes,
+                            metadata=self._item_metadata(mirror),
+                            external_id=mirror.get("external_id") or person_id,
+                            person_id=mirror["id"],
+                            collection_id=cid,
+                        )
+                    except Exception:
+                        logger.exception("failed to restore category mirror %s", mirror["id"])
+            raise
+
+        if image_path:
+            image_path.unlink(missing_ok=True)
+        return current
 
     # ------------------------------------------------------------------
     # Internal helper: run sync SDK calls without blocking the event loop.
