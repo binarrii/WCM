@@ -75,7 +75,11 @@ extend-exclude = [
 # I (isort) for import order; B (bugbear) for common pitfalls;
 # UP (pyupgrade) for modern Python idioms; C4 (comprehensions).
 # SIM (simplify) for obvious simplifications.
-select = ["E", "W", "F", "I", "B", "UP", "C4", "SIM"]
+# PLC0415 (pylint catalogue) bans `import` statements inside function
+# bodies — the same anti-pattern the runtime once had in api/main.py and
+# src/wcm_facerec/ifs_adapter.py. Enforce it at the top level so the
+# runtime stays clean; tests/scripts/main.py are exempted per-file below.
+select = ["E", "W", "F", "I", "B", "UP", "C4", "SIM", "PLC0415"]
 # E501 is auto-disabled by ruff when line-length is set; ignore a few
 # project-specific exceptions.
 ignore = [
@@ -88,13 +92,17 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Scripts, root-level CLI tools, and one-off docs/dev scripts are
-# scratch/legacy and exempted from most rules.
-"scripts/*" = ["B", "E402", "E722", "F401", "F841"]
-"main.py" = ["E402"]                # CLI tool — imports after shebang
-"app_wrapper.py" = ["E402"]         # legacy DeepFace entry point
-"docs/*" = ["B", "E402", "E711", "E722", "F401", "F841"]
+# scratch/legacy and exempted from most rules. PLC0415 is also exempted
+# there because tests/scripts often have intentional in-function imports
+# (`import asyncio` inside one-off test bodies, `import uvicorn` inside
+# the `__main__` guard, etc.). The runtime API code under src/ and api/
+# is held to the strict rule.
+"scripts/*" = ["B", "E402", "E722", "F401", "F841", "PLC0415"]
+"main.py" = ["E402", "PLC0415"]      # CLI tool — imports after shebang / inside main()
+"app_wrapper.py" = ["E402", "PLC0415"] # legacy DeepFace entry point
+"docs/*" = ["B", "E402", "E711", "E722", "F401", "F841", "PLC0415"]
 "test_tensorflow_init.py" = ["E402"] # legacy one-shot probe
-"tests/*" = ["B", "F401", "F811", "SIM105"]  # test files import & reimport freely
+"tests/*" = ["B", "F401", "F811", "PLC0415", "SIM105"]  # test files import & reimport freely
 "src/wcm_facerec/vendor/**" = ["ALL"]
 
 [tool.ruff.lint.isort]
