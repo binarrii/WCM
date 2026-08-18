@@ -313,9 +313,7 @@ class InsightFaceAdapter:
                 if emb_result.faces:
                     raw_emb = emb_result.faces[0].get("embedding")
                     if raw_emb:
-                        import numpy as _np
-
-                        probe_norm = float(_np.linalg.norm(raw_emb))
+                        probe_norm = float(np.linalg.norm(raw_emb))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("IFS /embeddings failed; norm scoring disabled: %s", exc)
             # Auto-disable when the server returns L2-normalized

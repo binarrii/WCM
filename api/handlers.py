@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import os
+import re
 from pathlib import Path
 
 import cv2
@@ -135,8 +136,6 @@ async def _call_ocr_api(base64_image: str) -> str:
             resp.raise_for_status()
             data = resp.json()
             analysis = data["choices"][0]["message"]["content"].strip()
-
-            import re
 
             # Clean up <|LOC_X|> bounding box tokens that the VLM might output
             analysis = re.sub(r"<\|LOC_\d+\|>", "", analysis)

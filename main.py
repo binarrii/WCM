@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import datetime
 
 import cv2
 import httpx
@@ -129,8 +130,6 @@ def main():
     if args.output:
         output_path = args.output
     else:
-        import datetime
-
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
         output_path = f"/tmp/face_detection_result_{timestamp}.png"
     cv2.imwrite(output_path, result)
