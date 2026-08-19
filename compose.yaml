@@ -16,11 +16,10 @@ services:
     networks:
       - wcm-network
     volumes:
-      - wcm-images:/tmp/wcm
+      # Keep the existing host image library visible inside the container.
+      # Override WCM_IMAGE_DIR when deploying from a different host path.
+      - ${WCM_IMAGE_DIR:-/tmp/wcm}:/tmp/wcm
 
 networks:
   wcm-network:
     driver: bridge
-
-volumes:
-  wcm-images:
