@@ -589,20 +589,36 @@ class FaceEngine:
             raise
 
     async def delete_person_record(self, person_id: str) -> dict | None:
-        """Delete category mirrors and aggregate, restoring mirrors on failure."""
+        """Delete aggregate/category records, including orphaned mirrors."""
         resolved = await self._resolve_aggregate_person(person_id)
-        if not resolved:
-            return None
-        aggregate_id, current = resolved
+        aggregate_id: str | None = None
+        current: dict | None = None
+        lookup_id = person_id
+        if resolved:
+            aggregate_id, current = resolved
+            lookup_id = aggregate_id
 
-        file_path = current.get("file_path")
-        image_path = Path(str(file_path)) if file_path else None
-        image_bytes = image_path.read_bytes() if image_path and image_path.is_file() else None
         mirrors: list[tuple[str, dict]] = []
         for cid in dict.fromkeys(settings.insightface_category_collections.values()):
-            mirror = await self._find_category_mirror(aggregate_id, cid)
+            mirror = await self._find_category_mirror(lookup_id, cid)
             if mirror:
                 mirrors.append((cid, mirror))
+
+        # Early WebUI/E2E records can survive only in a category collection:
+        # their aggregate record was rolled back or deleted separately.  They
+        # still need to be removable from the category view.
+        if current is None:
+            if not mirrors:
+                return None
+            current = mirrors[0][1]
+
+        rollback_images: dict[tuple[str, str], bytes | None] = {}
+        for cid, mirror in mirrors:
+            file_path = mirror.get("file_path")
+            image_path = Path(str(file_path)) if file_path else None
+            rollback_images[(cid, mirror["id"])] = (
+                image_path.read_bytes() if image_path and image_path.is_file() else None
+            )
 
         deleted: list[tuple[str, dict]] = []
         try:
@@ -613,17 +629,19 @@ class FaceEngine:
                     collection_id=cid,
                 )
                 deleted.append((cid, mirror))
-            await self._run(self._adapter.delete_person, aggregate_id)
+            if aggregate_id:
+                await self._run(self._adapter.delete_person, aggregate_id)
         except Exception:
-            if image_bytes is not None:
-                for cid, mirror in deleted:
+            for cid, mirror in deleted:
+                image_bytes = rollback_images[(cid, mirror["id"])]
+                if image_bytes is not None:
                     try:
                         await self._run(
                             self._adapter.register_person,
                             name=mirror.get("name") or current.get("name") or "",
                             image_bytes=image_bytes,
                             metadata=self._item_metadata(mirror),
-                            external_id=mirror.get("external_id") or aggregate_id,
+                            external_id=mirror.get("external_id") or aggregate_id or person_id,
                             person_id=mirror["id"],
                             collection_id=cid,
                         )
@@ -631,7 +649,12 @@ class FaceEngine:
                         logger.exception("failed to restore category mirror %s", mirror["id"])
             raise
 
-        if image_path:
+        image_paths = {
+            Path(str(item["file_path"]))
+            for item in [current, *(mirror for _, mirror in mirrors)]
+            if item.get("file_path")
+        }
+        for image_path in image_paths:
             image_path.unlink(missing_ok=True)
         return current
 

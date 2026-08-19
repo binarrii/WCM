@@ -689,3 +689,50 @@ def test_delete_resolves_legacy_aggregate_external_id(monkeypatch):
     deleted = asyncio.run(engine.delete_person_record(external_id))
     assert deleted["id"] == aggregate_id
     assert engine._adapter.deleted == [(None, aggregate_id)]
+
+
+def test_delete_removes_orphaned_category_mirror(
+    monkeypatch, tmp_path, sample_image_bytes
+):
+    import asyncio
+
+    external_id = "3fd30dbc-5d82-4216-ad2b-eea23801adb5"
+    mirror_id = "a18202b2-6ebc-44b4-a568-7bac2e6a5e46"
+    image_path = tmp_path / "probe2.png"
+    image_path.write_bytes(sample_image_bytes)
+    mirror = {
+        "id": mirror_id,
+        "external_id": external_id,
+        "name": "probe2_1786091192",
+        "category": "时政敏感",
+        "type": "时政敏感",
+        "file_path": str(image_path),
+    }
+
+    class Adapter:
+        def __init__(self):
+            self.deleted = []
+
+        def get_person(self, _person_id, *, collection_id=None):
+            return None
+
+        def find_person_by_external_id(self, person_id, *, collection_id):
+            if collection_id == "political" and person_id == external_id:
+                return mirror
+            return None
+
+        def delete_person(self, person_id, *, collection_id=None):
+            self.deleted.append((collection_id, person_id))
+
+    monkeypatch.setattr(settings, "insightface_collection_id", "all-persons")
+    monkeypatch.setattr(
+        settings,
+        "insightface_category_collections",
+        {"时政敏感": "political"},
+    )
+    engine = FaceEngine.__new__(FaceEngine)
+    engine._adapter = Adapter()
+    deleted = asyncio.run(engine.delete_person_record(external_id))
+    assert deleted["id"] == mirror_id
+    assert engine._adapter.deleted == [("political", mirror_id)]
+    assert not image_path.exists()
