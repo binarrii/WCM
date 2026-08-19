@@ -127,6 +127,23 @@ def test_category_list_exposes_aggregate_id(client_for):
     assert response["items"][0]["person"]["id"] == "aggregate-id"
 
 
+def test_category_list_reconstructs_legacy_aggregate_id(client_for):
+    def list_persons(**_kwargs):
+        return [
+            {
+                "id": "p-bad-artists-00001",
+                "external_id": None,
+                "name": "测试",
+                "type": "劣迹艺人",
+            }
+        ], None
+
+    client = client_for(StubEngine(SimpleNamespace(list_persons=list_persons)))
+    response = client.get("/api/v1/face_records", params={"type": "劣迹艺人"}).json()
+    assert response["items"][0]["id"] == "bad-artists-p-bad-artists-00001"
+    assert response["items"][0]["person"]["id"] == "bad-artists-p-bad-artists-00001"
+
+
 def test_create_uses_type_as_category(client_for, sample_image_bytes):
     class CreateEngine(StubEngine):
         async def detect_faces(self, _contents):

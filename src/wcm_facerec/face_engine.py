@@ -417,11 +417,44 @@ class FaceEngine:
         )
         if mirror:
             return mirror
+
+        # The original import assigned different ids to the aggregate and its
+        # category mirror: ``<collection>-<category-local-id>`` in aggregate,
+        # and just ``<category-local-id>`` in the category collection.  Those
+        # mirrors also predate ``external_id``, so try the reversible legacy
+        # mapping before querying by external id.
+        legacy_prefix = f"{collection_id}-"
+        if person_id.startswith(legacy_prefix):
+            mirror = await self._run(
+                self._adapter.get_person,
+                person_id[len(legacy_prefix) :],
+                collection_id=collection_id,
+            )
+            if mirror:
+                return mirror
         return await self._run(
             self._adapter.find_person_by_external_id,
             person_id,
             collection_id=collection_id,
         )
+
+    async def _resolve_aggregate_person(self, person_id: str) -> tuple[str, dict] | None:
+        """Resolve either a canonical id or a legacy category-local id."""
+        current = await self._run(self._adapter.get_person, person_id)
+        if current:
+            return person_id, current
+
+        for cid in dict.fromkeys(settings.insightface_category_collections.values()):
+            mirror = await self._find_category_mirror(person_id, cid)
+            if not mirror:
+                continue
+
+            candidates = [mirror.get("external_id"), f"{cid}-{mirror['id']}"]
+            for candidate in dict.fromkeys(candidate for candidate in candidates if candidate):
+                current = await self._run(self._adapter.get_person, candidate)
+                if current:
+                    return candidate, current
+        return None
 
     @staticmethod
     def _item_metadata(item: dict) -> dict:
@@ -546,16 +579,17 @@ class FaceEngine:
 
     async def delete_person_record(self, person_id: str) -> dict | None:
         """Delete category mirrors and aggregate, restoring mirrors on failure."""
-        current = await self._run(self._adapter.get_person, person_id)
-        if not current:
+        resolved = await self._resolve_aggregate_person(person_id)
+        if not resolved:
             return None
+        aggregate_id, current = resolved
 
         file_path = current.get("file_path")
         image_path = Path(str(file_path)) if file_path else None
         image_bytes = image_path.read_bytes() if image_path and image_path.is_file() else None
         mirrors: list[tuple[str, dict]] = []
         for cid in dict.fromkeys(settings.insightface_category_collections.values()):
-            mirror = await self._find_category_mirror(person_id, cid)
+            mirror = await self._find_category_mirror(aggregate_id, cid)
             if mirror:
                 mirrors.append((cid, mirror))
 
@@ -568,7 +602,7 @@ class FaceEngine:
                     collection_id=cid,
                 )
                 deleted.append((cid, mirror))
-            await self._run(self._adapter.delete_person, person_id)
+            await self._run(self._adapter.delete_person, aggregate_id)
         except Exception:
             if image_bytes is not None:
                 for cid, mirror in deleted:
@@ -578,7 +612,7 @@ class FaceEngine:
                             name=mirror.get("name") or current.get("name") or "",
                             image_bytes=image_bytes,
                             metadata=self._item_metadata(mirror),
-                            external_id=mirror.get("external_id") or person_id,
+                            external_id=mirror.get("external_id") or aggregate_id,
                             person_id=mirror["id"],
                             collection_id=cid,
                         )

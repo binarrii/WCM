@@ -590,3 +590,58 @@ def test_delete_removes_category_mirror_before_aggregate(monkeypatch, tmp_path, 
         (None, "aggregate-id"),
     ]
     assert not image_path.exists()
+
+
+def test_delete_resolves_legacy_category_local_id(
+    monkeypatch, tmp_path, sample_image_bytes
+):
+    import asyncio
+
+    image_path = tmp_path / "legacy-face.jpg"
+    image_path.write_bytes(sample_image_bytes)
+    aggregate_id = "bad-artists-p-bad-artists-00001"
+    mirror_id = "p-bad-artists-00001"
+    current = {
+        "id": aggregate_id,
+        "name": "测试",
+        "category": "劣迹艺人",
+        "type": "劣迹艺人",
+        "file_path": str(image_path),
+    }
+    mirror = {
+        **current,
+        "id": mirror_id,
+        "external_id": None,
+    }
+
+    class Adapter:
+        def __init__(self):
+            self.deleted = []
+
+        def get_person(self, person_id, *, collection_id=None):
+            if collection_id is None:
+                return current if person_id == aggregate_id else None
+            if collection_id == "bad-artists" and person_id == mirror_id:
+                return mirror
+            return None
+
+        def find_person_by_external_id(self, _person_id, *, collection_id):
+            return None
+
+        def delete_person(self, person_id, *, collection_id=None):
+            self.deleted.append((collection_id, person_id))
+
+    monkeypatch.setattr(
+        settings,
+        "insightface_category_collections",
+        {"劣迹艺人": "bad-artists", "时政敏感": "political"},
+    )
+    engine = FaceEngine.__new__(FaceEngine)
+    engine._adapter = Adapter()
+    deleted = asyncio.run(engine.delete_person_record(mirror_id))
+    assert deleted["id"] == aggregate_id
+    assert engine._adapter.deleted == [
+        ("bad-artists", mirror_id),
+        (None, aggregate_id),
+    ]
+    assert not image_path.exists()

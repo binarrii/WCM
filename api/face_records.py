@@ -40,9 +40,9 @@ def _path_to_image_url(file_path: str | None) -> str | None:
     return f"/images/{relative.as_posix()}"
 
 
-def _item_with_person(item: dict) -> dict:
+def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
     """Return the stable aggregate id even for legacy category mirrors."""
-    record_id = item.get("external_id") or item.get("id")
+    record_id = aggregate_id or item.get("external_id") or item.get("id")
     return {
         "id": record_id,
         "name": item.get("name"),
@@ -122,7 +122,15 @@ async def list_face_records(
                     person["type"] = inject_type
                 elif filter_other and (person.get("type") or "") in _CATEGORY_LABELS:
                     continue
-                items.append(_item_with_person(person))
+                aggregate_id = person.get("external_id")
+                if collection_id and not aggregate_id:
+                    # Legacy category imports used a category-local id such as
+                    # ``p-bad-artists-00001`` while the aggregate collection
+                    # prefixed it with the category collection id.  Returning
+                    # the local id makes update/delete target the wrong
+                    # collection, so reconstruct the canonical aggregate id.
+                    aggregate_id = f"{collection_id}-{person['id']}"
+                items.append(_item_with_person(person, aggregate_id=aggregate_id))
                 if len(items) == limit:
                     if index < len(page_items):
                         next_cursor = _encode_cursor(request_cursor, index)
