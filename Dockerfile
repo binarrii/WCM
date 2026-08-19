@@ -2,9 +2,17 @@
 FROM node:22-slim AS web-builder
 
 WORKDIR /webui
-RUN corepack enable
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --global pnpm@10.33.0 \
+    --fetch-retries=10 \
+    --fetch-timeout=600000
 COPY webui/package.json webui/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store \
+    && pnpm install --frozen-lockfile \
+    --fetch-retries=10 \
+    --fetch-timeout=600000 \
+    --network-concurrency=4
 COPY webui/ ./
 RUN pnpm build
 
