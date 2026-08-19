@@ -15,8 +15,9 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install uv
-RUN pip install uv --no-cache-dir
+# Copy the pinned standalone uv binary instead of downloading its large wheel
+# through pip during every clean build.
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
 
 # Copy only dependency files
 COPY pyproject.toml uv.lock ./
