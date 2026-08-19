@@ -645,3 +645,47 @@ def test_delete_resolves_legacy_category_local_id(
         (None, aggregate_id),
     ]
     assert not image_path.exists()
+
+
+def test_delete_resolves_legacy_aggregate_external_id(monkeypatch):
+    import asyncio
+
+    aggregate_id = "90d94de9-9bbe-44b4-bb79-ff5828fc9ca3"
+    external_id = "7521e6b5-1e1a-4bb7-bbfa-4f9deeaf7a7b"
+    current = {
+        "id": aggregate_id,
+        "external_id": external_id,
+        "name": "刘志军",
+        "category": "未分类",
+        "type": "落马官员",
+        "file_path": "/tmp/wcm/未分类/missing.jpg",
+    }
+
+    class Adapter:
+        def __init__(self):
+            self.deleted = []
+
+        def get_person(self, person_id, *, collection_id=None):
+            if collection_id is None and person_id == aggregate_id:
+                return current
+            return None
+
+        def find_person_by_external_id(self, person_id, *, collection_id):
+            if collection_id == "all-persons" and person_id == external_id:
+                return current
+            return None
+
+        def delete_person(self, person_id, *, collection_id=None):
+            self.deleted.append((collection_id, person_id))
+
+    monkeypatch.setattr(settings, "insightface_collection_id", "all-persons")
+    monkeypatch.setattr(
+        settings,
+        "insightface_category_collections",
+        {"落马官员": "corrupt-officials"},
+    )
+    engine = FaceEngine.__new__(FaceEngine)
+    engine._adapter = Adapter()
+    deleted = asyncio.run(engine.delete_person_record(external_id))
+    assert deleted["id"] == aggregate_id
+    assert engine._adapter.deleted == [(None, aggregate_id)]

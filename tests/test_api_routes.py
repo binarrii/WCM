@@ -127,6 +127,23 @@ def test_category_list_exposes_aggregate_id(client_for):
     assert response["items"][0]["person"]["id"] == "aggregate-id"
 
 
+def test_aggregate_list_uses_person_id_not_external_id(client_for):
+    def list_persons(**_kwargs):
+        return [
+            {
+                "id": "ifs-person-id",
+                "external_id": "legacy-source-id",
+                "name": "测试",
+                "type": "落马官员",
+            }
+        ], None
+
+    client = client_for(StubEngine(SimpleNamespace(list_persons=list_persons)))
+    response = client.get("/api/v1/face_records", params={"type": "All"}).json()
+    assert response["items"][0]["id"] == "ifs-person-id"
+    assert response["items"][0]["person"]["id"] == "ifs-person-id"
+
+
 def test_category_list_reconstructs_legacy_aggregate_id(client_for):
     def list_persons(**_kwargs):
         return [

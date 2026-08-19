@@ -444,6 +444,17 @@ class FaceEngine:
         if current:
             return person_id, current
 
+        # Older aggregate imports exposed their source id as ``external_id``.
+        # The dashboard historically returned that value as ``record.id``, so
+        # a page loaded before the fix can still submit it for deletion.
+        current = await self._run(
+            self._adapter.find_person_by_external_id,
+            person_id,
+            collection_id=settings.insightface_collection_id,
+        )
+        if current:
+            return current["id"], current
+
         for cid in dict.fromkeys(settings.insightface_category_collections.values()):
             mirror = await self._find_category_mirror(person_id, cid)
             if not mirror:
