@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Some deployment hosts do not provide DNS inside Docker's build
+      # bridge. Set WCM_BUILD_NETWORK=host there; keep the portable default.
+      network: ${WCM_BUILD_NETWORK:-default}
     container_name: wcm-facerec-api
     ports:
       - "8000:8000"
