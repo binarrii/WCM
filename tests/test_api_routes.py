@@ -29,6 +29,23 @@ def client_for(monkeypatch):
     return factory
 
 
+def test_image_url_is_only_returned_for_existing_local_file(tmp_path, monkeypatch):
+    image_dir = tmp_path / "劣迹艺人"
+    image_dir.mkdir()
+    image = image_dir / "face.jpg"
+    image.write_bytes(b"image")
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+
+    assert face_records._path_to_image_url(str(image)) == "/images/劣迹艺人/face.jpg"
+    assert face_records._path_to_image_url(str(image_dir / "missing.jpg")) is None
+
+
+def test_image_url_rejects_path_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+
+    assert face_records._path_to_image_url(str(tmp_path / ".." / "secret.jpg")) is None
+
+
 def test_health_checks_insightface_dependency(client_for):
     adapter = SimpleNamespace(health=lambda: {"status": "ok"})
     response = client_for(StubEngine(adapter)).get("/api/v1/health")

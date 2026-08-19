@@ -17,6 +17,7 @@ face_records_bp = APIRouter()
 
 _LIST_PAGE_FETCH = 100
 _CATEGORY_LABELS = tuple(settings.insightface_category_collections)
+_IMAGE_ROOT = Path("/tmp/wcm")
 
 
 def _path_to_image_url(file_path: str | None) -> str | None:
@@ -24,10 +25,19 @@ def _path_to_image_url(file_path: str | None) -> str | None:
         return None
     path = Path(file_path)
     try:
-        relative = path.relative_to("/tmp/wcm")
-        return f"/images/{relative}"
+        relative = path.relative_to(_IMAGE_ROOT)
     except ValueError:
-        return f"/images/{path.name}"
+        relative = Path(path.name)
+
+    image_root = _IMAGE_ROOT.resolve()
+    target = (image_root / relative).resolve()
+    try:
+        target.relative_to(image_root)
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    return f"/images/{relative.as_posix()}"
 
 
 def _item_with_person(item: dict) -> dict:
