@@ -46,6 +46,71 @@ def test_image_url_rejects_path_traversal(tmp_path, monkeypatch):
     assert face_records._path_to_image_url(str(tmp_path / ".." / "secret.jpg")) is None
 
 
+def test_face_records_exposes_image_url_without_file_path(tmp_path, monkeypatch, client_for):
+    image = tmp_path / "时政敏感" / "face.jpg"
+    image.parent.mkdir()
+    image.write_bytes(b"image")
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+
+    def list_persons(**_kwargs):
+        return [{"id": "p1", "name": "测试", "file_path": str(image)}], None
+
+    response = client_for(StubEngine(SimpleNamespace(list_persons=list_persons))).get(
+        "/api/v1/face_records"
+    )
+    item = response.json()["items"][0]
+    assert item["image_url"] == "/images/时政敏感/face.jpg"
+    assert "file_path" not in item
+
+
+def test_search_returns_canonical_fields_without_internal_paths(
+    tmp_path, monkeypatch, client_for, sample_image_bytes
+):
+    image = tmp_path / "劣迹艺人" / "face.jpg"
+    image.parent.mkdir()
+    image.write_bytes(b"image")
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+
+    class SearchEngine(StubEngine):
+        async def search(self, **_kwargs):
+            return [
+                {
+                    "id": "p1",
+                    "person_id": "p1",
+                    "name": "测试",
+                    "person_name": "测试",
+                    "file_path": str(image),
+                    "category": "劣迹艺人",
+                    "type": "劣迹艺人",
+                    "similarity": 0.9,
+                    "distance": 0.1,
+                    "effective_similarity": 0.95,
+                    "effective_distance": 0.05,
+                    "quality_factor": 1.1,
+                    "passes_adaptive": True,
+                    "matched_face_id": "face-1",
+                    "query_face_bbox": {"x": 1, "y": 2, "w": 3, "h": 4},
+                }
+            ]
+
+    response = client_for(SearchEngine()).post(
+        "/api/v1/search",
+        files={"file": ("query.jpg", sample_image_bytes, "image/jpeg")},
+    )
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result == {
+        "id": "p1",
+        "name": "测试",
+        "similarity": 0.95,
+        "distance": 0.05,
+        "image_url": "/images/劣迹艺人/face.jpg",
+        "type": "劣迹艺人",
+        "matched_face_id": "face-1",
+        "query_face_bbox": {"x": 1, "y": 2, "w": 3, "h": 4},
+    }
+
+
 def test_health_checks_insightface_dependency(client_for):
     adapter = SimpleNamespace(health=lambda: {"status": "ok"})
     response = client_for(StubEngine(adapter)).get("/api/v1/health")

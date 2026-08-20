@@ -49,7 +49,6 @@ def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
     return {
         "id": record_id,
         "name": item.get("name"),
-        "file_path": item.get("file_path"),
         "image_url": _path_to_image_url(item.get("file_path")),
         "created_at": item.get("created_at"),
         "person": {

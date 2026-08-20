@@ -14,6 +14,7 @@ from wcm_facerec import __version__
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
 
+from .face_records import _path_to_image_url
 from .handlers import (
     _process_analyze_media,
     _process_detect_nsfw,
@@ -43,6 +44,41 @@ def _opt_float(source, key: str) -> float | None:
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+_SEARCH_RESULT_FIELDS = (
+    "matched_face_id",
+    "created_at",
+    "occupation",
+    "remarks",
+    "face_count",
+    "face_index",
+    "query_face_bbox",
+    "source_x",
+    "source_y",
+    "source_w",
+    "source_h",
+    "frame_time",
+    "source_face_b64",
+)
+
+
+def _public_search_result(match: dict) -> dict:
+    """Convert an internal engine match to the stable public API contract."""
+    result = {
+        "id": match.get("id") or match.get("person_id"),
+        "name": match.get("name") or match.get("person_name"),
+        "similarity": match.get("effective_similarity", match.get("similarity")),
+        "distance": match.get("effective_distance", match.get("distance")),
+        "image_url": _path_to_image_url(match.get("file_path")),
+        "type": match.get("type") or match.get("category"),
+    }
+    result.update({key: match[key] for key in _SEARCH_RESULT_FIELDS if key in match})
+    return result
+
+
+def _public_search_results(results: list[dict]) -> list[dict]:
+    return [_public_search_result(match) for match in results]
 
 
 @api_bp.get("/health")
@@ -223,7 +259,7 @@ async def search_faces(request: Request):
                     sample_interval,
                 )
                 return {
-                    "results": results,
+                    "results": _public_search_results(results),
                     "query_embedding_dim": settings.embedding_dim,
                     "frames_processed": frames,
                 }
@@ -244,7 +280,7 @@ async def search_faces(request: Request):
             adaptive_threshold_step=adaptive_threshold_step,
         )
         return {
-            "results": results,
+            "results": _public_search_results(results),
             "query_embedding_dim": settings.embedding_dim,
         }
     except Exception as e:
@@ -301,7 +337,7 @@ async def websocket_search(websocket: WebSocket):
                             "taskId": task_id,
                             "query_embedding_dim": settings.embedding_dim,
                             "frames_processed": frames,
-                            "results": results,
+                            "results": _public_search_results(results),
                         }
                     )
                 else:
@@ -319,7 +355,7 @@ async def websocket_search(websocket: WebSocket):
                             "status": "completed",
                             "taskId": task_id,
                             "query_embedding_dim": settings.embedding_dim,
-                            "results": results,
+                            "results": _public_search_results(results),
                         }
                     )
                     continue

@@ -155,24 +155,13 @@ const filteredRecords = computed(() => {
     return imageSearchResults.value
       .filter(item => (1 - (item.distance || 0)) >= 0.8)
       .map(item => {
-        // Map file_path to image_url
-        let imageUrl = null;
-        if (item.file_path) {
-          const prefix = "/tmp/wcm";
-          if (item.file_path.startsWith(prefix)) {
-            imageUrl = "/images" + item.file_path.substring(prefix.length);
-          } else {
-            imageUrl = item.file_path;
-          }
-        }
-        
         return {
           id: item.id,
           name: item.name,
-          image_url: imageUrl,
+          image_url: item.image_url,
           created_at: item.created_at,
           person: {
-            name: item.person_name,
+            name: item.name,
             occupation: item.occupation,
             type: item.type,
             remarks: item.remarks
@@ -357,7 +346,6 @@ const handleSubmit = async () => {
             return {
               ...item,
               name: form.value.name,
-              person_name: form.value.name,
               occupation: form.value.occupation,
               type: form.value.type,
               remarks: form.value.remarks
