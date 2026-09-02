@@ -916,18 +916,91 @@
   text-align: center;
 }
 
+.similarity-threshold-control {
+  --threshold-progress: 71.43%;
+  position: relative;
+  height: 24px;
+  margin-top: 12px;
+}
+
+.similarity-threshold-track {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  right: 9px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-primary) 0 var(--threshold-progress),
+    var(--border-color) var(--threshold-progress) 100%
+  );
+  transform: translateY(-50%);
+}
+
+.similarity-threshold-tick {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--border-color);
+  border-radius: 50%;
+  background-color: var(--bg-primary);
+  transform: translate(-50%, -50%);
+}
+
+.similarity-threshold-tick.active {
+  border-color: var(--color-primary);
+  background-color: var(--color-primary);
+}
+
 .similarity-threshold-range {
+  appearance: none;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  margin: 14px 0 2px;
-  accent-color: var(--color-primary);
+  height: 24px;
+  margin: 0;
+  background: transparent;
   cursor: pointer;
+}
+
+.similarity-threshold-range::-webkit-slider-runnable-track {
+  height: 6px;
+  background: transparent;
+}
+
+.similarity-threshold-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border: 2px solid var(--color-primary);
+  border-radius: 50%;
+  background-color: var(--color-primary);
+  box-shadow: 0 2px 6px var(--color-primary-glow);
+}
+
+.similarity-threshold-range::-moz-range-track {
+  height: 6px;
+  background: transparent;
+}
+
+.similarity-threshold-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-primary);
+  border-radius: 50%;
+  background-color: var(--color-primary);
+  box-shadow: 0 2px 6px var(--color-primary-glow);
 }
 
 .similarity-threshold-scale {
   display: flex;
   justify-content: space-between;
+  margin-top: 1px;
   color: var(--text-muted);
-  font-size: 0.7rem;
+  font-size: 0.65rem;
 }
 
 .similarity-threshold-hint {

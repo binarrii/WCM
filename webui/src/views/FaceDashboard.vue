@@ -74,6 +74,7 @@ const imageSearching = ref(false);
 const isImageSearchActive = ref(false);
 const imageSearchResults = ref([]);
 const DEFAULT_IMAGE_SEARCH_SIMILARITY = 0.8;
+const IMAGE_SEARCH_SIMILARITY_TICKS = [30, 40, 50, 60, 70, 80, 90, 100];
 const imageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
 const activeImageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
 
@@ -1033,18 +1034,32 @@ onUnmounted(() => {
                 {{ Math.round(imageSearchSimilarityThreshold * 100) }}%
               </output>
             </div>
-            <input
-              id="image-search-threshold"
-              v-model.number="imageSearchSimilarityThreshold"
-              class="similarity-threshold-range"
-              type="range"
-              min="0.5"
-              max="1"
-              step="0.01"
-            />
+            <div
+              class="similarity-threshold-control"
+              :style="{
+                '--threshold-progress': `${((imageSearchSimilarityThreshold - 0.3) / 0.7) * 100}%`
+              }"
+            >
+              <div class="similarity-threshold-track" aria-hidden="true">
+                <span
+                  v-for="tick in IMAGE_SEARCH_SIMILARITY_TICKS"
+                  :key="tick"
+                  :class="['similarity-threshold-tick', { active: tick <= imageSearchSimilarityThreshold * 100 }]"
+                  :style="{ left: `${((tick - 30) / 70) * 100}%` }"
+                ></span>
+              </div>
+              <input
+                id="image-search-threshold"
+                v-model.number="imageSearchSimilarityThreshold"
+                class="similarity-threshold-range"
+                type="range"
+                min="0.3"
+                max="1"
+                step="0.01"
+              />
+            </div>
             <div class="similarity-threshold-scale" aria-hidden="true">
-              <span>50%</span>
-              <span>100%</span>
+              <span v-for="tick in IMAGE_SEARCH_SIMILARITY_TICKS" :key="tick">{{ tick }}%</span>
             </div>
             <p class="similarity-threshold-hint">默认 80%，数值越高，检索结果越严格</p>
           </div>
