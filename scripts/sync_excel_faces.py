@@ -27,10 +27,12 @@ from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any, TypeVar
 
 import xlrd
+from PIL import Image
 
 from scripts.backfill_file_path import (
     DEFAULT_AGGREGATE_COLLECTION,
@@ -51,6 +53,13 @@ SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 EXTENSION_PRIORITY = {".jpg": 0, ".jpeg": 1, ".png": 2, ".webp": 3, ".bmp": 4}
 DEFAULT_EXACT_SIMILARITY = 0.9999
 T = TypeVar("T")
+EXPECTED_IMAGE_FORMATS = {
+    ".jpg": {"JPEG"},
+    ".jpeg": {"JPEG"},
+    ".png": {"PNG"},
+    ".webp": {"WEBP"},
+    ".bmp": {"BMP", "DIB"},
+}
 
 
 @dataclass(frozen=True)
@@ -76,6 +85,20 @@ class FaceAddPlan:
     person_id: str
     name: str
     images: tuple[Path, ...]
+
+
+def _upload_image(path: Path) -> Path | bytes:
+    """Return standard JPEG bytes when a file's extension lies about its format."""
+
+    with Image.open(path) as image:
+        actual_format = (image.format or "").upper()
+        if actual_format in EXPECTED_IMAGE_FORMATS.get(path.suffix.lower(), set()):
+            return path
+        image.seek(0)
+        converted = image.convert("RGB")
+        output = BytesIO()
+        converted.save(output, format="JPEG", quality=95)
+        return output.getvalue()
 
 
 class FaceSyncClient:
@@ -107,7 +130,7 @@ class FaceSyncClient:
     def exact_face_exists(self, collection_id: str, person_id: str, image: Path) -> bool:
         result = self.sdk.search(
             collection_id,
-            image=image,
+            image=_upload_image(image),
             limit=20,
             threshold=self.exact_similarity,
         )
@@ -129,7 +152,7 @@ class FaceSyncClient:
     ) -> tuple[dict[str, Any], int, list[dict[str, Any]]]:
         result = self.sdk.create_person(
             collection_id,
-            images=[Path(image.file_path) for image in person.images],
+            images=[_upload_image(Path(image.file_path)) for image in person.images],
             person_id=person_id,
             name=person.name,
             external_id=external_id,
@@ -143,7 +166,11 @@ class FaceSyncClient:
         person_id: str,
         images: tuple[Path, ...],
     ) -> tuple[int, list[dict[str, Any]]]:
-        result = self.sdk.add_faces(collection_id, person_id, images=images)
+        result = self.sdk.add_faces(
+            collection_id,
+            person_id,
+            images=[_upload_image(image) for image in images],
+        )
         return len(result.faces or []), list(result.rejected_images or [])
 
 
@@ -170,6 +197,7 @@ def _resolve_image(
     *,
     by_stem: dict[str, list[Path]],
     by_normalized_stem: dict[str, list[Path]],
+    by_name_prefix: dict[str, list[Path]],
     by_numeric_prefix: dict[str, list[Path]],
 ) -> tuple[Path | None, str]:
     direct = image_dir / Path(filename).name
@@ -185,6 +213,12 @@ def _resolve_image(
     )
     if normalized_match:
         return normalized_match, "normalized_stem"
+
+    name_hash = re.fullmatch(r"(.+)_([0-9a-fA-F]{32})", direct.stem)
+    if name_hash:
+        name_candidates = by_name_prefix.get(_normalized_stem(name_hash.group(1)), [])
+        if len(name_candidates) == 1:
+            return name_candidates[0], "name_prefix"
 
     prefix = direct.stem.split("_", 1)[0]
     if prefix.isdigit():
@@ -221,10 +255,14 @@ def load_expected_people(
     ]
     by_stem: dict[str, list[Path]] = defaultdict(list)
     by_normalized_stem: dict[str, list[Path]] = defaultdict(list)
+    by_name_prefix: dict[str, list[Path]] = defaultdict(list)
     by_numeric_prefix: dict[str, list[Path]] = defaultdict(list)
     for path in files:
         by_stem[path.stem].append(path)
         by_normalized_stem[_normalized_stem(path.name)].append(path)
+        name_hash = re.fullmatch(r"(.+)_([0-9a-fA-F]{32})", path.stem)
+        if name_hash:
+            by_name_prefix[_normalized_stem(name_hash.group(1))].append(path)
         prefix = path.stem.split("_", 1)[0]
         if prefix.isdigit():
             by_numeric_prefix[prefix].append(path)
@@ -245,6 +283,7 @@ def load_expected_people(
             image_dir,
             by_stem=by_stem,
             by_normalized_stem=by_normalized_stem,
+            by_name_prefix=by_name_prefix,
             by_numeric_prefix=by_numeric_prefix,
         )
         resolution_counts[method] += 1
@@ -491,20 +530,31 @@ def synchronize(
                 report["planned_face_adds"] += missing_collections * len(person.images)
                 if not apply:
                     continue
-                (
-                    aggregate_person,
-                    category_person,
-                    aggregate_added,
-                    category_added,
-                    rejected,
-                ) = _create_missing_person(
-                    client,
-                    person,
-                    aggregate_collection=aggregate_collection,
-                    category_collection=spec.collection_id,
-                    aggregate_person=aggregate_person,
-                    category_person=category_person,
-                )
+                try:
+                    (
+                        aggregate_person,
+                        category_person,
+                        aggregate_added,
+                        category_added,
+                        rejected,
+                    ) = _create_missing_person(
+                        client,
+                        person,
+                        aggregate_collection=aggregate_collection,
+                        category_collection=spec.collection_id,
+                        aggregate_person=aggregate_person,
+                        category_person=category_person,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    report.setdefault("apply_errors", []).append(
+                        {
+                            "phase": "create_person",
+                            "collection": spec.collection_id,
+                            "name": name,
+                            "error": str(exc),
+                        }
+                    )
+                    continue
                 report["added_faces"] += aggregate_added + category_added
                 report["rejected_images"].extend(
                     {"name": name, **item} for item in rejected

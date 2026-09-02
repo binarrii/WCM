@@ -1,11 +1,16 @@
 from pathlib import Path
 
+from PIL import Image
+
+import scripts.sync_excel_faces as sync_faces
 from scripts.backfill_file_path import SOURCES, ExcelRecord
 from scripts.sync_excel_faces import (
     ExpectedPerson,
     _create_missing_person,
     _logical_candidate,
     _normalized_stem,
+    _resolve_image,
+    _upload_image,
     find_missing_images,
     load_expected_people,
 )
@@ -22,6 +27,40 @@ def test_normalized_stem_matches_unicode_name_separators():
     assert _normalized_stem("艾买尔江•阿吾提_hash.png") == _normalized_stem(
         "艾买尔江_阿吾提_hash.jpg"
     )
+
+
+def test_name_prefix_matches_when_source_hash_changed(tmp_path):
+    image = tmp_path / "韩志远_227944e64555eccd2308d830c4b86248.jpg"
+    image.touch()
+
+    resolved, method = _resolve_image(
+        "韩志远_8cb2543f9119dcef9e50411bfedb1dbc.jpg",
+        tmp_path,
+        by_stem={image.stem: [image]},
+        by_normalized_stem={_normalized_stem(image.name): [image]},
+        by_name_prefix={_normalized_stem("韩志远"): [image]},
+        by_numeric_prefix={},
+    )
+
+    assert resolved == image
+    assert method == "name_prefix"
+
+
+def test_upload_image_normalizes_mislabelled_format(tmp_path):
+    path = tmp_path / "actually-a-gif.jpg"
+    Image.new("RGB", (20, 20), "white").save(path, format="GIF")
+
+    upload = _upload_image(path)
+
+    assert isinstance(upload, bytes)
+    assert upload.startswith(b"\xff\xd8\xff")
+
+
+def test_upload_image_keeps_correctly_labelled_file(tmp_path):
+    path = tmp_path / "photo.jpg"
+    Image.new("RGB", (20, 20), "white").save(path, format="JPEG")
+
+    assert _upload_image(path) == path
 
 
 def test_load_expected_people_keeps_all_images_for_same_person(tmp_path):
@@ -111,3 +150,52 @@ def test_find_missing_images_checks_the_existing_person_id(tmp_path):
     )
 
     assert result == (missing,)
+
+
+def test_synchronize_continues_when_new_person_has_no_valid_face(monkeypatch, tmp_path):
+    person = ExpectedPerson(
+        name="无法识别",
+        images=(
+            ExcelRecord("无法识别", "a.jpg", "/tmp/a.jpg", "", "劣迹艺人", ""),
+        ),
+    )
+
+    monkeypatch.setattr(
+        sync_faces,
+        "load_expected_people",
+        lambda *_args, **_kwargs: (
+            {person.name: person},
+            {
+                "workbook": "test.xls",
+                "collection": "bad-artists",
+                "unresolved_images": [],
+            },
+        ),
+    )
+
+    class RejectingClient:
+        def all_persons(self, _collection_id):
+            return []
+
+        def create_person(self, *_args, **_kwargs):
+            raise RuntimeError("no valid face")
+
+    reports = sync_faces.synchronize(
+        RejectingClient(),
+        aggregate_collection="all-persons",
+        excel_dir=tmp_path,
+        image_root=tmp_path,
+        selected_collections={"bad-artists"},
+        apply=True,
+        workers=1,
+        retries=0,
+    )
+
+    assert reports[0]["apply_errors"] == [
+        {
+            "phase": "create_person",
+            "collection": "bad-artists",
+            "name": "无法识别",
+            "error": "no valid face",
+        }
+    ]
