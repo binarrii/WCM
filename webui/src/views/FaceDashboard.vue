@@ -82,14 +82,26 @@ const activeImageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY
 
 // Full image preview state
 const isImagePreviewOpen = ref(false);
-const previewImageUrl = ref('');
-const openImagePreview = (url) => {
-  previewImageUrl.value = url;
+const previewImageUrls = ref([]);
+const previewImageIndex = ref(0);
+const previewImageUrl = computed(() => previewImageUrls.value[previewImageIndex.value] || '');
+const openImagePreview = (urls, initialIndex = 0) => {
+  const availableUrls = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
+  if (availableUrls.length === 0) return;
+  previewImageUrls.value = availableUrls;
+  previewImageIndex.value = Math.min(Math.max(initialIndex, 0), availableUrls.length - 1);
   isImagePreviewOpen.value = true;
 };
 const closeImagePreview = () => {
   isImagePreviewOpen.value = false;
-  previewImageUrl.value = '';
+  previewImageUrls.value = [];
+  previewImageIndex.value = 0;
+};
+const changePreviewImage = (direction) => {
+  if (previewImageUrls.value.length < 2) return;
+  previewImageIndex.value = (
+    previewImageIndex.value + direction + previewImageUrls.value.length
+  ) % previewImageUrls.value.length;
 };
 const activeCardImageIndexes = ref({});
 const getRecordImages = (record) => {
@@ -627,6 +639,16 @@ const handleGlobalPaste = (e) => {
 };
 
 const handleGlobalKeyDown = (e) => {
+  if (isImagePreviewOpen.value && e.key === 'ArrowLeft') {
+    e.preventDefault();
+    changePreviewImage(-1);
+    return;
+  }
+  if (isImagePreviewOpen.value && e.key === 'ArrowRight') {
+    e.preventDefault();
+    changePreviewImage(1);
+    return;
+  }
   if (e.key === 'Escape' || e.keyCode === 27) {
     if (isImagePreviewOpen.value) {
       closeImagePreview();
@@ -821,7 +843,7 @@ onUnmounted(() => {
             class="record-card"
           >
             <!-- Card Image -->
-            <div class="card-image-container" @click="getActiveCardImage(record) && openImagePreview(`${IMAGE_BASE}${getActiveCardImage(record)}`)">
+            <div class="card-image-container" @click="getActiveCardImage(record) && openImagePreview(getRecordImages(record).map(url => `${IMAGE_BASE}${url}`), getActiveCardImageIndex(record))">
               <img 
                 v-if="getActiveCardImage(record)" 
                 :src="`${IMAGE_BASE}${getActiveCardImage(record)}`" 
@@ -1160,7 +1182,30 @@ onUnmounted(() => {
       <div class="preview-close-btn" @click="closeImagePreview" title="关闭">
         <X class="close-icon" />
       </div>
-      <img :src="previewImageUrl" alt="完整大图" class="preview-image-large animate-zoom-in" />
+      <button
+        v-if="previewImageUrls.length > 1"
+        type="button"
+        class="preview-nav-button preview-nav-previous"
+        title="上一张"
+        aria-label="上一张完整大图"
+        @click.stop="changePreviewImage(-1)"
+      >
+        <ChevronLeft />
+      </button>
+      <img :key="previewImageUrl" :src="previewImageUrl" alt="完整大图" class="preview-image-large animate-zoom-in" />
+      <button
+        v-if="previewImageUrls.length > 1"
+        type="button"
+        class="preview-nav-button preview-nav-next"
+        title="下一张"
+        aria-label="下一张完整大图"
+        @click.stop="changePreviewImage(1)"
+      >
+        <ChevronRight />
+      </button>
+      <span v-if="previewImageUrls.length > 1" class="preview-image-count">
+        {{ previewImageIndex + 1 }} / {{ previewImageUrls.length }}
+      </span>
     </div>
   </div>
 </template>
