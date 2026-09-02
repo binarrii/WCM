@@ -73,6 +73,9 @@ const imageSearchFileInputRef = ref(null);
 const imageSearching = ref(false);
 const isImageSearchActive = ref(false);
 const imageSearchResults = ref([]);
+const DEFAULT_IMAGE_SEARCH_SIMILARITY = 0.8;
+const imageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
+const activeImageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
 
 // Full image preview state
 const isImagePreviewOpen = ref(false);
@@ -150,11 +153,16 @@ const showToast = (message, type = 'success') => {
 };
 
 // Filtered records
+const getSearchSimilarity = (item) => Number(
+  item.similarity ?? (1 - (item.distance ?? 1))
+);
+
 const filteredRecords = computed(() => {
   if (isImageSearchActive.value && imageSearchResults.value) {
     return imageSearchResults.value
-      .filter(item => (1 - (item.distance || 0)) >= 0.8)
+      .filter(item => getSearchSimilarity(item) >= activeImageSearchSimilarityThreshold.value)
       .map(item => {
+        const similarity = getSearchSimilarity(item);
         return {
           id: item.id,
           name: item.name,
@@ -167,7 +175,7 @@ const filteredRecords = computed(() => {
             remarks: item.remarks
           },
           searchDistance: item.distance,
-          searchSimilarity: (1 - item.distance).toFixed(2)
+          searchSimilarity: similarity.toFixed(2)
         };
       });
   }
@@ -465,12 +473,15 @@ const executeImageSearch = async () => {
     const formData = new FormData();
     formData.append('file', imageSearchFile.value);
     formData.append('top_k', '10');
-    formData.append('threshold', '0.4');
+    formData.append('threshold', String(1 - imageSearchSimilarityThreshold.value));
     
     const data = await faceService.searchFaces(formData);
     imageSearchResults.value = data.results || [];
+    activeImageSearchSimilarityThreshold.value = imageSearchSimilarityThreshold.value;
     isImageSearchActive.value = true;
-    const matchCount = imageSearchResults.value.filter(r => (1 - (r.distance || 0)) >= 0.6).length;
+    const matchCount = imageSearchResults.value.filter(
+      item => getSearchSimilarity(item) >= activeImageSearchSimilarityThreshold.value
+    ).length;
     showToast(`检索成功，共找到 ${matchCount} 个相似人脸`);
     closeImageSearchModal();
   } catch (error) {
@@ -1015,7 +1026,30 @@ onUnmounted(() => {
             />
           </div>
 
-          <div class="modal-actions" style="margin-top: 24px;">
+          <div class="similarity-threshold-field">
+            <div class="similarity-threshold-header">
+              <label for="image-search-threshold" class="form-label">最低相似度</label>
+              <output for="image-search-threshold" class="similarity-threshold-value">
+                {{ Math.round(imageSearchSimilarityThreshold * 100) }}%
+              </output>
+            </div>
+            <input
+              id="image-search-threshold"
+              v-model.number="imageSearchSimilarityThreshold"
+              class="similarity-threshold-range"
+              type="range"
+              min="0.5"
+              max="1"
+              step="0.01"
+            />
+            <div class="similarity-threshold-scale" aria-hidden="true">
+              <span>50%</span>
+              <span>100%</span>
+            </div>
+            <p class="similarity-threshold-hint">默认 80%，数值越高，检索结果越严格</p>
+          </div>
+
+          <div class="modal-actions image-search-actions">
             <button 
               type="button" 
               class="btn-secondary" 

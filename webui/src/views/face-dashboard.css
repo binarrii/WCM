@@ -890,6 +890,56 @@
   color: var(--status-red);
 }
 
+.similarity-threshold-field {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background-color: var(--bg-primary);
+}
+
+.similarity-threshold-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.similarity-threshold-value {
+  min-width: 52px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background-color: var(--color-primary-glow);
+  color: var(--color-primary);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.similarity-threshold-range {
+  width: 100%;
+  margin: 14px 0 2px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.similarity-threshold-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.similarity-threshold-hint {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.image-search-actions {
+  margin-top: 24px;
+}
+
 .form-input, .form-select, .form-textarea {
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
