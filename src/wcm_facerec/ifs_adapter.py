@@ -724,4 +724,5 @@ def _person_to_item(person: dict[str, Any] | None) -> dict[str, Any]:
         "type": metadata.get("type"),
         "remarks": metadata.get("remarks"),
         "file_path": metadata.get("file_path"),
+        "image_paths": metadata.get("image_paths"),
     }

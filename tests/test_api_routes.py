@@ -63,6 +63,36 @@ def test_face_records_exposes_image_url_without_file_path(tmp_path, monkeypatch,
     assert "file_path" not in item
 
 
+def test_face_records_exposes_all_person_images(tmp_path, monkeypatch, client_for):
+    image_dir = tmp_path / "落马官员"
+    image_dir.mkdir()
+    images = [image_dir / "face-1.jpg", image_dir / "face-2.jpg"]
+    for image in images:
+        image.write_bytes(b"image")
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+
+    def list_persons(**_kwargs):
+        return [
+            {
+                "id": "p1",
+                "name": "艾宝俊",
+                "face_count": 2,
+                "file_path": str(images[0]),
+                "image_paths": [str(image) for image in images],
+            }
+        ], None
+
+    response = client_for(StubEngine(SimpleNamespace(list_persons=list_persons))).get(
+        "/api/v1/face_records", params={"search": "艾宝俊"}
+    )
+    item = response.json()["items"][0]
+    assert item["face_count"] == 2
+    assert item["image_urls"] == [
+        "/images/落马官员/face-1.jpg",
+        "/images/落马官员/face-2.jpg",
+    ]
+
+
 def test_search_returns_canonical_fields_without_internal_paths(
     tmp_path, monkeypatch, client_for, sample_image_bytes
 ):

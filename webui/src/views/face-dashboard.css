@@ -530,6 +530,57 @@
   transform: scale(1.05);
 }
 
+.image-nav-button {
+  position: absolute;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.66);
+  color: white;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: background 0.2s ease, opacity 0.2s ease;
+  opacity: 0.82;
+  z-index: 2;
+}
+
+.image-nav-button:hover {
+  background: rgba(15, 23, 42, 0.88);
+  opacity: 1;
+}
+
+.image-nav-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.image-nav-previous {
+  left: 12px;
+}
+
+.image-nav-next {
+  right: 12px;
+}
+
+.image-count-badge {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
 .card-image-fallback {
   height: 100%;
   display: flex;

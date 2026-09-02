@@ -68,7 +68,7 @@ class ExpectedPerson:
     images: tuple[ExcelRecord, ...]
 
     @property
-    def metadata(self) -> dict[str, str]:
+    def metadata(self) -> dict[str, Any]:
         representative = self.images[0]
         return {
             "category": representative.category,
@@ -76,6 +76,7 @@ class ExpectedPerson:
             "occupation": representative.occupation,
             "remarks": representative.remarks,
             "file_path": representative.file_path,
+            "image_paths": [image.file_path for image in self.images],
         }
 
 
@@ -172,6 +173,15 @@ class FaceSyncClient:
             images=[_upload_image(image) for image in images],
         )
         return len(result.faces or []), list(result.rejected_images or [])
+
+    def update_person_metadata(
+        self,
+        collection_id: str,
+        person_id: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = self.sdk.update_person(collection_id, person_id, metadata=metadata)
+        return dict(result.person)
 
 
 def _normalized_stem(value: str) -> str:
@@ -494,6 +504,8 @@ def synchronize(
                 "exact_checks": 0,
                 "planned_face_adds": 0,
                 "added_faces": 0,
+                "planned_metadata_updates": 0,
+                "metadata_updates": 0,
                 "rejected_images": [],
                 "unsafe_count_mismatches": [],
                 "ambiguous_database_names": [],
@@ -568,6 +580,37 @@ def synchronize(
             assert category_person is not None and aggregate_person is not None
             if str(category_person["id"]) != str(aggregate_person["id"]):
                 report["legacy_pair_id_mismatches"] += 1
+
+            if len(person.images) > 1:
+                expected_paths = person.metadata["image_paths"]
+                for collection_id, database_person in (
+                    (spec.collection_id, category_person),
+                    (aggregate_collection, aggregate_person),
+                ):
+                    current_metadata = _metadata(database_person)
+                    if current_metadata.get("image_paths") == expected_paths:
+                        continue
+                    report["planned_metadata_updates"] += 1
+                    if not apply:
+                        continue
+                    try:
+                        updated = client.update_person_metadata(
+                            collection_id,
+                            str(database_person["id"]),
+                            {**current_metadata, **person.metadata},
+                        )
+                        database_person.update(updated)
+                        report["metadata_updates"] += 1
+                    except Exception as exc:  # noqa: BLE001
+                        report.setdefault("apply_errors", []).append(
+                            {
+                                "phase": "update_image_paths",
+                                "collection": collection_id,
+                                "person_id": str(database_person["id"]),
+                                "name": name,
+                                "error": str(exc),
+                            }
+                        )
 
             for collection_id, database_person in (
                 (spec.collection_id, category_person),

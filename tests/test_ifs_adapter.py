@@ -799,6 +799,10 @@ def test_list_persons_returns_flat_items_and_next_cursor(adapter, fake_transport
                         "type": "时政敏感",
                         "remarks": "",
                         "file_path": "/tmp/wcm/时政敏感/张三_md5.jpg",
+                        "image_paths": [
+                            "/tmp/wcm/时政敏感/张三_md5.jpg",
+                            "/tmp/wcm/时政敏感/张三_2_md5.jpg",
+                        ],
                     },
                 },
             ],
@@ -815,6 +819,10 @@ def test_list_persons_returns_flat_items_and_next_cursor(adapter, fake_transport
     assert item["occupation"] == "教师"
     assert item["type"] == "时政敏感"
     assert item["file_path"] == "/tmp/wcm/时政敏感/张三_md5.jpg"
+    assert item["image_paths"] == [
+        "/tmp/wcm/时政敏感/张三_md5.jpg",
+        "/tmp/wcm/时政敏感/张三_2_md5.jpg",
+    ]
     assert item["created_at"] == "2026-08-06T00:00:00Z"
 
 

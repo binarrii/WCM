@@ -46,10 +46,23 @@ def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
     # mirrors.  Some legacy aggregate records also carry an external id, but
     # it is not a valid IFS Person id and therefore cannot be used for CRUD.
     record_id = aggregate_id or item.get("id")
+    paths = [item.get("file_path")]
+    image_paths = item.get("image_paths")
+    if isinstance(image_paths, list):
+        paths.extend(image_paths)
+    image_urls: list[str] = []
+    for path in paths:
+        if not isinstance(path, str):
+            continue
+        image_url = _path_to_image_url(path)
+        if image_url and image_url not in image_urls:
+            image_urls.append(image_url)
     return {
         "id": record_id,
         "name": item.get("name"),
-        "image_url": _path_to_image_url(item.get("file_path")),
+        "image_url": image_urls[0] if image_urls else None,
+        "image_urls": image_urls,
+        "face_count": item.get("face_count"),
         "created_at": item.get("created_at"),
         "person": {
             "id": record_id,

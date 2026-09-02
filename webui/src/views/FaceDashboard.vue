@@ -21,6 +21,8 @@ import {
   Layers,
   Settings,
   ArrowUp,
+  ChevronLeft,
+  ChevronRight,
   Sun,
   Moon,
   Monitor
@@ -88,6 +90,27 @@ const openImagePreview = (url) => {
 const closeImagePreview = () => {
   isImagePreviewOpen.value = false;
   previewImageUrl.value = '';
+};
+const activeCardImageIndexes = ref({});
+const getRecordImages = (record) => {
+  if (Array.isArray(record.image_urls) && record.image_urls.length > 0) {
+    return record.image_urls;
+  }
+  return record.image_url ? [record.image_url] : [];
+};
+const getActiveCardImageIndex = (record) => {
+  const images = getRecordImages(record);
+  if (images.length === 0) return 0;
+  return Math.min(activeCardImageIndexes.value[record.id] || 0, images.length - 1);
+};
+const getActiveCardImage = (record) => (
+  getRecordImages(record)[getActiveCardImageIndex(record)] || null
+);
+const changeCardImage = (record, direction) => {
+  const images = getRecordImages(record);
+  if (images.length < 2) return;
+  const current = getActiveCardImageIndex(record);
+  activeCardImageIndexes.value[record.id] = (current + direction + images.length) % images.length;
 };
 
 // Toast state
@@ -798,10 +821,10 @@ onUnmounted(() => {
             class="record-card"
           >
             <!-- Card Image -->
-            <div class="card-image-container" @click="record.image_url && openImagePreview(`${IMAGE_BASE}${record.image_url}`)">
+            <div class="card-image-container" @click="getActiveCardImage(record) && openImagePreview(`${IMAGE_BASE}${getActiveCardImage(record)}`)">
               <img 
-                v-if="record.image_url" 
-                :src="`${IMAGE_BASE}${record.image_url}`" 
+                v-if="getActiveCardImage(record)" 
+                :src="`${IMAGE_BASE}${getActiveCardImage(record)}`" 
                 :alt="record.name" 
                 class="card-image"
                 loading="lazy"
@@ -818,6 +841,17 @@ onUnmounted(() => {
               <span v-if="record.searchSimilarity" class="similarity-badge">
                 相似度: {{ (record.searchSimilarity * 100).toFixed(0) }}%
               </span>
+              <template v-if="getRecordImages(record).length > 1">
+                <button class="image-nav-button image-nav-previous" type="button" title="上一张" @click.stop="changeCardImage(record, -1)">
+                  <ChevronLeft />
+                </button>
+                <button class="image-nav-button image-nav-next" type="button" title="下一张" @click.stop="changeCardImage(record, 1)">
+                  <ChevronRight />
+                </button>
+                <span class="image-count-badge">
+                  {{ getActiveCardImageIndex(record) + 1 }} / {{ getRecordImages(record).length }}
+                </span>
+              </template>
             </div>
 
             <!-- Card Body -->

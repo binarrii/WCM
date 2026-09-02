@@ -124,6 +124,19 @@ def test_missing_person_uses_same_person_id_in_both_collections():
     ]
 
 
+def test_expected_person_metadata_contains_every_image_path():
+    person = ExpectedPerson(
+        name="艾宝俊",
+        images=(
+            ExcelRecord("艾宝俊", "a.jpg", "/tmp/a.jpg", "无", "落马官员", ""),
+            ExcelRecord("艾宝俊", "b.jpg", "/tmp/b.jpg", "无", "落马官员", ""),
+        ),
+    )
+
+    assert person.metadata["file_path"] == "/tmp/a.jpg"
+    assert person.metadata["image_paths"] == ["/tmp/a.jpg", "/tmp/b.jpg"]
+
+
 def test_find_missing_images_checks_the_existing_person_id(tmp_path):
     present = tmp_path / "present.jpg"
     missing = tmp_path / "missing.jpg"
