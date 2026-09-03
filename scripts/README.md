@@ -29,6 +29,19 @@ uv run python scripts/mark_video_timeline.py /path/to/video.mp4 \
   --results /path/to/analysis.json --output-dir data/media_reviews/review-2
 ```
 
+Local video paths, `--results`, and `--output-dir` expand a leading `~` to the
+current user's home directory (for example `/home/aigc`), including when the
+argument is quoted and the shell does not expand it. Relative and absolute
+paths still work; HTTP(S) URLs are passed through unchanged.
+
+```bash
+uv run python scripts/mark_video_timeline.py '~/videos/video.mp4' \
+  --results '~/reviews/analysis.json' --output-dir '~/reviews/review-2'
+```
+
+In Docker, `~` refers to the user running the script inside the container, not
+the SSH user's home directory on the host. Local input still requires `--results`.
+
 Each output directory contains:
 
 - `review.html`: open in a browser; click timeline points or list entries to

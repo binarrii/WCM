@@ -1,11 +1,19 @@
 import json
+import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import httpx
 import pytest
 
 from scripts import mark_video_timeline as timeline
+
+
+def tilde_path(path):
+    # Exercise real expanduser without changing HOME or writing to the home directory.
+    return f"~/{os.path.relpath(path, Path.home())}"
 
 
 @pytest.mark.parametrize(
@@ -83,19 +91,27 @@ def test_html_and_metadata_escape_untrusted_results():
     assert "\nnext" not in metadata
 
 
-def test_existing_output_directory_is_never_overwritten(tmp_path, monkeypatch):
+@pytest.mark.parametrize("use_tilde", [False, True])
+def test_existing_output_directory_is_never_overwritten(tmp_path, monkeypatch, use_tilde):
     monkeypatch.setattr(timeline.shutil, "which", lambda name: name)
     existing = tmp_path / "existing"
     existing.mkdir()
     sentinel = existing / "marked.mp4"
     sentinel.write_bytes(b"original")
+    original_mkdir = Path.mkdir
+
+    def checked_mkdir(path, *args, **kwargs):
+        assert path == existing.resolve(), "Output path must expand before any directory creation"
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", checked_mkdir)
     args = timeline.build_parser().parse_args(
         [
             "source.mp4",
             "--results",
             "existing.json",
             "--output-dir",
-            str(existing),
+            tilde_path(existing) if use_tilde else str(existing),
         ]
     )
     with pytest.raises(FileExistsError):
@@ -218,6 +234,41 @@ def test_complete_export_and_stream_copy(sample_video, tmp_path):
     assert media_hash(sample_video) == media_hash(output / "marked.mp4")
 
 
+def test_cli_expands_tilde_for_all_disk_paths_without_shell(sample_video, tmp_path):
+    inputs = tmp_path / "clips ~ archive"
+    inputs.mkdir()
+    source = inputs / "测试 video.mp4"
+    shutil.copyfile(sample_video, source)
+    results = inputs / "analysis results.json"
+    results.write_text('[{"timestamp": 1, "category": "test"}]', encoding="utf-8")
+    output = tmp_path / "review output"
+    # Keep even an incorrectly resolved literal ~ path inside this test's temporary tree.
+    working_directory = tmp_path.joinpath(*(["work"] * len(Path.home().parts)))
+    working_directory.mkdir(parents=True)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(timeline.__file__).resolve()),
+            tilde_path(source),
+            "--results",
+            tilde_path(results),
+            "--output-dir",
+            tilde_path(output),
+        ],
+        cwd=working_directory,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert str(output.resolve()) in result.stdout
+    assert (output / "review.html").is_file()
+    assert len(timeline.probe_video(output / "marked.mp4", "ffprobe")["chapters"]) == 2
+    assert source.read_bytes() == sample_video.read_bytes()
+    assert not (working_directory / "~").exists()
+
+
 def test_live_api_mode_serializes_parameters_without_retries(sample_video, tmp_path, monkeypatch):
     payloads = []
 
@@ -235,7 +286,7 @@ def test_live_api_mode_serializes_parameters_without_retries(sample_video, tmp_p
     )
     args = timeline.build_parser().parse_args(
         [
-            "https://example.com/video.mp4",
+            "https://example.com/~media/video.mp4",
             "--api-url",
             "http://test/api/v1/analyze_media",
             "--threshold",

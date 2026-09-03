@@ -233,9 +233,13 @@ def download_video(url: str, destination: Path, max_bytes: int) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("video", help="视频 HTTP(S) URL；使用 --results 时也支持本地视频")
-    parser.add_argument("--results", type=Path, help="已有 analyze_media JSON，跳过接口调用")
-    parser.add_argument("--output-dir", type=Path, help="新建的输出目录，不允许覆盖已有目录")
+    parser.add_argument("video", help="视频 HTTP(S) URL；使用 --results 时也支持本地视频（支持 ~）")
+    parser.add_argument(
+        "--results", type=Path, help="已有 analyze_media JSON，跳过接口调用（支持 ~）"
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, help="新建的输出目录，不允许覆盖已有目录（支持 ~）"
+    )
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="完整 analyze_media 接口 URL")
     parser.add_argument("--sample-interval", type=float, default=1.0, help="采样间隔秒数，默认 1")
     parser.add_argument(
@@ -266,10 +270,14 @@ def execute(args: argparse.Namespace) -> Path:
     name = Path(unquote(urlsplit(args.video).path) if remote else args.video).stem or "video"
     safe_name = re.sub(r"[^\w.-]+", "_", name)[:80]
     output = (
-        args.output_dir
-        or Path("data/media_reviews")
-        / (safe_name + "-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
-    ).resolve()
+        (
+            args.output_dir
+            or Path("data/media_reviews")
+            / (safe_name + "-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
+        )
+        .expanduser()
+        .resolve()
+    )
     # Fail closed rather than overwrite source videos or a previous report.
     output.mkdir(parents=True, exist_ok=False)
     print(f"输出目录：{output}", flush=True)
@@ -279,13 +287,13 @@ def execute(args: argparse.Namespace) -> Path:
             source = Path(work) / "source.video"
             download_video(args.video, source, args.max_download_mb * 1024 * 1024)
         else:
-            source = Path(args.video).resolve(strict=True)
+            source = Path(args.video).expanduser().resolve(strict=True)
         probe = probe_video(source, ffprobe)
         duration_ms = timestamp_ms(probe["format"]["duration"])
         if duration_ms <= 0 or not any(s["codec_type"] == "video" for s in probe["streams"]):
             raise ValueError("输入不是有效的有限时长视频")
         if args.results:
-            payload = json.loads(args.results.read_text(encoding="utf-8"))
+            payload = json.loads(args.results.expanduser().read_text(encoding="utf-8"))
         else:
             print("调用 analyze_media，视频较长时请等待；不会自动重复提交…", flush=True)
             with httpx.Client(timeout=httpx.Timeout(args.timeout, connect=15)) as client:
