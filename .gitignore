@@ -16,3 +16,6 @@ wheels/
 
 # Environment variables
 .env
+
+# Generated video review copies and API analysis reports
+data/media_reviews/
