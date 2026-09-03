@@ -91,6 +91,14 @@ Each output directory contains:
 - `marked.mp4`: stream-copied audio/video/subtitles, with new chapter marks.
   This does not burn labels into frames or re-encode media. Chapter display
   depends on the player; the HTML page provides a separate clickable timeline.
+  Chapters use a QuickTime text track with a fixed millisecond timescale to
+  avoid overflow on long spans. The duplicate Nero chapter table is disabled
+  (`-movflags +faststart+disable_chpl -movie_timescale 1000`); its titles are
+  limited to 255 bytes, which can truncate Chinese/UTF-8 text. See
+  [FFmpeg's MP4 options](https://ffmpeg.org/ffmpeg-formats.html) and
+  [Nero chapter writer](https://ffmpeg.org/doxygen/trunk/movenc_8c_source.html#l05073).
+  Chapter titles remain summaries of up to 240 characters; complete descriptions
+  are retained in the HTML and JSON outputs. Audio/video timescales are unchanged.
 - `analysis.json`: original API response, retained for reuse.
 - `markers.json`: sorted point/interval groups (`time_ms`, `end_time_ms`), with
   exact duplicate findings within the same span removed.
@@ -107,6 +115,16 @@ Output chapter marks replace the source's chapter table only in the new copy.
 Exported HTML pages contain their own copy of the UI. After a script/template
 update, regenerate into a new output directory to use the latest behavior;
 reuse the existing `analysis.json` with `--results` to avoid another API call.
+
+If an older version fails with `输出视频章节标题不匹配` or
+`输出视频章节数量不匹配`, update the script and rerun with the saved results in a
+**new** output directory. Do not reuse the partially created directory or delete
+the source video. For example:
+
+```bash
+uv run python scripts/mark_video_timeline.py '~/videos/video.mp4' \
+  --results /tmp/reviews-2/analysis.json --output-dir /tmp/reviews-2-retry
+```
 
 Markers are **review cues from the API**, not verified violations. A person
 range covers the first through last consecutive sampled hit, not exact

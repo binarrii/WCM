@@ -200,10 +200,11 @@ def test_local_source_requires_existing_analysis_json():
 
 
 @pytest.fixture
-def sample_video(tmp_path):
+def sample_video(tmp_path, request):
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         pytest.skip("ffmpeg/ffprobe not installed")
     video = tmp_path / "source.mp4"
+    duration = getattr(request, "param", 3)
     timeline.run_media_command(
         [
             "ffmpeg",
@@ -214,11 +215,11 @@ def sample_video(tmp_path):
             "-f",
             "lavfi",
             "-i",
-            "color=c=blue:s=128x96:r=10:d=3",
+            f"color=c=blue:s=128x96:r=10:d={duration}",
             "-f",
             "lavfi",
             "-i",
-            "sine=frequency=440:duration=3",
+            f"sine=frequency=440:duration={duration}",
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -232,7 +233,12 @@ def sample_video(tmp_path):
     return video
 
 
-def test_complete_export_and_stream_copy(sample_video, tmp_path):
+@pytest.mark.parametrize(
+    "description",
+    ["引号 ; # = \\ \n换行", "中文长标题" * 60, "中文 English 😀 ; # = \\ " * 30],
+    ids=["short-escaped", "long-chinese", "long-mixed-unicode"],
+)
+def test_complete_export_and_stream_copy(sample_video, tmp_path, description):
     results = tmp_path / "results.json"
     results.write_text(
         json.dumps(
@@ -240,9 +246,9 @@ def test_complete_export_and_stream_copy(sample_video, tmp_path):
                 {
                     "timestamp": "00:00:01.000~00:00:02.000",
                     "category": "复核",
-                    "description": "引号 ; # = \\ \n换行",
+                    "description": description,
                 },
-                {"timestamp": "00:00:02.000", "category": "复核", "description": "另一个标记"},
+                {"timestamp": "00:00:02.000", "category": "复核", "description": description},
             ],
             ensure_ascii=False,
         ),
@@ -270,6 +276,19 @@ def test_complete_export_and_stream_copy(sample_video, tmp_path):
     probe = timeline.probe_video(output / "marked.mp4", "ffprobe")
     assert [float(c["start_time"]) for c in probe["chapters"]] == [0, 1, 2]
     assert {s["codec_type"] for s in probe["streams"]} >= {"audio", "video"}
+    source_probe = timeline.probe_video(sample_video, "ffprobe")
+    assert [(s["codec_name"], s["time_base"]) for s in source_probe["streams"]] == [
+        (s["codec_name"], s["time_base"])
+        for s in probe["streams"]
+        if s["codec_type"] in {"audio", "video"}
+    ]
+    markers = json.loads((output / "markers.json").read_text())["markers"]
+    chapters = timeline.make_chapters(markers, 3000)
+    assert [c["tags"]["title"] for c in probe["chapters"]] == [c["title"] for c in chapters]
+    if len(description) > 240:
+        assert len(chapters[1]["title"].encode("utf-8")) > 255
+    assert markers[0]["findings"][0]["description"] == description
+    assert timeline.json_for_html(description) in (output / "review.html").read_text()
 
     def media_hash(path):
         return timeline.run_media_command(
@@ -292,6 +311,54 @@ def test_complete_export_and_stream_copy(sample_video, tmp_path):
         )
 
     assert media_hash(sample_video) == media_hash(output / "marked.mp4")
+
+
+def test_more_than_255_chapters_round_trip(sample_video, tmp_path):
+    markers = timeline.normalize_results(
+        [{"timestamp": i / 100, "category": "复核", "description": str(i)} for i in range(260)],
+        3000,
+    )
+    chapters = timeline.make_chapters(markers, 3000)
+    metadata = tmp_path / "chapters.ffmetadata"
+    metadata.write_text(timeline.metadata_text(chapters), encoding="utf-8")
+    output = tmp_path / "marked.mp4"
+    timeline.embed_chapters(sample_video, output, metadata, "ffmpeg")
+    timeline.verify_chapters(output, chapters, "ffprobe")
+    assert len(timeline.probe_video(output, "ffprobe")["chapters"]) == 260
+
+
+@pytest.mark.parametrize("sample_video", [600], indirect=True)
+def test_long_chapter_durations_keep_all_titles_and_times(sample_video, tmp_path):
+    # High audio/video timescales can make a chapter's duration overflow in the
+    # muxer. Previously the final chapter vanished from the QuickTime track,
+    # leaving only its truncated Nero title for ffprobe to read.
+    markers = timeline.normalize_results(
+        [
+            {"timestamp": i, "category": "复核", "description": "中英混合 English 😀 " * 30}
+            for i in (50, 178, 331, 368)
+        ],
+        600000,
+    )
+    chapters = timeline.make_chapters(markers, 600000)
+    metadata = tmp_path / "chapters.ffmetadata"
+    metadata.write_text(timeline.metadata_text(chapters), encoding="utf-8")
+    output = tmp_path / "marked.mp4"
+    timeline.embed_chapters(sample_video, output, metadata, "ffmpeg")
+    timeline.verify_chapters(output, chapters, "ffprobe")
+    actual = timeline.probe_video(output, "ffprobe")["chapters"]
+    assert [timeline.timestamp_ms(c["end_time"]) for c in actual] == [c["end_ms"] for c in chapters]
+
+
+def test_verify_chapters_still_rejects_changed_title(monkeypatch):
+    monkeypatch.setattr(
+        timeline,
+        "probe_video",
+        lambda *args: {"chapters": [{"start_time": "1.000", "tags": {"title": "truncated"}}]},
+    )
+    with pytest.raises(RuntimeError, match="章节标题不匹配"):
+        timeline.verify_chapters(
+            Path("marked.mp4"), [{"start_ms": 1000, "title": "truncated title"}], "ffprobe"
+        )
 
 
 def test_cli_expands_tilde_for_all_disk_paths_without_shell(sample_video, tmp_path):

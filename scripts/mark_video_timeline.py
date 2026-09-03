@@ -198,6 +198,10 @@ def probe_video(path: Path, ffprobe: str) -> dict:
 def embed_chapters(source: Path, output: Path, metadata: Path, ffmpeg: str) -> None:
     # Keep audio/video/subtitle streams. Old chapter data tracks are not media.
     # The new output's chapters replace the original chapter table, not its media.
+    # Use the QuickTime chapter track only. The duplicate Nero chpl table cuts
+    # titles at 255 bytes (possibly mid-UTF-8) and only holds 255 chapters.
+    # Pin its timescale to milliseconds: auto-selected audio/video common
+    # timescales can overflow long chapter durations. Media timescales stay intact.
     run_media_command(
         [
             ffmpeg,
@@ -225,7 +229,9 @@ def embed_chapters(source: Path, output: Path, metadata: Path, ffmpeg: str) -> N
             "-c",
             "copy",
             "-movflags",
-            "+faststart",
+            "+faststart+disable_chpl",
+            "-movie_timescale",
+            "1000",
             str(output),
         ]
     )
