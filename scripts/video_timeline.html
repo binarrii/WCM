@@ -57,7 +57,19 @@ document.getElementById('duration').textContent=stamp(duration);
 let visible=data.markers;
 const categories=[...new Set(data.markers.flatMap(m=>m.findings.map(f=>f.category)))];
 categories.forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;category.append(option);});
-function jump(index){if(index<0||index>=visible.length)return;video.currentTime=visible[index].time_ms/1000;update();}
+function revealEvent(index){
+  const row=events.children[index];if(!row||!events.clientHeight)return;
+  const bounds=row.getBoundingClientRect(),top=events.getBoundingClientRect().top+events.clientTop;
+  const bottom=top+events.clientHeight;
+  // Scroll this list only; scrollIntoView would also move the page/video.
+  // Oversized descriptions cannot fit, so reveal their timestamp/header first.
+  if(bounds.top<top||bounds.height>events.clientHeight)events.scrollTop+=Math.floor(bounds.top-top);
+  else if(bounds.bottom>bottom)events.scrollTop+=Math.ceil(bounds.bottom-bottom);
+}
+function jump(index){
+  if(index<0||index>=visible.length)return;
+  video.currentTime=visible[index].time_ms/1000;update();revealEvent(index);
+}
 function layoutMarkers(){
   const width=Math.max(timeline.clientWidth,12),lanes=[];
   timeline.querySelectorAll('button').forEach((tick,index)=>{

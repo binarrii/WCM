@@ -70,6 +70,11 @@ highlighted during playback within the range. Different people or endpoints at
 the same start remain separate interval entries. MP4 chapters share one entry per start and
 include the original ranges in their titles.
 
+Clicking a timeline marker or using previous/next also scrolls its exact entry
+into view in the results list, without scrolling the page/video. Already-visible
+entries stay in place; descriptions taller than the list align at their heading.
+Normal playback updates highlighting without taking over manual list scrolling.
+
 With `--results`, the script preserves the supplied points/ranges; it does not
 guess person intervals from old point-only JSON. To obtain merged results,
 analyze the video through the updated API (omit `--results`).
@@ -98,6 +103,10 @@ omit `--output-dir` to create a uniquely named directory under
 be reused with `--results` in a new directory. Unsupported MP4 stream codecs
 cause an error instead of silent transcoding or dropping audio/subtitles.
 Output chapter marks replace the source's chapter table only in the new copy.
+
+Exported HTML pages contain their own copy of the UI. After a script/template
+update, regenerate into a new output directory to use the latest behavior;
+reuse the existing `analysis.json` with `--results` to avoid another API call.
 
 Markers are **review cues from the API**, not verified violations. A person
 range covers the first through last consecutive sampled hit, not exact

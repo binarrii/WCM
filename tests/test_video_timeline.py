@@ -16,6 +16,18 @@ def tilde_path(path):
     return f"~/{os.path.relpath(path, Path.home())}"
 
 
+@pytest.mark.skipif(not shutil.which("node"), reason="Node.js is required for template UI tests")
+def test_template_navigation_behavior():
+    result = subprocess.run(
+        ["node", "--test", str(Path(__file__).with_name("video_timeline_ui.test.cjs"))],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize(
     "value,expected",
     [
