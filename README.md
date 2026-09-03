@@ -83,6 +83,12 @@ RUN_LIVE=1 uv run pytest -m live tests/test_smoke_live.py -v
   collection.
 - Search accepts legacy distance thresholds (lower is better); the adapter
   converts InsightFace similarity to `distance = 1 - similarity`.
+  HTTP and WebSocket search/media analysis, engine search, adapter search,
+  and face verification default to `0.5` (50% minimum similarity / 0.5 maximum
+  distance). Explicit search thresholds and the verification setting
+  `WCM_INSIGHTFACE_VERIFY_SIMILARITY_THRESHOLD` still override their defaults.
+  Detection settings and the import script's exact-image deduplication threshold
+  are separate and unchanged.
 - Search collapses multiple enrolled-sample hits for the same person and query
   face (and video frame) into the highest-scoring hit. `matched_face_id`, the
   score and source bounding box describe that hit. `image_url` is the person's

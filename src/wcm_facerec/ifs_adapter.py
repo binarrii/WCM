@@ -26,7 +26,7 @@ from wcm_facerec.vendor.insightface_server import (  # type: ignore  # noqa: F40
 )
 from wcm_facerec.vendor.insightface_server.exceptions import NotFoundError
 
-from .config import settings
+from .config import DEFAULT_SIMILARITY_THRESHOLD, settings
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,11 @@ class InsightFaceAdapter:
 
     def compare(self, a_bytes: bytes, b_bytes: bytes) -> float:
         """Return the cosine similarity in [0,1] between two faces."""
-        result = self._client.compare(source=a_bytes, target=b_bytes)
+        result = self._client.compare(
+            source=a_bytes,
+            target=b_bytes,
+            threshold=settings.insightface_verify_similarity_threshold,
+        )
         return float(result.similarity)
 
     # ------------------------------------------------------------------
@@ -153,7 +157,7 @@ class InsightFaceAdapter:
         image_bytes: bytes,
         *,
         top_k: int,
-        min_similarity: float,
+        min_similarity: float = DEFAULT_SIMILARITY_THRESHOLD,
     ) -> list[dict]:
         """Search the default collection for similar faces.
 
@@ -239,7 +243,7 @@ class InsightFaceAdapter:
         image_bytes: bytes,
         *,
         top_k: int = 5,
-        min_similarity: float = 0.0,
+        min_similarity: float = DEFAULT_SIMILARITY_THRESHOLD,
         min_face_pixels: int = 80,
         max_faces: int = 10,
         quality_weight: float | None = None,

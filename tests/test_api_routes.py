@@ -32,6 +32,58 @@ def client_for(monkeypatch):
     return factory
 
 
+@pytest.mark.parametrize("threshold", [None, 0.7, 0.0])
+@pytest.mark.parametrize(
+    "mode",
+    ["upload", "image", "video", "ws_image", "ws_video", "analyze", "ws_analyze"],
+)
+def test_matching_threshold_defaults_and_explicit_overrides(
+    mode, threshold, client_for, monkeypatch, sample_image_bytes
+):
+    received = []
+
+    class SearchEngine(StubEngine):
+        async def search(self, **kwargs):
+            received.append(kwargs["threshold"])
+            return []
+
+    async def download(*args):
+        return sample_image_bytes
+
+    async def search_video(engine, url, name, top_k, threshold, sample_interval):
+        received.append(threshold)
+        return 1, []
+
+    async def analyze(url, sample_interval, top_k, threshold):
+        received.append(threshold)
+        return {"results": []}
+
+    monkeypatch.setattr(routes, "_download_url_safe", download)
+    monkeypatch.setattr(routes, "_search_video_frames", search_video)
+    monkeypatch.setattr(routes, "_process_analyze_media", analyze)
+    client = client_for(SearchEngine())
+    payload = {} if threshold is None else {"threshold": threshold}
+    if mode == "upload":
+        response = client.post(
+            "/api/v1/search",
+            data=payload,
+            files={"file": ("query.jpg", sample_image_bytes, "image/jpeg")},
+        )
+        assert response.status_code == 200, response.text
+    else:
+        payload["url"] = "https://example.com/query." + ("mp4" if "video" in mode else "jpg")
+        endpoint = "analyze_media" if "analyze" in mode else "search"
+        if mode.startswith("ws_"):
+            with client.websocket_connect(f"/api/v1/ws/{endpoint}") as socket:
+                socket.send_json(payload)
+                assert socket.receive_json()["status"] == "accepted"
+                assert socket.receive_json()["status"] == "completed"
+        else:
+            response = client.post(f"/api/v1/{endpoint}", json=payload)
+            assert response.status_code == 200, response.text
+    assert received == [0.5 if threshold is None else threshold]
+
+
 def test_image_url_is_only_returned_for_existing_local_file(tmp_path, monkeypatch):
     image_dir = tmp_path / "劣迹艺人"
     image_dir.mkdir()

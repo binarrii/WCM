@@ -7,6 +7,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # reference; the engine now always uses 512.
 INSIGHTFACE_EMBEDDING_DIM = 512
 
+# Keep omitted matching thresholds consistent across HTTP, WebSocket,
+# the engine and the adapter. Distance is the complement of similarity.
+DEFAULT_SIMILARITY_THRESHOLD = 0.5
+DEFAULT_DISTANCE_THRESHOLD = 1.0 - DEFAULT_SIMILARITY_THRESHOLD
+
 
 class Settings(BaseSettings):
     """Application settings."""
@@ -20,9 +25,9 @@ class Settings(BaseSettings):
     insightface_timeout_s: float = 60.0
     # InsightFace's /compare returns similarity in [0,1] (higher = better).
     # The legacy verify_distance_threshold was on a cosine-distance scale
-    # (lower = better). For buffalo_m + ArcFace R50, similarity ≥ 0.55 is a
-    # reasonable starting point; tune against your data.
-    insightface_verify_similarity_threshold: float = 0.55
+    # (lower = better). Both now default to 0.5; explicit configuration
+    # can still override the verification threshold.
+    insightface_verify_similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD
     # Optional bearer token. Empty when auth is disabled on the server.
     insightface_api_key: str = ""
 
@@ -35,8 +40,8 @@ class Settings(BaseSettings):
     # #1 adaptive per-Person threshold: for Persons with more enrolled
     # faces (face_count), raise the acceptance bar by `step` per face,
     # capped at 10. adaptive = base + step * min(face_count, 10).
-    # step=0 disables; step=0.005 means a 10-face Person requires ~0.605
-    # similarity to match, vs. 0.55 for a 1-face Person.
+    # step=0 disables; at the default base of 0.5, step=0.005 means a
+    # 10-face Person requires 0.55 similarity, vs. 0.505 for 1 face.
     insightface_adaptive_threshold_step: float = 0.0
     # #2 norm-aware scoring (MPS proxy): the probe embedding's L2 norm is
     # a quality signal (MagFace). factor = min(norm / ref, 1.0).

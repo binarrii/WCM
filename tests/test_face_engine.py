@@ -217,6 +217,36 @@ def test_search_passes_similarity_threshold_to_sdk(engine, fake_transport, sampl
 # Verify uses insightface_verify_similarity_threshold (not the legacy
 # cosine-distance threshold).
 # ----------------------------------------------------------------------
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["search", "search_multi_face"])
+@pytest.mark.parametrize("threshold", [None, 0.3, 0.0])
+async def test_engine_default_distance_and_conversion(engine, monkeypatch, method, threshold):
+    received = []
+
+    def search_multi_face(image, **kwargs):
+        received.append(kwargs["min_similarity"])
+        return {"faces": [], "all_results": []}
+
+    monkeypatch.setattr(engine._adapter, "search_multi_face", search_multi_face)
+    kwargs = {} if threshold is None else {"threshold": threshold}
+    await getattr(engine, method)(b"query", **kwargs)
+    expected = 0.5 if threshold is None else (1 - threshold if threshold else 0.0)
+    assert received == pytest.approx([expected])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("similarity, matched", [(0.49, False), (0.5, True), (0.51, True)])
+async def test_verify_default_boundary(engine, monkeypatch, similarity, matched):
+    from wcm_facerec.config import Settings
+
+    monkeypatch.delenv("WCM_INSIGHTFACE_VERIFY_SIMILARITY_THRESHOLD", raising=False)
+    default_threshold = Settings(_env_file=None).insightface_verify_similarity_threshold
+    assert default_threshold == 0.5
+    monkeypatch.setattr(settings, "insightface_verify_similarity_threshold", default_threshold)
+    monkeypatch.setattr(engine._adapter, "compare", lambda *args: similarity)
+    assert await engine.verify_faces(b"a", b"b") is matched
+
+
 def test_verify_uses_similarity_threshold(engine, fake_transport, monkeypatch, sample_image_bytes):
     monkeypatch.setattr(settings, "insightface_verify_similarity_threshold", 0.6)
     fake_transport.register(

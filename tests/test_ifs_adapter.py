@@ -34,6 +34,58 @@ def adapter(fake_transport: FakeTransport):
     return a
 
 
+@pytest.mark.parametrize("method", ["search", "search_multi_face"])
+@pytest.mark.parametrize("threshold", [None, 0.7, 0.0])
+def test_adapter_sends_default_or_explicit_similarity(
+    adapter, method, threshold, sample_image_bytes
+):
+    search_bodies = []
+
+    def respond(request):
+        if request.url.path == "/v1/detect":
+            return httpx.Response(
+                200,
+                json={
+                    "faces": [
+                        {
+                            "bbox": {"pixels": {"x": 0, "y": 0, "width": 120, "height": 120}},
+                            "detection_score": 0.9,
+                        }
+                    ]
+                },
+            )
+        assert request.url.path == "/v1/collections/all-persons/search"
+        search_bodies.append(request.read())
+        return httpx.Response(200, json={"matches": []})
+
+    adapter._client = _make_client(httpx.MockTransport(respond))
+    kwargs = {} if threshold is None else {"min_similarity": threshold}
+    getattr(adapter, method)(sample_image_bytes, top_k=5, **kwargs)
+    expected = 0.5 if threshold is None else threshold
+    assert len(search_bodies) == 1
+    assert f'name="threshold"\r\n\r\n{expected}\r\n'.encode() in search_bodies[0]
+
+
+@pytest.mark.parametrize("threshold", [0.5, 0.65])
+def test_compare_sends_configured_threshold_without_changing_raw_score(
+    adapter, monkeypatch, sample_image_bytes, threshold
+):
+    from wcm_facerec.config import settings
+
+    monkeypatch.setattr(settings, "insightface_verify_similarity_threshold", threshold)
+    bodies = []
+
+    def respond(request):
+        assert request.url.path == "/v1/compare"
+        bodies.append(request.read())
+        return httpx.Response(200, json={"similarity": 0.4, "matched": False})
+
+    adapter._client = _make_client(httpx.MockTransport(respond))
+    assert adapter.compare(sample_image_bytes, sample_image_bytes) == 0.4
+    assert len(bodies) == 1
+    assert f'name="threshold"\r\n\r\n{threshold}\r\n'.encode() in bodies[0]
+
+
 # ----------------------------------------------------------------------
 # Detection
 # ----------------------------------------------------------------------
@@ -640,14 +692,18 @@ def test_norm_scoring_penalizes_low_norm(adapter, fake_transport, sample_image_b
     assert m["mps_similarity"] == pytest.approx(0.9 / 3.0)
 
 
-def test_adaptive_threshold_per_person(adapter, fake_transport, sample_image_bytes):
+def test_adaptive_threshold_per_person(adapter, fake_transport, sample_image_bytes, monkeypatch):
     """#1: Persons with more enrolled faces get a higher threshold.
 
     Search returns two matches at similarity=0.58 — one Person has
     face_count=10, the other face_count=1. With step=0.005, the 10-face
-    Person needs ≥ 0.605 to pass (FAILS); the 1-face Person needs ≥ 0.555
+    Person needs ≥ 0.6 to pass (FAILS); the 1-face Person needs ≥ 0.555
     (PASSES).
     """
+    from wcm_facerec.config import settings
+
+    # Test an explicit non-default base independently of the app's default.
+    monkeypatch.setattr(settings, "insightface_verify_similarity_threshold", 0.55)
     fake_transport.register(
         "POST",
         "/v1/detect",

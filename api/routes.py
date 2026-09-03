@@ -11,7 +11,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from wcm_facerec import __version__
-from wcm_facerec.config import settings
+from wcm_facerec.config import DEFAULT_DISTANCE_THRESHOLD, settings
 from wcm_facerec.face_engine import get_face_engine
 
 from .face_records import _image_url_to_path, _item_image_urls
@@ -234,7 +234,7 @@ async def search_faces(request: Request):
     img_bytes = None
     name = None
     top_k = 10
-    threshold = 0.4
+    threshold = DEFAULT_DISTANCE_THRESHOLD
     quality_weight: float | None = None
     norm_reference: float | None = None
     adaptive_threshold_step: float | None = None
@@ -247,7 +247,7 @@ async def search_faces(request: Request):
         img_bytes = await file.read()
         name = form.get("name")
         top_k = int(form.get("top_k", 10))
-        threshold = float(form.get("threshold", 0.4))
+        threshold = float(form.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
         quality_weight = _opt_float(form, "quality_weight")
         norm_reference = _opt_float(form, "norm_reference")
         adaptive_threshold_step = _opt_float(form, "adaptive_threshold_step")
@@ -267,7 +267,7 @@ async def search_faces(request: Request):
 
         name = data.get("name")
         top_k = int(data.get("top_k", 10))
-        threshold = float(data.get("threshold", 0.4))
+        threshold = float(data.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
         quality_weight = _opt_float(data, "quality_weight")
         norm_reference = _opt_float(data, "norm_reference")
         adaptive_threshold_step = _opt_float(data, "adaptive_threshold_step")
@@ -354,7 +354,7 @@ async def websocket_search(websocket: WebSocket):
             task_id = str(uuid.uuid4())
             name = payload.get("name")
             top_k = int(payload.get("top_k", 10))
-            threshold = float(payload.get("threshold", 0.4))
+            threshold = float(payload.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
             sample_interval = float(payload.get("sample_interval", 1.0))
 
             await websocket.send_json({"status": "accepted", "taskId": task_id})
@@ -542,7 +542,7 @@ async def analyze_media(request: Request):
 
     sample_interval = float(body.get("sample_interval", 1.0))
     top_k = int(body.get("top_k", 10))
-    threshold = float(body.get("threshold", 0.4))
+    threshold = float(body.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
 
     try:
         return await _process_analyze_media(url, sample_interval, top_k, threshold)
@@ -574,7 +574,7 @@ async def websocket_analyze_media(websocket: WebSocket):
             task_id = str(uuid.uuid4())
             sample_interval = float(payload.get("sample_interval", 1.0))
             top_k = int(payload.get("top_k", 10))
-            threshold = float(payload.get("threshold", 0.4))
+            threshold = float(payload.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
 
             await websocket.send_json({"status": "accepted", "taskId": task_id})
 

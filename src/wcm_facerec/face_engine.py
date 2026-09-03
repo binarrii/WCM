@@ -6,7 +6,7 @@ api/handlers.py, main.py, scripts/*.py) keep compiling:
     - FaceEngine(model_name, distance_metric)  # legacy kwargs ignored
     - engine.detect_faces(img_source) -> list[dict]
     - engine.generate_embedding(img_source) -> np.ndarray
-    - engine.search(img_source, name=None, top_k=10, threshold=0.3) -> list[dict]
+    - engine.search(img_source, name=None, top_k=10, threshold=0.5) -> list[dict]
     - engine.search_multi_face(img_source, ...) -> dict  # new multi-face shape
     - engine.register_from_image(name, img_source, category=None, ...) -> dict
       (flat record-item dict from IFS; no SQL row written)
@@ -32,7 +32,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .config import settings
+from .config import DEFAULT_DISTANCE_THRESHOLD, settings
 from .ifs_adapter import InsightFaceAdapter, crop_query_face
 
 logger = logging.getLogger(__name__)
@@ -166,7 +166,7 @@ class FaceEngine:
         img_source: str | Path | bytes | np.ndarray,
         name: str | None = None,
         top_k: int = 10,
-        threshold: float = 0.3,
+        threshold: float = DEFAULT_DISTANCE_THRESHOLD,
         quality_weight: float | None = None,
         norm_reference: float | None = None,
         adaptive_threshold_step: float | None = None,
@@ -205,7 +205,7 @@ class FaceEngine:
         *,
         name: str | None = None,
         top_k: int = 10,
-        threshold: float = 0.3,
+        threshold: float = DEFAULT_DISTANCE_THRESHOLD,
         min_face_pixels: int = 80,
         max_faces: int = 10,
         quality_weight: float | None = None,
