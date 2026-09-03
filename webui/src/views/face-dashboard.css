@@ -214,7 +214,7 @@
 }
 
 .stat-image-count {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   line-height: 1.5;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
