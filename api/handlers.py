@@ -20,6 +20,8 @@ from .utils import (
     _extract_video_frames_for_ocr,
 )
 
+_ANALYZE_MIN_FACE_PIXELS = 48
+
 
 async def _search_video_frames(
     engine: FaceEngine,
@@ -428,12 +430,23 @@ def _format_timestamp(seconds: float) -> str:
 async def _face_task(engine, frame, top_k, threshold, current_frame_time):
     all_results = []
     try:
-        results = await engine.search(img_source=frame, top_k=top_k, threshold=threshold)
-        for r in results:
-            x, y, w, h = r.get("source_x"), r.get("source_y"), r.get("source_w"), r.get("source_h")
+        # Apply the same minimum during detection so the engine's default
+        # 80px floor does not discard 48–79px query faces before this step.
+        grouped = await engine.search_multi_face(
+            img_source=frame,
+            top_k=top_k,
+            threshold=threshold,
+            min_face_pixels=_ANALYZE_MIN_FACE_PIXELS,
+        )
+        for r in grouped["all_results"]:
+            # source_* describes the enrolled database sample. Only the
+            # query bbox belongs to the uploaded image/frame we are filtering
+            # and cropping; never fall back to the sample's coordinates.
+            bbox = r.get("query_face_bbox") or {}
+            x, y, w, h = (bbox.get(key) for key in ("x", "y", "w", "h"))
 
-            # 过滤掉过小的人脸 (< 64x64)
-            if w is not None and h is not None and (w < 64 or h < 64):
+            # Keep faces whose width and height are both at least 48px.
+            if w is not None and h is not None and min(w, h) < _ANALYZE_MIN_FACE_PIXELS:
                 continue
 
             r["timestamp"] = _format_timestamp(current_frame_time)
@@ -443,8 +456,9 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
                 x1, x2 = max(0, x), min(frame.shape[1], x + w)
                 if y2 > y1 and x2 > x1:
                     crop = frame[y1:y2, x1:x2]
-                    _, buf = cv2.imencode(".jpg", crop)
-                    r["face_image_b64"] = base64.b64encode(buf).decode("utf-8")
+                    ok, buf = cv2.imencode(".jpg", crop)
+                    if ok:
+                        r["face_image_b64"] = base64.b64encode(buf).decode("utf-8")
             all_results.append(r)
         return all_results
     except Exception:
