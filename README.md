@@ -84,6 +84,14 @@ RUN_LIVE=1 uv run pytest -m live tests/test_smoke_live.py -v
   gallery cover, not necessarily the matched sample. `image_urls` contains all
   available, distinct gallery URLs, just as in `/face_records`; it does not mean
   every gallery image met the threshold. WebUI shows one card per person with
-  their highest similarity and the complete gallery, including full-size navigation.
+  the complete gallery, including full-size navigation.
+- Image `/search` also returns `image_similarities`, keyed by gallery URL. These
+  are individual, unweighted comparisons against the result's query face (using
+  the same crop as search), not the person's highest score. WebUI updates the
+  displayed similarity when switching images. An unreadable image or failed
+  comparison gets `null` (shown as “暂无评分”), never another image's score.
+  Gallery scores below the threshold remain visible; person ranking/filtering
+  still uses the original best search score. Video/stream responses do not
+  recompute gallery scores for every frame.
 - For a minimum similarity of 30%, send `threshold=0.7`. `top_k` still limits
   upstream sample candidates, so the deduplicated person count may be smaller.

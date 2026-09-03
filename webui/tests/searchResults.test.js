@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { toSearchRecords } from '../src/services/searchResults.js';
+import { formatImageSimilarity, getImageSimilarity, toSearchRecords } from '../src/services/searchResults.js';
 
 test('one person card with all distinct images and the best score across query faces', () => {
   const hits = [
@@ -41,4 +41,31 @@ test('legacy single images, missing covers and empty results remain supported', 
   assert.equal(records[2].image_url, null);
   assert.deepEqual(records[2].image_urls, []);
   assert.deepEqual(toSearchRecords([], 0.3), []);
+});
+
+test('switching gallery images shows their own scores, including below threshold', () => {
+  const [record] = toSearchRecords([{
+    id: 'p1', similarity: 0.97,
+    image_urls: ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg'],
+    image_similarities: {'/a.jpg': 0.76, '/b.jpg': 0.97, '/c.jpg': 0.22, '/d.jpg': null},
+  }], 0.3);
+  assert.deepEqual(record.image_urls.map(url => formatImageSimilarity(record, url)),
+    ['76%', '97%', '22%', '暂无评分']);
+  assert.equal(formatImageSimilarity(record, '/missing.jpg'), '暂无评分');
+  assert.equal(getImageSimilarity(record, '/a.jpg'), 0.76);
+  assert.equal(record.searchSimilarity, 0.97); // ranking stays unchanged
+});
+
+test('scores belong to the best query context, with no fallback to person score', () => {
+  const [record] = toSearchRecords([
+    {id: 'p1', face_index: 1, similarity: 0.98, image_urls: ['/a.jpg'],
+      image_similarities: {'/a.jpg': 0.6}},
+    {id: 'p1', face_index: 0, similarity: 0.7, image_urls: ['/a.jpg', '/b.jpg'],
+      image_similarities: {'/a.jpg': 0.7, '/b.jpg': 0.5}},
+  ], 0.3);
+  assert.equal(formatImageSimilarity(record, '/a.jpg'), '60%');
+  assert.equal(formatImageSimilarity(record, '/b.jpg'), '暂无评分');
+  assert.equal(formatImageSimilarity({image_similarities: {'/a': 0}}, '/a'), '0%');
+  assert.equal(formatImageSimilarity({image_similarities: {'/a': NaN}}, '/a'), '暂无评分');
+  assert.equal(formatImageSimilarity({searchSimilarity: 0.97}, '/a'), '暂无评分');
 });

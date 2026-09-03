@@ -29,7 +29,7 @@ import {
 } from '@lucide/vue';
 import { faceService } from '../services/faceService';
 import { IMAGE_BASE } from '../services/api';
-import { toSearchRecords } from '../services/searchResults';
+import { formatImageSimilarity, toSearchRecords } from '../services/searchResults';
 
 // State
 const records = ref([]);
@@ -837,8 +837,8 @@ onUnmounted(() => {
                 {{ record.person?.type || '其它' }}
               </span>
               <!-- Similarity Badge -->
-              <span v-if="record.searchSimilarity" class="similarity-badge">
-                最高相似度: {{ (record.searchSimilarity * 100).toFixed(0) }}%
+              <span v-if="record.searchSimilarity != null" class="similarity-badge" title="当前图片与查询人脸的相似度">
+                相似度: {{ formatImageSimilarity(record, getActiveCardImage(record)) }}
               </span>
               <template v-if="getRecordImages(record).length > 1">
                 <button class="image-nav-button image-nav-previous" type="button" title="上一张" @click.stop="changeCardImage(record, -1)">

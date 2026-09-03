@@ -2,6 +2,16 @@ export const getSearchSimilarity = (item) => Number(
   item.similarity ?? (1 - (item.distance ?? 1))
 );
 
+export const getImageSimilarity = (record, imageUrl) => {
+  const value = record.image_similarities?.[imageUrl];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
+export const formatImageSimilarity = (record, imageUrl) => {
+  const value = getImageSimilarity(record, imageUrl);
+  return value === null ? '暂无评分' : `${(value * 100).toFixed(0)}%`;
+};
+
 // The API retains separate query-face contexts. The dashboard displays people,
 // so combine those contexts into one card, scored by the person's best hit.
 export const toSearchRecords = (results, minSimilarity) => {
@@ -22,6 +32,9 @@ export const toSearchRecords = (results, minSimilarity) => {
         name: item.name,
         created_at: item.created_at,
         face_count: item.face_count,
+        // Keep scores from the selected query face, never combine scores
+        // from different faces or apply the person's maximum to all images.
+        image_similarities: item.image_similarities || {},
         person: {
           name: item.name,
           occupation: item.occupation,

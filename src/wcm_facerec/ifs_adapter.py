@@ -615,6 +615,16 @@ def _encode_crop(img: np.ndarray | None, x: int, y: int, w: int, h: int) -> byte
     return buf.getvalue()
 
 
+def crop_query_face(image_bytes: bytes, bbox: dict | None) -> bytes:
+    """Use exactly the same crop/encoding as search for per-image comparisons."""
+    if not bbox:
+        return image_bytes
+    crop = _encode_crop(_decode(image_bytes), *(int(bbox[key]) for key in ("x", "y", "w", "h")))
+    if crop is None:
+        raise ValueError("Unable to crop the query face")
+    return crop
+
+
 # ----------------------------------------------------------------------
 # Match scoring enhancements (#1, #2, #3)
 # ----------------------------------------------------------------------

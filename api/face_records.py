@@ -56,6 +56,18 @@ def _item_image_urls(item: dict) -> list[str]:
     return image_urls
 
 
+def _image_url_to_path(image_url: str) -> Path | None:
+    """Resolve a gallery URL back to a readable file within the image root."""
+    try:
+        relative = Path(image_url).relative_to("/images")
+        root = _IMAGE_ROOT.resolve()
+        target = (root / relative).resolve()
+        target.relative_to(root)
+    except (TypeError, ValueError, OSError):
+        return None
+    return target if target.is_file() else None
+
+
 def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
     """Return the stable aggregate id even for legacy category mirrors."""
     # ``external_id`` is only a cross-collection reference on category

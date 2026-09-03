@@ -18,6 +18,9 @@ class StubEngine:
     async def _run(self, func, *args, **kwargs):
         return func(*args, **kwargs)
 
+    async def compare_gallery(self, image_bytes, paths, query_bbox):
+        return [None] * len(paths)
+
 
 @pytest.fixture
 def client_for(monkeypatch):
@@ -136,6 +139,7 @@ def test_search_returns_canonical_fields_without_internal_paths(
         "distance": 0.05,
         "image_url": "/images/劣迹艺人/face.jpg",
         "image_urls": ["/images/劣迹艺人/face.jpg"],
+        "image_similarities": {"/images/劣迹艺人/face.jpg": None},
         "type": "劣迹艺人",
         "matched_face_id": "face-1",
         "query_face_bbox": {"x": 1, "y": 2, "w": 3, "h": 4},
@@ -161,6 +165,11 @@ def test_search_merges_sample_hits_and_returns_full_gallery(
     }
 
     class SearchEngine(StubEngine):
+        async def compare_gallery(self, image_bytes, paths, query_bbox):
+            assert paths == images
+            assert query_bbox == base["query_face_bbox"]
+            return [0.76, 0.65, 0.97, 0.22]
+
         async def search(self, **kwargs):
             assert kwargs["threshold"] == 0.7  # minimum similarity 30%
             return [
@@ -190,6 +199,12 @@ def test_search_merges_sample_hits_and_returns_full_gallery(
     assert result["face_count"] == 4
     assert result["image_urls"] == [f"/images/face-{index}.jpg" for index in range(4)]
     assert result["image_url"] == result["image_urls"][0]
+    assert result["image_similarities"] == {
+        "/images/face-0.jpg": 0.76,
+        "/images/face-1.jpg": 0.65,
+        "/images/face-2.jpg": 0.97,
+        "/images/face-3.jpg": 0.22,
+    }
     assert "file_path" not in response.text
     assert "image_paths" not in response.text
     assert str(tmp_path) not in response.text
@@ -227,6 +242,20 @@ def test_search_gallery_falls_back_when_cover_is_missing(tmp_path, monkeypatch):
     assert result["image_urls"] == ["/images/other.jpg"]
     assert routes._public_search_result({"image_paths": "not-a-list"})["image_urls"] == []
     assert len(routes._public_search_results([{}, {}])) == 2
+
+
+def test_gallery_url_resolution_never_reads_outside_image_root(tmp_path, monkeypatch):
+    root = tmp_path / "images"
+    root.mkdir()
+    image = root / "face.jpg"
+    image.write_bytes(b"image")
+    secret = tmp_path / "secret.jpg"
+    secret.write_bytes(b"not-public")
+    (root / "link.jpg").symlink_to(secret)
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", root)
+    assert face_records._image_url_to_path("/images/face.jpg") == image
+    for url in ("/images/../secret.jpg", "/images/link.jpg", "/images/missing.jpg", str(secret)):
+        assert face_records._image_url_to_path(url) is None
 
 
 def test_health_checks_insightface_dependency(client_for):

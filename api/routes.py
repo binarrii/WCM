@@ -14,7 +14,7 @@ from wcm_facerec import __version__
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
 
-from .face_records import _item_image_urls
+from .face_records import _image_url_to_path, _item_image_urls
 from .handlers import (
     _process_analyze_media,
     _process_detect_nsfw,
@@ -306,8 +306,17 @@ async def search_faces(request: Request):
             norm_reference=norm_reference,
             adaptive_threshold_step=adaptive_threshold_step,
         )
+        public_results = _public_search_results(results)
+        for result in public_results:
+            urls = result["image_urls"]
+            scores = await engine.compare_gallery(
+                img_bytes,
+                [_image_url_to_path(url) for url in urls],
+                result.get("query_face_bbox"),
+            )
+            result["image_similarities"] = dict(zip(urls, scores, strict=True))
         return {
-            "results": _public_search_results(results),
+            "results": public_results,
             "query_embedding_dim": settings.embedding_dim,
         }
     except Exception as e:

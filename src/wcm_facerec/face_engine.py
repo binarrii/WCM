@@ -26,13 +26,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from .config import settings
-from .ifs_adapter import InsightFaceAdapter
+from .ifs_adapter import InsightFaceAdapter, crop_query_face
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +298,43 @@ class FaceEngine:
         for face in grouped["faces"]:
             face["matches"] = face["matches"][:top_k]
         return grouped
+
+    async def compare_gallery(
+        self,
+        image_bytes: bytes,
+        paths: list[Path | None],
+        query_bbox: dict | None,
+    ) -> list[float | None]:
+        """Compare each displayed original with this result's query face.
+
+        Paths must be resolved within the public image root by the route.
+        These are raw per-image scores, independent of top-k and threshold;
+        they do not replace the search score used for person ranking.
+        One unreadable image or failed comparison must not fail the search.
+        """
+        try:
+            query = crop_query_face(image_bytes, query_bbox)
+        except (ValueError, KeyError, TypeError):
+            return [None] * len(paths)
+        limit = asyncio.Semaphore(4)
+
+        def compare_image(path: Path) -> float | None:
+            if path.stat().st_size > settings.max_file_size_mb * 1024 * 1024:
+                return None
+            value = float(self._adapter.compare(query, path.read_bytes()))
+            return value if math.isfinite(value) else None
+
+        async def score(path: Path | None) -> float | None:
+            if path is None:
+                return None
+            async with limit:
+                try:
+                    return await self._run(compare_image, path)
+                except Exception:
+                    logger.warning("Unable to score a gallery image", exc_info=True)
+                    return None
+
+        return list(await asyncio.gather(*(score(path) for path in paths)))
 
     async def verify_faces(
         self,

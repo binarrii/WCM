@@ -34,6 +34,44 @@ def engine(fake_transport: FakeTransport, monkeypatch):
 # ----------------------------------------------------------------------
 # Coercion of legacy img_source overload
 # ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_gallery_scores_follow_each_image_and_do_not_use_person_maximum(
+    engine, tmp_path, sample_image_bytes, monkeypatch
+):
+    from wcm_facerec.ifs_adapter import _decode, _encode_crop
+
+    paths = [tmp_path / f"{index}.jpg" for index in range(5)]
+    for index, path in enumerate(paths):
+        path.write_bytes(str(index).encode())
+    bbox = {"x": 1, "y": 2, "w": 20, "h": 20}
+    expected_query = _encode_crop(_decode(sample_image_bytes), 1, 2, 20, 20)
+
+    def compare(query, target):
+        assert query == expected_query  # same query-face JPEG as the search
+        if target == b"3":
+            raise RuntimeError("target has no face")
+        return {b"0": 0.76, b"1": 0.97, b"2": 0.22, b"4": float("nan")}[target]
+
+    monkeypatch.setattr(engine._adapter, "compare", compare)
+    result = await engine.compare_gallery(sample_image_bytes, [*paths, None], bbox)
+    assert result == [0.76, 0.97, 0.22, None, None, None]
+
+
+@pytest.mark.asyncio
+async def test_gallery_handles_missing_file_and_invalid_query_crop(
+    engine, tmp_path, sample_image_bytes, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(engine._adapter, "compare", lambda *args: calls.append(args))
+    assert await engine.compare_gallery(sample_image_bytes, [tmp_path / "missing.jpg"], None) == [
+        None
+    ]
+    assert await engine.compare_gallery(
+        sample_image_bytes, [tmp_path / "missing.jpg"], {"x": 0, "y": 0, "w": 0, "h": 0}
+    ) == [None]
+    assert calls == []
+
+
 def test_detect_rejects_url_gr_source():
     """URLs must be downloaded by the route layer; engine refuses them."""
     import asyncio
@@ -592,9 +630,7 @@ def test_delete_removes_category_mirror_before_aggregate(monkeypatch, tmp_path, 
     assert not image_path.exists()
 
 
-def test_delete_resolves_legacy_category_local_id(
-    monkeypatch, tmp_path, sample_image_bytes
-):
+def test_delete_resolves_legacy_category_local_id(monkeypatch, tmp_path, sample_image_bytes):
     import asyncio
 
     image_path = tmp_path / "legacy-face.jpg"
@@ -691,9 +727,7 @@ def test_delete_resolves_legacy_aggregate_external_id(monkeypatch):
     assert engine._adapter.deleted == [(None, aggregate_id)]
 
 
-def test_delete_removes_orphaned_category_mirror(
-    monkeypatch, tmp_path, sample_image_bytes
-):
+def test_delete_removes_orphaned_category_mirror(monkeypatch, tmp_path, sample_image_bytes):
     import asyncio
 
     external_id = "3fd30dbc-5d82-4216-ad2b-eea23801adb5"
