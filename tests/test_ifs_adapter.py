@@ -174,6 +174,7 @@ def test_search_extracts_metadata_fields(adapter, fake_transport, sample_image_b
                             "type": "敏感",
                             "remarks": "备注",
                             "file_path": "/tmp/wcm/时政敏感/x_y.jpg",
+                            "image_paths": ["/tmp/wcm/时政敏感/x_y.jpg", "/tmp/wcm/second.jpg"],
                         },
                     },
                     "matched_face_id": "f_001",
@@ -190,6 +191,7 @@ def test_search_extracts_metadata_fields(adapter, fake_transport, sample_image_b
     assert m["type"] == "敏感"
     assert m["remarks"] == "备注"
     assert m["file_path"] == "/tmp/wcm/时政敏感/x_y.jpg"
+    assert m["image_paths"] == ["/tmp/wcm/时政敏感/x_y.jpg", "/tmp/wcm/second.jpg"]
     # After the IFS-as-source-of-truth refactor, the match id is the
     # IFS Person.id (not the local FaceRecord.external_id).
     assert m["id"] == "ifs-uuid-1"
@@ -339,7 +341,13 @@ def test_search_multi_face_returns_one_block_per_face(adapter, fake_transport, s
         {
             "matches": [
                 {
-                    "person": {"id": "p_match", "name": "Match", "metadata": {}},
+                    "person": {
+                        "id": "p_match",
+                        "name": "Match",
+                        "metadata": json.dumps(
+                            {"image_paths": ["/tmp/wcm/1.jpg", "/tmp/wcm/2.jpg"]}
+                        ),
+                    },
                     "matched_face_id": "f_match",
                     "similarity": 0.9,
                 },
@@ -363,6 +371,7 @@ def test_search_multi_face_returns_one_block_per_face(adapter, fake_transport, s
     for f in result["faces"]:
         assert f["matches"][0]["face_index"] == f["face_index"]
         assert f["matches"][0]["query_face_bbox"] == f["bbox"]
+        assert f["matches"][0]["image_paths"] == ["/tmp/wcm/1.jpg", "/tmp/wcm/2.jpg"]
     # all_results concatenates every face's matches in encounter order
     assert len(result["all_results"]) == 3
     assert all(r["face_index"] in (0, 1, 2) for r in result["all_results"])

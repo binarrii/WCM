@@ -14,7 +14,7 @@ from wcm_facerec import __version__
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
 
-from .face_records import _path_to_image_url
+from .face_records import _item_image_urls
 from .handlers import (
     _process_analyze_media,
     _process_detect_nsfw,
@@ -65,12 +65,14 @@ _SEARCH_RESULT_FIELDS = (
 
 def _public_search_result(match: dict) -> dict:
     """Convert an internal engine match to the stable public API contract."""
+    image_urls = _item_image_urls(match)
     result = {
         "id": match.get("id") or match.get("person_id"),
         "name": match.get("name") or match.get("person_name"),
         "similarity": match.get("effective_similarity", match.get("similarity")),
         "distance": match.get("effective_distance", match.get("distance")),
-        "image_url": _path_to_image_url(match.get("file_path")),
+        "image_url": image_urls[0] if image_urls else None,
+        "image_urls": image_urls,
         "type": match.get("type") or match.get("category"),
     }
     result.update({key: match[key] for key in _SEARCH_RESULT_FIELDS if key in match})
@@ -78,7 +80,32 @@ def _public_search_result(match: dict) -> dict:
 
 
 def _public_search_results(results: list[dict]) -> list[dict]:
-    return [_public_search_result(match) for match in results]
+    """One best match per person/query face, with the complete person gallery.
+
+    IFS can return multiple enrolled samples for the same person. Their
+    metadata contains a person cover, NOT a matched-sample image path.
+    Preserve independent query faces/video frames but collapse sample hits.
+    The score, matched_face_id and source bbox always come from one best hit;
+    the gallery does not imply that every image passed the search threshold.
+    """
+    grouped: dict[tuple, dict] = {}
+    for index, match in enumerate(results):
+        result = _public_search_result(match)
+        key = (
+            result.get("frame_time"),
+            result.get("face_index", 0),
+            result["id"] or ("unknown", index),
+        )
+        previous = grouped.get(key)
+        if previous is None:
+            grouped[key] = result
+            continue
+        image_urls = list(dict.fromkeys(previous["image_urls"] + result["image_urls"]))
+        if (result["similarity"] or 0) > (previous["similarity"] or 0):
+            grouped[key] = result
+        grouped[key]["image_urls"] = image_urls
+        grouped[key]["image_url"] = image_urls[0] if image_urls else None
+    return sorted(grouped.values(), key=lambda item: item["similarity"] or 0, reverse=True)
 
 
 @api_bp.get("/health")

@@ -40,12 +40,8 @@ def _path_to_image_url(file_path: str | None) -> str | None:
     return f"/images/{relative.as_posix()}"
 
 
-def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
-    """Return the stable aggregate id even for legacy category mirrors."""
-    # ``external_id`` is only a cross-collection reference on category
-    # mirrors.  Some legacy aggregate records also carry an external id, but
-    # it is not a valid IFS Person id and therefore cannot be used for CRUD.
-    record_id = aggregate_id or item.get("id")
+def _item_image_urls(item: dict) -> list[str]:
+    """Serialize the person's gallery without leaking internal file paths."""
     paths = [item.get("file_path")]
     image_paths = item.get("image_paths")
     if isinstance(image_paths, list):
@@ -57,6 +53,16 @@ def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
         image_url = _path_to_image_url(path)
         if image_url and image_url not in image_urls:
             image_urls.append(image_url)
+    return image_urls
+
+
+def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
+    """Return the stable aggregate id even for legacy category mirrors."""
+    # ``external_id`` is only a cross-collection reference on category
+    # mirrors.  Some legacy aggregate records also carry an external id, but
+    # it is not a valid IFS Person id and therefore cannot be used for CRUD.
+    record_id = aggregate_id or item.get("id")
+    image_urls = _item_image_urls(item)
     return {
         "id": record_id,
         "name": item.get("name"),

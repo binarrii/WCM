@@ -29,6 +29,7 @@ import {
 } from '@lucide/vue';
 import { faceService } from '../services/faceService';
 import { IMAGE_BASE } from '../services/api';
+import { toSearchRecords } from '../services/searchResults';
 
 // State
 const records = ref([]);
@@ -189,31 +190,9 @@ const showToast = (message, type = 'success') => {
 };
 
 // Filtered records
-const getSearchSimilarity = (item) => Number(
-  item.similarity ?? (1 - (item.distance ?? 1))
-);
-
 const filteredRecords = computed(() => {
   if (isImageSearchActive.value && imageSearchResults.value) {
-    return imageSearchResults.value
-      .filter(item => getSearchSimilarity(item) >= activeImageSearchSimilarityThreshold.value)
-      .map(item => {
-        const similarity = getSearchSimilarity(item);
-        return {
-          id: item.id,
-          name: item.name,
-          image_url: item.image_url,
-          created_at: item.created_at,
-          person: {
-            name: item.name,
-            occupation: item.occupation,
-            type: item.type,
-            remarks: item.remarks
-          },
-          searchDistance: item.distance,
-          searchSimilarity: similarity.toFixed(2)
-        };
-      });
+    return toSearchRecords(imageSearchResults.value, activeImageSearchSimilarityThreshold.value);
   }
   return records.value;
 });
@@ -515,10 +494,8 @@ const executeImageSearch = async () => {
     imageSearchResults.value = data.results || [];
     activeImageSearchSimilarityThreshold.value = imageSearchSimilarityThreshold.value;
     isImageSearchActive.value = true;
-    const matchCount = imageSearchResults.value.filter(
-      item => getSearchSimilarity(item) >= activeImageSearchSimilarityThreshold.value
-    ).length;
-    showToast(`检索成功，共找到 ${matchCount} 个相似人脸`);
+    const matchCount = filteredRecords.value.length;
+    showToast(`检索成功，共找到 ${matchCount} 位相似人员`);
     closeImageSearchModal();
   } catch (error) {
     const errorMsg = error.response?.data?.detail || '人脸检索失败';
@@ -861,7 +838,7 @@ onUnmounted(() => {
               </span>
               <!-- Similarity Badge -->
               <span v-if="record.searchSimilarity" class="similarity-badge">
-                相似度: {{ (record.searchSimilarity * 100).toFixed(0) }}%
+                最高相似度: {{ (record.searchSimilarity * 100).toFixed(0) }}%
               </span>
               <template v-if="getRecordImages(record).length > 1">
                 <button class="image-nav-button image-nav-previous" type="button" title="上一张" @click.stop="changeCardImage(record, -1)">

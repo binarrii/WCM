@@ -135,10 +135,98 @@ def test_search_returns_canonical_fields_without_internal_paths(
         "similarity": 0.95,
         "distance": 0.05,
         "image_url": "/images/劣迹艺人/face.jpg",
+        "image_urls": ["/images/劣迹艺人/face.jpg"],
         "type": "劣迹艺人",
         "matched_face_id": "face-1",
         "query_face_bbox": {"x": 1, "y": 2, "w": 3, "h": 4},
     }
+
+
+def test_search_merges_sample_hits_and_returns_full_gallery(
+    tmp_path, monkeypatch, client_for, sample_image_bytes
+):
+    images = [tmp_path / f"face-{index}.jpg" for index in range(4)]
+    for image in images:
+        image.write_bytes(b"image")
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+    base = {
+        "id": "p1",
+        "name": "测试",
+        "file_path": str(images[0]),
+        "image_paths": [str(image) for image in images]
+        + [str(images[0]), str(tmp_path / "missing.jpg"), None, "../secret.jpg"],
+        "face_count": 4,
+        "face_index": 0,
+        "query_face_bbox": {"x": 1, "y": 2, "w": 3, "h": 4},
+    }
+
+    class SearchEngine(StubEngine):
+        async def search(self, **kwargs):
+            assert kwargs["threshold"] == 0.7  # minimum similarity 30%
+            return [
+                {**base, "similarity": 0.7, "distance": 0.3, "matched_face_id": "f1"},
+                {
+                    **base,
+                    "similarity": 0.9,
+                    "distance": 0.1,
+                    "matched_face_id": "f2",
+                    "source_x": 42,
+                },
+            ]
+
+    response = client_for(SearchEngine()).post(
+        "/api/v1/search",
+        files={"file": ("query.jpg", sample_image_bytes, "image/jpeg")},
+        data={"threshold": "0.7"},
+    )
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+    result = results[0]
+    assert result["matched_face_id"] == "f2"
+    assert result["source_x"] == 42
+    assert result["similarity"] == 0.9
+    assert result["distance"] == 0.1
+    assert result["face_count"] == 4
+    assert result["image_urls"] == [f"/images/face-{index}.jpg" for index in range(4)]
+    assert result["image_url"] == result["image_urls"][0]
+    assert "file_path" not in response.text
+    assert "image_paths" not in response.text
+    assert str(tmp_path) not in response.text
+
+
+def test_search_deduplication_keeps_query_faces_frames_and_distinct_ids():
+    base = {"id": "p1", "name": "same name", "face_index": 0, "similarity": 0.8}
+    matches = [
+        base,
+        {**base, "similarity": 0.99, "effective_similarity": 0.5},
+        {**base, "face_index": 1},
+        {**base, "frame_time": 1.0},
+        {**base, "id": "p2", "similarity": 0.9},
+    ]
+    results = routes._public_search_results(matches)
+    assert len(results) == 4
+    assert results[0]["id"] == "p2"
+    assert [result["similarity"] for result in results] == [0.9, 0.8, 0.8, 0.8]
+    assert {(r["id"], r["face_index"], r.get("frame_time")) for r in results} == {
+        ("p1", 0, None),
+        ("p1", 1, None),
+        ("p1", 0, 1.0),
+        ("p2", 0, None),
+    }
+
+
+def test_search_gallery_falls_back_when_cover_is_missing(tmp_path, monkeypatch):
+    image = tmp_path / "other.jpg"
+    image.write_bytes(b"image")
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+    result = routes._public_search_result(
+        {"file_path": str(tmp_path / "missing.jpg"), "image_paths": [str(image)]}
+    )
+    assert result["image_url"] == "/images/other.jpg"
+    assert result["image_urls"] == ["/images/other.jpg"]
+    assert routes._public_search_result({"image_paths": "not-a-list"})["image_urls"] == []
+    assert len(routes._public_search_results([{}, {}])) == 2
 
 
 def test_health_checks_insightface_dependency(client_for):

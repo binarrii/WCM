@@ -78,3 +78,12 @@ RUN_LIVE=1 uv run pytest -m live tests/test_smoke_live.py -v
   collection.
 - Search accepts legacy distance thresholds (lower is better); the adapter
   converts InsightFace similarity to `distance = 1 - similarity`.
+- Search collapses multiple enrolled-sample hits for the same person and query
+  face (and video frame) into the highest-scoring hit. `matched_face_id`, the
+  score and source bounding box describe that hit. `image_url` is the person's
+  gallery cover, not necessarily the matched sample. `image_urls` contains all
+  available, distinct gallery URLs, just as in `/face_records`; it does not mean
+  every gallery image met the threshold. WebUI shows one card per person with
+  their highest similarity and the complete gallery, including full-size navigation.
+- For a minimum similarity of 30%, send `threshold=0.7`. `top_k` still limits
+  upstream sample candidates, so the deduplicated person count may be smaller.

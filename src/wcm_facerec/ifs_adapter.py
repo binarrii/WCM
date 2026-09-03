@@ -162,7 +162,7 @@ class InsightFaceAdapter:
             id, name, distance, person_id, created_at,
             source_x, source_y, source_w, source_h,
             person_name, occupation, category, type, remarks,
-            file_path, similarity, matched_face_id
+            file_path, image_paths, similarity, matched_face_id
 
         ``distance`` is computed as ``1 - similarity`` so legacy sort/filters
         keep working unchanged.
@@ -196,6 +196,7 @@ class InsightFaceAdapter:
                     "matched_face_id": m.get("matched_face_id"),
                     "created_at": person.get("created_at"),
                     "file_path": metadata.get("file_path"),
+                    "image_paths": metadata.get("image_paths"),
                     "category": metadata.get("category"),
                     "occupation": metadata.get("occupation"),
                     "type": metadata.get("type"),
@@ -382,6 +383,7 @@ class InsightFaceAdapter:
                     "matched_face_id": m.get("matched_face_id"),
                     "created_at": person.get("created_at"),
                     "file_path": metadata.get("file_path"),
+                    "image_paths": metadata.get("image_paths"),
                     "category": metadata.get("category"),
                     "occupation": metadata.get("occupation"),
                     "type": metadata.get("type"),
