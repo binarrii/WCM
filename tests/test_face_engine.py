@@ -219,7 +219,7 @@ def test_search_passes_similarity_threshold_to_sdk(engine, fake_transport, sampl
 # ----------------------------------------------------------------------
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["search", "search_multi_face"])
-@pytest.mark.parametrize("threshold", [None, 0.3, 0.0])
+@pytest.mark.parametrize("threshold", [None, 0.3, 0.9, 0.0])
 async def test_engine_default_distance_and_conversion(engine, monkeypatch, method, threshold):
     received = []
 

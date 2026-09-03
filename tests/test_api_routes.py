@@ -32,7 +32,7 @@ def client_for(monkeypatch):
     return factory
 
 
-@pytest.mark.parametrize("threshold", [None, 0.7, 0.0])
+@pytest.mark.parametrize("threshold", [None, 0.7, 0.9, 0.0])
 @pytest.mark.parametrize(
     "mode",
     ["upload", "image", "video", "ws_image", "ws_video", "analyze", "ws_analyze"],

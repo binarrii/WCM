@@ -43,6 +43,15 @@ test('legacy single images, missing covers and empty results remain supported', 
   assert.deepEqual(toSearchRecords([], 0.3), []);
 });
 
+test('10% minimum keeps low-similarity results at or above the selected threshold', () => {
+  const records = toSearchRecords([
+    { id: 'below', similarity: 0.0999 },
+    { id: 'boundary', similarity: 0.1 },
+    { id: 'above', similarity: 0.2 },
+  ], 0.1);
+  assert.deepEqual(records.map(record => record.id), ['above', 'boundary']);
+});
+
 test('switching gallery images shows their own scores, including below threshold', () => {
   const [record] = toSearchRecords([{
     id: 'p1', similarity: 0.97,

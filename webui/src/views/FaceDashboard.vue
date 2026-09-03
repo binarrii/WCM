@@ -81,7 +81,7 @@ const imageSearching = ref(false);
 const isImageSearchActive = ref(false);
 const imageSearchResults = ref([]);
 const DEFAULT_IMAGE_SEARCH_SIMILARITY = 0.5;
-const IMAGE_SEARCH_SIMILARITY_TICKS = [30, 40, 50, 60, 70, 80, 90, 100];
+const IMAGE_SEARCH_SIMILARITY_TICKS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 const imageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
 const activeImageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
 
@@ -1082,7 +1082,7 @@ onUnmounted(() => {
             <div
               class="similarity-threshold-control"
               :style="{
-                '--threshold-progress': `${((imageSearchSimilarityThreshold - 0.3) / 0.7) * 100}%`
+                '--threshold-progress': `${((imageSearchSimilarityThreshold - 0.1) / 0.9) * 100}%`
               }"
             >
               <div class="similarity-threshold-track" aria-hidden="true">
@@ -1090,7 +1090,7 @@ onUnmounted(() => {
                   v-for="tick in IMAGE_SEARCH_SIMILARITY_TICKS"
                   :key="tick"
                   :class="['similarity-threshold-tick', { active: tick <= imageSearchSimilarityThreshold * 100 }]"
-                  :style="{ left: `${((tick - 30) / 70) * 100}%` }"
+                  :style="{ left: `${((tick - 10) / 90) * 100}%` }"
                 ></span>
               </div>
               <input
@@ -1098,7 +1098,7 @@ onUnmounted(() => {
                 v-model.number="imageSearchSimilarityThreshold"
                 class="similarity-threshold-range"
                 type="range"
-                min="0.3"
+                min="0.1"
                 max="1"
                 step="0.01"
               />
