@@ -56,30 +56,52 @@ def format_timestamp(milliseconds: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
 
 
+def timestamp_range_ms(value: object) -> tuple[int, int]:
+    """Accept legacy points and start~end intervals emitted by analyze_media."""
+    if isinstance(value, str) and "~" in value:
+        parts = value.split("~")
+        if len(parts) != 2:
+            raise ValueError(f"无效时间区间：{value!r}")
+        start, end = (timestamp_ms(part) for part in parts)
+        if end < start:
+            raise ValueError(f"区间结束时间早于开始时间：{value!r}")
+        return start, end
+    point = timestamp_ms(value)
+    return point, point
+
+
 def normalize_results(payload: object, duration_ms: int) -> list[dict]:
-    """Sort markers and group identical timestamps, deduplicating exact findings."""
+    """Group only identical spans; never infer intervals from legacy point results."""
     if isinstance(payload, dict) and payload.get("status") not in ("error", "failed"):
         payload = payload.get("results")
     if not isinstance(payload, list):
         raise ValueError("审核结果必须是数组，或包含 results 数组的对象；不能把错误响应当成无标记")
-    grouped: dict[int, list[dict]] = {}
+    grouped: dict[tuple[int, int, str, str], list[dict]] = {}
     for index, item in enumerate(payload):
         if not isinstance(item, dict) or "timestamp" not in item:
             raise ValueError(f"第 {index + 1} 条结果缺少 timestamp")
-        start = timestamp_ms(item["timestamp"])
-        if start >= duration_ms:
+        start, end = timestamp_range_ms(item["timestamp"])
+        if start >= duration_ms or end > duration_ms:
             raise ValueError(f"第 {index + 1} 条时间戳超出视频时长：{item['timestamp']}")
         category = item.get("category") or "未分类"
         description = item.get("description") or ""
         if not isinstance(category, str) or not isinstance(description, str):
             raise ValueError(f"第 {index + 1} 条 category/description 必须是文本")
         finding = {"category": category, "description": description}
-        findings = grouped.setdefault(start, [])
+        # Different people keep distinct interval entries, even with identical bounds.
+        key = (start, end, category if end > start else "", description if end > start else "")
+        findings = grouped.setdefault(key, [])
         if finding not in findings:
             findings.append(finding)
     return [
-        {"timestamp": format_timestamp(start), "time_ms": start, "findings": findings}
-        for start, findings in sorted(grouped.items())
+        {
+            "timestamp": format_timestamp(start)
+            + (f"~{format_timestamp(end)}" if end > start else ""),
+            "time_ms": start,
+            "end_time_ms": end,
+            "findings": findings,
+        }
+        for (start, end, _, _), findings in sorted(grouped.items())
     ]
 
 
@@ -95,7 +117,15 @@ def chapter_title(marker: dict) -> str:
 
 
 def make_chapters(markers: list[dict], duration_ms: int) -> list[dict]:
-    chapters = [{"start_ms": m["time_ms"], "title": chapter_title(m)} for m in markers]
+    # A point and several intervals may share a start. MP4 needs one chapter
+    # per start, but the HTML/JSON retain their separate spans and full details.
+    titles_by_start: dict[int, list[str]] = {}
+    for marker in markers:
+        titles_by_start.setdefault(marker["time_ms"], []).append(chapter_title(marker))
+    chapters = [
+        {"start_ms": start, "title": " | ".join(titles)[:240]}
+        for start, titles in sorted(titles_by_start.items())
+    ]
     if not chapters or chapters[0]["start_ms"] > 0:
         chapters.insert(0, {"start_ms": 0, "title": "开始（此处无审核标记）"})
     for index, chapter in enumerate(chapters):
@@ -320,14 +350,14 @@ def execute(args: argparse.Namespace) -> Path:
                 {
                     "duration_ms": duration_ms,
                     "markers": markers,
-                    "note": "时间点是接口命中位置，不代表违规区间；无标记不代表内容安全。",
+                    "note": "人物区间表示连续采样命中，其余结果为单点；均需人工复核，无标记不代表内容安全。",
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
             encoding="utf-8",
         )
-        print(f"共 {len(markers)} 个时间点，正在无重编码写入章节…", flush=True)
+        print(f"共 {len(markers)} 条标记（单点/区间），正在无重编码写入章节…", flush=True)
         video = output / "marked.mp4"
         embed_chapters(source, video, metadata, ffmpeg)
         verify_chapters(video, chapters, ffprobe)

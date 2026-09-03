@@ -530,7 +530,11 @@ async def websocket_detect_nsfw(websocket: WebSocket):
 
 @api_bp.post("/analyze_media")
 async def analyze_media(request: Request):
-    """Analyze a single media file for faces, sensitive text, and NSFW content."""
+    """Analyze media for faces, sensitive text, and NSFW content.
+
+    Consecutive video face hits with the same category/name use a timestamp
+    range (HH:MM:SS.mmm~HH:MM:SS.mmm). Other findings remain individual points.
+    """
     try:
         body = await request.json()
     except Exception:

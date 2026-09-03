@@ -15,8 +15,9 @@ video{display:block;width:100%;max-height:65vh;background:#000;border-radius:10p
 button,select,input{font:inherit;color:inherit;background:#25334a;border:1px solid #526782;border-radius:7px;padding:8px 12px}
 button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outline:2px solid #8db8ff}button:disabled{opacity:.4;cursor:default}
 .seek{width:100%;padding:0;accent-color:#8db8ff}
-.timeline{position:relative;height:30px;margin:12px 8px;background:linear-gradient(transparent 13px,#48576c 13px,#48576c 17px,transparent 17px)}
-.marker{position:absolute;top:5px;width:12px;height:20px;padding:0;transform:translateX(-50%);background:#ffbd66;border:0;border-radius:4px}
+.timeline{position:relative;min-height:36px;margin:12px 0;background:repeating-linear-gradient(transparent 0 16px,#48576c 16px 18px,transparent 18px 24px)}
+.marker{position:absolute;top:8px;width:12px;height:18px;padding:0;background:#ffbd66;border:0;border-radius:4px}
+.marker.range{background:#a9a0ff}
 .marker.active{background:#fff;outline:2px solid #ffbd66}.marker:hover{background:#fff}
 .scale{display:flex;justify-content:space-between;color:#aebcd0;font-size:12px}.hint{font-size:12px;margin-bottom:0}
 .badge{display:inline-block;color:#ffcc8a;background:#593f20;padding:4px 9px;border-radius:20px;font-size:12px}
@@ -29,7 +30,7 @@ button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outli
 </head>
 <body>
 <header><span class="badge">WCM · 人工复核</span><h1>__TITLE__</h1>
-<p>按接口时间戳定位待复核画面。点击时间轴标记或右侧条目跳转；标记不是违规结论，也不表示违规持续时间。</p></header>
+<p>按接口时间戳定位待复核画面。人物区间表示连续采样命中，其他结果保留单点；点击标记或条目跳到起点。标记不是违规结论，区间边界受采样精度限制。</p></header>
 <main>
 <section class="panel" aria-label="视频与时间轴">
 <video id="video" controls preload="metadata" src="marked.mp4"></video>
@@ -38,6 +39,7 @@ button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outli
 <label for="seek">视频进度</label><input class="seek" id="seek" type="range" min="0" max="1" step="0.001" value="0">
 <div id="timeline" class="timeline" aria-label="审核标记"></div>
 <div class="scale"><span>00:00</span><span id="duration"></span></div>
+<p class="hint">紫色条：人物合并区间；橙色点：单次命中。重叠标记分行显示。</p>
 <p class="hint">章节副本：marked.mp4。原始结果：analysis.json。播放器章节功能的显示方式可能不同，此页提供独立可点击时间轴。</p>
 </section>
 <aside class="panel"><h2 id="summary">审核标记</h2><div class="toolbar"><label for="category">类别</label><select id="category"><option value="">全部类别</option></select></div><div id="events"></div></aside>
@@ -56,26 +58,37 @@ let visible=data.markers;
 const categories=[...new Set(data.markers.flatMap(m=>m.findings.map(f=>f.category)))];
 categories.forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;category.append(option);});
 function jump(index){if(index<0||index>=visible.length)return;video.currentTime=visible[index].time_ms/1000;update();}
+function layoutMarkers(){
+  const width=Math.max(timeline.clientWidth,12),lanes=[];
+  timeline.querySelectorAll('button').forEach((tick,index)=>{
+    const m=visible[index],end=m.end_time_ms??m.time_ms;
+    const left=Math.min(width-12,m.time_ms/data.duration_ms*width);
+    const size=Math.min(width-left,Math.max(12,(end-m.time_ms)/data.duration_ms*width));
+    let lane=lanes.findIndex(right=>right+4<=left);if(lane<0)lane=lanes.length;
+    lanes[lane]=left+size;tick.style.left=`${left}px`;tick.style.width=`${size}px`;tick.style.top=`${8+lane*24}px`;
+  });
+  timeline.style.height=`${Math.max(1,lanes.length)*24+12}px`;
+}
 function render(){
   timeline.replaceChildren();events.replaceChildren();
   visible=data.markers.filter(m=>!category.value||m.findings.some(f=>f.category===category.value));
-  document.getElementById('summary').textContent=`${visible.length} 个时间点 · 共 ${data.markers.length} 个`;
+  document.getElementById('summary').textContent=`${visible.length} 条标记 · 共 ${data.markers.length} 条`;
   visible.forEach((m,index)=>{
     const details=m.findings.map(f=>`${f.category}：${f.description}`).join('\n');
-    const tick=document.createElement('button');tick.className='marker';tick.style.left=`${m.time_ms/data.duration_ms*100}%`;
+    const tick=document.createElement('button');tick.className='marker';tick.classList.toggle('range',(m.end_time_ms??m.time_ms)>m.time_ms);
     tick.title=m.timestamp+'\n'+details;tick.setAttribute('aria-label','跳转 '+m.timestamp);tick.onclick=()=>jump(index);timeline.append(tick);
     const row=document.createElement('button');row.className='event';row.onclick=()=>jump(index);
     const time=document.createElement('strong');time.textContent=m.timestamp;
     const text=document.createElement('span');text.textContent=details;row.append(time,text);events.append(row);
   });
   if(!visible.length){const empty=document.createElement('p');empty.textContent='没有审核标记。无标记不代表内容安全。';events.append(empty);}
-  update();
+  layoutMarkers();update();
 }
 function update(){
   const current=video.currentTime||0;seek.value=current;document.getElementById('clock').textContent=stamp(current);
-  const currentIndex=visible.findIndex(m=>Math.abs(m.time_ms/1000-current)<0.1);
-  timeline.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('active',i===currentIndex));
-  events.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('active',i===currentIndex));
+  const active=m=>{const start=m.time_ms/1000,end=(m.end_time_ms??m.time_ms)/1000;return end>start?current>=start-0.05&&current<=end+0.05:Math.abs(start-current)<0.1;};
+  timeline.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('active',active(visible[i])));
+  events.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('active',active(visible[i])));
   prev.disabled=!visible.some(m=>m.time_ms/1000<current-0.05);
   next.disabled=!visible.some(m=>m.time_ms/1000>current+0.05);
 }
@@ -84,6 +97,7 @@ next.onclick=()=>jump(visible.findIndex(m=>m.time_ms/1000>video.currentTime+0.05
 seek.oninput=()=>{video.currentTime=Number(seek.value);update();};category.onchange=render;
 video.addEventListener('timeupdate',update);
 video.addEventListener('loadedmetadata',()=>{message.textContent='';update();});
+window.addEventListener('resize',layoutMarkers);
 video.addEventListener('error',()=>{message.textContent='无法播放视频：请确保 marked.mp4 和本页在同一目录；若浏览器不支持原视频编码，请用支持章节的播放器打开 marked.mp4。';});
 render();
 </script>

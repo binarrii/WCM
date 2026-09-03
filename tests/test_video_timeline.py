@@ -57,6 +57,54 @@ def test_grouping_sorting_and_deduplication():
     ]
 
 
+def test_ranges_keep_distinct_endpoints_and_other_points_unmerged():
+    items = [
+        {"timestamp": "00:00:06.000~00:00:07.000", "category": "person", "description": "甲"},
+        {"timestamp": "00:00:06.000~00:00:08.000", "category": "person", "description": "乙"},
+        {"timestamp": 6, "category": "visual", "description": "review"},
+        {"timestamp": 7, "category": "visual", "description": "review"},
+    ]
+    markers = timeline.normalize_results(items, 10000)
+    assert [(m["time_ms"], m["end_time_ms"]) for m in markers] == [
+        (6000, 6000),
+        (6000, 7000),
+        (6000, 8000),
+        (7000, 7000),
+    ]
+    assert markers[1]["timestamp"] == "00:00:06.000~00:00:07.000"
+    chapters = timeline.make_chapters(markers, 10000)
+    assert [(c["start_ms"], c["end_ms"]) for c in chapters] == [
+        (0, 6000),
+        (6000, 7000),
+        (7000, 10000),
+    ]
+    assert "~00:00:07.000" in chapters[1]["title"]
+    assert "~00:00:08.000" in chapters[1]["title"]
+    assert "甲" in chapters[1]["title"] and "乙" in chapters[1]["title"]
+
+
+@pytest.mark.parametrize("value", ["2~1", "~1", "1~", "1~2~3", "-1~2", "1~nan", "1~11"])
+def test_invalid_ranges_fail_instead_of_silently_changing_markers(value):
+    with pytest.raises(ValueError):
+        timeline.normalize_results([{"timestamp": value}], 10000)
+
+
+def test_range_can_end_at_duration_and_zero_length_is_a_point():
+    markers = timeline.normalize_results([{"timestamp": "0~0"}, {"timestamp": "1~10"}], 10000)
+    assert markers[0]["timestamp"] == "00:00:00.000"
+    assert markers[1]["end_time_ms"] == 10000
+
+
+def test_same_interval_for_different_people_stays_separate():
+    first = {"timestamp": "6~7", "category": "person", "description": "甲"}
+    markers = timeline.normalize_results(
+        [first, first.copy(), {**first, "description": "乙"}], 10000
+    )
+    assert len(markers) == 2
+    assert {m["findings"][0]["description"] for m in markers} == {"甲", "乙"}
+    assert len(timeline.make_chapters(markers, 10000)) == 2  # Intro + one chapter start.
+
+
 @pytest.mark.parametrize(
     "payload", [{"detail": "error"}, {"status": "error", "results": []}, [{}], ["bad"]]
 )
@@ -178,7 +226,7 @@ def test_complete_export_and_stream_copy(sample_video, tmp_path):
         json.dumps(
             [
                 {
-                    "timestamp": "00:00:01.000",
+                    "timestamp": "00:00:01.000~00:00:02.000",
                     "category": "复核",
                     "description": "引号 ; # = \\ \n换行",
                 },

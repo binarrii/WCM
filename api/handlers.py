@@ -465,11 +465,40 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
         return []
 
 
+def _merge_person_timelines(frame_results: list, sample_interval: float) -> list[dict]:
+    """Merge only face-task hits from consecutive sampled frames by category/name."""
+    results = []
+    previous = {}
+    # Millisecond rounding must not split otherwise adjacent samples.
+    max_gap = max(sample_interval, 0.0) + 0.001
+    for face_res, _, _, _, ts in sorted(frame_results, key=lambda frame: frame[4]):
+        current = {}
+        formatted_ts = _format_timestamp(ts)
+        for face in face_res:
+            key = (face.get("category") or "敏感人物", face.get("name", "敏感人物"))
+            if key in current:
+                continue  # Multiple matching samples for one person in the same frame.
+            prior = previous.get(key)
+            if prior is not None and 0 <= ts - prior[1] <= max_gap:
+                start, _, row = prior
+                if formatted_ts != start:
+                    row["timestamp"] = f"{start}~{formatted_ts}"
+            else:
+                start = formatted_ts
+                row = {"timestamp": start, "category": key[0], "description": key[1]}
+                results.append(row)
+            current[key] = (start, ts, row)
+        # A sampled frame without this person terminates their current interval.
+        previous = current
+    return results
+
+
 async def _process_analyze_media(
     url: str, sample_interval: float, top_k: int, threshold: float
 ) -> list:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     engine = get_face_engine()
+    merge_interval = sample_interval
 
     async def _process_single_frame(frame, b64_img, current_frame_time):
         async def face_task():
@@ -530,6 +559,8 @@ async def _process_analyze_media(
             if fps <= 0:
                 fps = 25.0  # noqa: E701
 
+            frame_stride = int(max(fps * sample_interval, 1))
+            merge_interval = frame_stride / fps
             queue = asyncio.Queue(maxsize=16)
 
             async def producer():
@@ -538,7 +569,7 @@ async def _process_analyze_media(
                     ret, frame = cap.read()
                     if not ret:
                         break
-                    if frame_idx % int(max(fps * sample_interval, 1)) == 0:
+                    if frame_idx % frame_stride == 0:
                         msec = cap.get(cv2.CAP_PROP_POS_MSEC)
                         current_frame_time = msec / 1000.0 if msec >= 0 else frame_idx / fps
                         # Downsample frame for VLM to reduce payload size and processing time
@@ -605,34 +636,10 @@ async def _process_analyze_media(
         res = await _process_single_frame(frame, b64_img, 0.0)
         frame_results = [res]
 
-    flattened_results = []
-
-    # 验证人脸结果
-    all_face_results = []
-    for face_res, _, _, _, _ in frame_results:
-        all_face_results.extend(face_res)
-    verified_faces = all_face_results
-
-    # Group verified faces by frame time
-    faces_by_time = {}
-    for vf in verified_faces:
-        t = vf.get("frame_time", 0.0) or vf.get("timestamp", 0.0)
-        if t not in faces_by_time:
-            faces_by_time[t] = []
-        faces_by_time[t].append(vf)
+    flattened_results = _merge_person_timelines(frame_results, merge_interval)
 
     for _, nsfw_res, ocr_res, flags_res, ts in frame_results:
         formatted_ts = _format_timestamp(ts)
-
-        face_list = faces_by_time.get(ts, []) or faces_by_time.get(formatted_ts, [])
-        for fr in face_list:
-            flattened_results.append(
-                {
-                    "timestamp": formatted_ts,
-                    "category": fr.get("category", None) or "敏感人物",
-                    "description": fr.get("name", "敏感人物"),
-                }
-            )
 
         if nsfw_res:
             flattened_results.append(
@@ -662,7 +669,7 @@ async def _process_analyze_media(
             )
 
     # Sort by timestamp
-    flattened_results.sort(key=lambda x: x["timestamp"])
+    flattened_results.sort(key=lambda x: x["timestamp"].split("~", 1)[0])
 
     return flattened_results
 
