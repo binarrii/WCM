@@ -200,9 +200,18 @@ async def list_face_records(
 
 @face_records_bp.get("/face_records/stats")
 async def get_face_records_stats():
-    """Return aggregate total plus authoritative category counts."""
+    """Return people and registered-image counts for aggregate/category libraries."""
     engine = get_face_engine()
-    counts = {"total": 0, "bad_artists": 0, "political": 0, "officials": 0}
+    counts = {
+        "total": 0,
+        "bad_artists": 0,
+        "political": 0,
+        "officials": 0,
+        "total_images": 0,
+        "bad_artists_images": 0,
+        "political_images": 0,
+        "officials_images": 0,
+    }
     buckets = [
         ("劣迹艺人", "bad_artists"),
         ("时政敏感", "political"),
@@ -214,11 +223,13 @@ async def get_face_records_stats():
             settings.insightface_collection_id,
         )
         counts["total"] = total["person_count"]
+        counts["total_images"] = total["face_count"]
         for category, output_key in buckets:
             collection_id = settings.insightface_category_collections.get(category)
             if collection_id:
                 stats = await engine._run(engine._adapter.collection_stats, collection_id)
                 counts[output_key] = stats["person_count"]
+                counts[f"{output_key}_images"] = stats["face_count"]
         return counts
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

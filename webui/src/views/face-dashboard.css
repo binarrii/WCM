@@ -213,6 +213,13 @@
   color: var(--text-muted);
 }
 
+.stat-image-count {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Controls styling */
 .controls-panel {
   position: sticky;

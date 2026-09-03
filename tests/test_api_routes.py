@@ -275,6 +275,54 @@ def test_health_returns_503_when_insightface_is_down(client_for):
     assert response.json()["detail"]["status"] == "unhealthy"
 
 
+def test_stats_exposes_people_and_images_without_double_counting_mirrors(monkeypatch, client_for):
+    monkeypatch.setattr(face_records.settings, "insightface_collection_id", "aggregate")
+    monkeypatch.setattr(
+        face_records.settings,
+        "insightface_category_collections",
+        {
+            "劣迹艺人": "artists",
+            "时政敏感": "political",
+            "落马官员": "officials",
+        },
+    )
+    libraries = {
+        "aggregate": {"person_count": 12, "face_count": 32},
+        "artists": {"person_count": 2, "face_count": 7},
+        "political": {"person_count": 3, "face_count": 8},
+        "officials": {"person_count": 4, "face_count": 9},
+    }
+    calls = []
+
+    def collection_stats(collection_id):
+        calls.append(collection_id)
+        return libraries[collection_id]
+
+    client = client_for(StubEngine(SimpleNamespace(collection_stats=collection_stats)))
+    response = client.get("/api/v1/face_records/stats")
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 12,
+        "bad_artists": 2,
+        "political": 3,
+        "officials": 4,
+        "total_images": 32,
+        "bad_artists_images": 7,
+        "political_images": 8,
+        "officials_images": 9,
+    }
+    assert calls == ["aggregate", "artists", "political", "officials"]
+
+
+def test_stats_empty_library_and_unconfigured_categories_are_zero(monkeypatch, client_for):
+    monkeypatch.setattr(face_records.settings, "insightface_category_collections", {})
+    adapter = SimpleNamespace(collection_stats=lambda _: {"person_count": 0, "face_count": 0})
+    response = client_for(StubEngine(adapter)).get("/api/v1/face_records/stats")
+    assert response.status_code == 200
+    assert len(response.json()) == 8
+    assert set(response.json().values()) == {0}
+
+
 def test_face_records_cursor_fetches_next_server_page(client_for):
     calls = []
 

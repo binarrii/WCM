@@ -49,7 +49,11 @@ const stats = ref({
   total: 0,
   badArtists: 0,
   political: 0,
-  officials: 0
+  officials: 0,
+  totalImages: null,
+  badArtistsImages: null,
+  politicalImages: null,
+  officialsImages: null
 });
 
 // Modal state
@@ -173,7 +177,11 @@ const fetchStats = async () => {
       total: data.total,
       badArtists: data.bad_artists,
       political: data.political,
-      officials: data.officials
+      officials: data.officials,
+      totalImages: data.total_images ?? null,
+      badArtistsImages: data.bad_artists_images ?? null,
+      politicalImages: data.political_images ?? null,
+      officialsImages: data.officials_images ?? null
     };
   } catch (error) {
     console.error('获取统计数据失败', error);
@@ -705,6 +713,7 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">库总容量</h3>
             <p class="stat-value">{{ stats.total }} <span class="unit">人</span></p>
+            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.totalImages ?? '—' }} 张</p>
           </div>
         </div>
 
@@ -715,6 +724,7 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">劣迹艺人</h3>
             <p class="stat-value">{{ stats.badArtists }} <span class="unit">人</span></p>
+            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.badArtistsImages ?? '—' }} 张</p>
           </div>
         </div>
 
@@ -725,6 +735,7 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">时政敏感</h3>
             <p class="stat-value">{{ stats.political }} <span class="unit">人</span></p>
+            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.politicalImages ?? '—' }} 张</p>
           </div>
         </div>
 
@@ -735,6 +746,7 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">落马官员</h3>
             <p class="stat-value">{{ stats.officials }} <span class="unit">人</span></p>
+            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.officialsImages ?? '—' }} 张</p>
           </div>
         </div>
       </section>

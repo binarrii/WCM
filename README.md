@@ -74,6 +74,11 @@ RUN_LIVE=1 uv run pytest -m live tests/test_smoke_live.py -v
 - API prefix: `/api/v1`
 - Face-record listing uses opaque cursor pagination. Pass the returned
   `next_cursor` unchanged on the next request.
+- `/face_records/stats` retains the person counts (`total`, `bad_artists`,
+  `political`, `officials`) and adds corresponding `*_images` fields from each
+  collection's registered face-sample count. Registration accepts one face per
+  image. The dashboard shows these image totals below the person counts;
+  the aggregate count is read directly, without adding category mirrors again.
 - `type` is the canonical classification field and also selects the category
   collection.
 - Search accepts legacy distance thresholds (lower is better); the adapter
