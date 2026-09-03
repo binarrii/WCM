@@ -80,7 +80,7 @@ const imageSearchFileInputRef = ref(null);
 const imageSearching = ref(false);
 const isImageSearchActive = ref(false);
 const imageSearchResults = ref([]);
-const DEFAULT_IMAGE_SEARCH_SIMILARITY = 0.8;
+const DEFAULT_IMAGE_SEARCH_SIMILARITY = 0.5;
 const IMAGE_SEARCH_SIMILARITY_TICKS = [30, 40, 50, 60, 70, 80, 90, 100];
 const imageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
 const activeImageSearchSimilarityThreshold = ref(DEFAULT_IMAGE_SEARCH_SIMILARITY);
@@ -1106,7 +1106,7 @@ onUnmounted(() => {
             <div class="similarity-threshold-scale" aria-hidden="true">
               <span v-for="tick in IMAGE_SEARCH_SIMILARITY_TICKS" :key="tick">{{ tick }}%</span>
             </div>
-            <p class="similarity-threshold-hint">默认 80%，数值越高，检索结果越严格</p>
+            <p class="similarity-threshold-hint">默认 {{ Math.round(DEFAULT_IMAGE_SEARCH_SIMILARITY * 100) }}%，数值越高，检索结果越严格</p>
           </div>
 
           <div class="modal-actions image-search-actions">
