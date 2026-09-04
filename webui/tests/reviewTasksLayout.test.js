@@ -9,3 +9,11 @@ test('review task table fills the viewport while keeping a bottom margin', () =>
   assert.match(css, /\.task-table-card\s*\{[^}]*flex:\s*1[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*\}/);
   assert.match(css, /\.task-table-scroll\s*\{[^}]*flex:\s*1[^}]*\}/);
 });
+
+test('action column remains a table cell so row separators span the full width', () => {
+  const actionRule = css.match(/\.task-actions\s*\{([^}]*)\}/)?.[1] ?? '';
+
+  assert.doesNotMatch(actionRule, /\bdisplay:\s*flex\b/);
+  assert.match(actionRule, /text-align:\s*right/);
+  assert.match(css, /\.task-actions button\s*\{[^}]*display:\s*inline-grid/);
+});

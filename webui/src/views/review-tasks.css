@@ -43,8 +43,9 @@ tbody tr.selected { background: var(--color-primary-glow); }
 .task-video small { color: var(--text-muted); font-size: .62rem; font-variant-numeric: tabular-nums; }
 .task-video em { color: var(--status-red); font-size: .64rem; font-style: normal; }
 .task-parameters, .task-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.task-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.task-actions button { width: 28px; height: 28px; display: grid; place-items: center; color: var(--text-muted); background: transparent; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
+.task-actions { text-align: right; white-space: nowrap; }
+.task-actions button { width: 28px; height: 28px; display: inline-grid; place-items: center; vertical-align: middle; color: var(--text-muted); background: transparent; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
+.task-actions button + button { margin-left: 4px; }
 .task-actions button:hover { color: var(--color-primary); background: var(--color-primary-glow); border-color: var(--border-hover); }
 .task-actions button.delete-task:hover { color: var(--status-red); background: var(--status-red-bg); border-color: var(--status-red-border); }
 .task-actions button:disabled { opacity: .4; cursor: default; }
