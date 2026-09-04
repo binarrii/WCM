@@ -9,9 +9,11 @@ const template = readFileSync(join(__dirname, '../scripts/video_timeline.html'),
 const navigation = template.slice(template.indexOf('function revealEvent('), template.indexOf('function layoutMarkers('));
 
 test('results list stretches through the remaining panel height', () => {
-  assert.match(template, /\.results-panel\{[^}]*display:flex[^}]*flex-direction:column[^}]*\}/);
+  assert.match(template, /main\{[^}]*align-items:start[^}]*\}/);
+  assert.match(template, /\.results-panel\{[^}]*display:flex[^}]*flex-direction:column[^}]*overflow:hidden[^}]*\}/);
   assert.match(template, /#events\{[^}]*flex:1[^}]*overflow:auto[^}]*\}/);
-  assert.match(template, /<aside class="panel results-panel">/);
+  assert.match(template, /<aside id="results-panel" class="panel results-panel">/);
+  assert.match(template, /resultsPanel\.style\.height=.*playerPanel\.offsetHeight/);
 });
 
 function setup(rows, scrollTop = 0, times = rows.map((_, i) => i * 1000)) {

@@ -24,12 +24,15 @@ const category = ref('');
 const currentSeconds = ref(0);
 const durationMs = ref(0);
 const videoRef = ref(null);
+const playerPanelRef = ref(null);
 const timelineRef = ref(null);
 const eventsRef = ref(null);
 const jsonInputRef = ref(null);
 const timelineWidth = ref(0);
 const eventRows = new Map();
 let resizeObserver;
+let panelResizeObserver;
+const playerPanelHeight = ref(0);
 
 const categories = computed(() => [...new Set(markers.value.flatMap(marker => marker.findings.map(finding => finding.category)))]);
 const visibleMarkers = computed(() => markers.value.filter(marker => !category.value || marker.findings.some(finding => finding.category === category.value)));
@@ -148,17 +151,33 @@ const observeTimeline = (element) => {
   resizeObserver?.observe(element);
   updateWidth();
 };
+const updatePlayerPanelHeight = () => { playerPanelHeight.value = playerPanelRef.value?.offsetHeight || 0; };
+const observePlayerPanel = (element) => {
+  panelResizeObserver?.disconnect();
+  if (!element) {
+    playerPanelHeight.value = 0;
+    return;
+  }
+  panelResizeObserver?.observe(element);
+  updatePlayerPanelHeight();
+};
 
 watch(category, () => {
   eventRows.clear();
   nextTick(updateWidth);
 });
 watch(timelineRef, observeTimeline, { flush: 'post' });
+watch(playerPanelRef, observePlayerPanel, { flush: 'post' });
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateWidth);
+  panelResizeObserver = new ResizeObserver(updatePlayerPanelHeight);
   observeTimeline(timelineRef.value);
+  observePlayerPanel(playerPanelRef.value);
 });
-onBeforeUnmount(() => resizeObserver?.disconnect());
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  panelResizeObserver?.disconnect();
+});
 </script>
 
 <template>
@@ -188,8 +207,8 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
       <p v-if="error" class="review-error" role="alert"><AlertCircle />{{ error }}</p>
     </section>
 
-    <section v-if="videoUrl || rawResults != null" class="review-workspace">
-      <div class="review-player-panel">
+    <section v-if="videoUrl || rawResults != null" class="review-workspace" :style="{ '--review-player-height': playerPanelHeight ? `${playerPanelHeight}px` : 'auto' }">
+      <div ref="playerPanelRef" class="review-player-panel">
         <video ref="videoRef" :src="videoUrl" controls preload="metadata" @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate" @error="error = '视频无法播放，请确认地址可访问且服务支持 Range 请求'" />
         <div class="review-toolbar">
           <button type="button" :disabled="previousIndex < 0" @click="jump(previousIndex)"><ChevronLeft />上一标记</button>

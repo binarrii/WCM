@@ -30,7 +30,7 @@
 .hidden-file { display: none; }
 .review-error { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding: 10px 12px; color: var(--status-red); background: var(--status-red-bg); border: 1px solid var(--status-red-border); border-radius: 8px; font-size: .78rem; overflow-wrap: anywhere; }
 .review-error svg { flex: 0 0 auto; width: 17px; height: 17px; }
-.review-workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 20px; }
+.review-workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); align-items: start; gap: 20px; }
 .review-player-panel, .review-events-panel { min-width: 0; padding: 18px; }
 .review-player-panel video { display: block; width: 100%; max-height: 58vh; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 10px; }
 .review-toolbar { display: flex; align-items: center; gap: 9px; margin: 14px 0; }
@@ -46,7 +46,7 @@
 .timeline-hint i { display: inline-block; width: 10px; height: 10px; margin: 0 5px 0 10px; border-radius: 3px; vertical-align: -1px; }
 .timeline-hint i:first-child { margin-left: 0; }
 .range-key { background: #9f94ff; }.point-key { background: #ffb85c; }
-.review-events-panel { display: flex; flex-direction: column; max-height: calc(58vh + 205px); }
+.review-events-panel { height: var(--review-player-height); min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .events-header { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding-bottom: 14px; }
 .events-header h2 small { color: var(--text-muted); font-size: .72rem; font-weight: 500; }
 .events-header label { grid-template-columns: auto 150px; align-items: center; }
@@ -67,7 +67,7 @@
   .review-form { grid-template-columns: minmax(260px, 1fr) 110px 110px; }
   .analyze-button { grid-column: 1 / -1; }
   .review-workspace { grid-template-columns: 1fr; }
-  .review-events-panel { max-height: 520px; }
+  .review-events-panel { height: auto; max-height: 520px; }
 }
 @media (max-width: 680px) {
   .video-review { padding: 16px 12px 30px; }

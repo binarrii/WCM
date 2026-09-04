@@ -8,7 +8,7 @@
 :root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#101521;color:#e8eef8}
 *{box-sizing:border-box}body{margin:0;padding:32px;max-width:1500px;margin-inline:auto}
 header{margin-bottom:24px}h1{font-size:25px;margin:8px 0}h2{font-size:17px;margin:0}
-p{color:#aebcd0;line-height:1.6}main{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:24px}
+p{color:#aebcd0;line-height:1.6}main{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);align-items:start;gap:24px}
 .panel{background:#192131;border:1px solid #303c51;border-radius:16px;padding:20px;min-width:0}
 video{display:block;width:100%;max-height:65vh;background:#000;border-radius:10px}
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0}
@@ -21,7 +21,7 @@ button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outli
 .marker.active{background:#fff;outline:2px solid #ffbd66}.marker:hover{background:#fff}
 .scale{display:flex;justify-content:space-between;color:#aebcd0;font-size:12px}.hint{font-size:12px;margin-bottom:0}
 .badge{display:inline-block;color:#ffcc8a;background:#593f20;padding:4px 9px;border-radius:20px;font-size:12px}
-.results-panel{display:flex;flex-direction:column;min-height:0}
+.results-panel{display:flex;flex-direction:column;min-height:0;overflow:hidden}
 #events{min-height:0;flex:1;overflow:auto;margin-top:16px;display:grid;align-content:start;gap:10px}
 .event{display:block;text-align:left;width:100%;padding:12px;background:#202c40}.event.active{border-color:#ffbd66;background:#342e28}
 .event strong{display:block;color:#ffcc8a;font-size:14px;margin-bottom:6px}.event span{display:block;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:13px}
@@ -33,7 +33,7 @@ button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outli
 <header><span class="badge">WCM · 人工复核</span><h1>__TITLE__</h1>
 <p>按接口时间戳定位待复核画面。人物区间表示连续采样命中，其他结果保留单点；点击标记或条目跳到起点。标记不是违规结论，区间边界受采样精度限制。</p></header>
 <main>
-<section class="panel" aria-label="视频与时间轴">
+<section id="player-panel" class="panel" aria-label="视频与时间轴">
 <video id="video" controls preload="metadata" src="marked.mp4"></video>
 <p id="message" role="status"></p>
 <div class="toolbar"><button id="prev">上一标记</button><button id="next">下一标记</button><span id="clock">00:00:00.000</span></div>
@@ -43,7 +43,7 @@ button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outli
 <p class="hint">紫色条：人物合并区间；橙色点：单次命中。重叠标记分行显示。</p>
 <p class="hint">章节副本：marked.mp4。原始结果：analysis.json。播放器章节功能的显示方式可能不同，此页提供独立可点击时间轴。</p>
 </section>
-<aside class="panel results-panel"><h2 id="summary">审核标记</h2><div class="toolbar"><label for="category">类别</label><select id="category"><option value="">全部类别</option></select></div><div id="events"></div></aside>
+<aside id="results-panel" class="panel results-panel"><h2 id="summary">审核标记</h2><div class="toolbar"><label for="category">类别</label><select id="category"><option value="">全部类别</option></select></div><div id="events"></div></aside>
 </main>
 <script id="review-data" type="application/json">__REVIEW_DATA__</script>
 <script>
@@ -52,6 +52,7 @@ const video=document.getElementById('video'),seek=document.getElementById('seek'
 const timeline=document.getElementById('timeline'),events=document.getElementById('events');
 const category=document.getElementById('category'),message=document.getElementById('message');
 const prev=document.getElementById('prev'),next=document.getElementById('next');
+const playerPanel=document.getElementById('player-panel'),resultsPanel=document.getElementById('results-panel');
 const duration=data.duration_ms/1000;seek.max=duration;
 function stamp(seconds){let ms=Math.round(seconds*1000);const h=Math.floor(ms/3600000);ms%=3600000;const m=Math.floor(ms/60000);ms%=60000;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(Math.floor(ms/1000)).padStart(2,'0')}.${String(ms%1000).padStart(3,'0')}`;}
 document.getElementById('duration').textContent=stamp(duration);
@@ -70,6 +71,9 @@ function revealEvent(index){
 function jump(index){
   if(index<0||index>=visible.length)return;
   video.currentTime=visible[index].time_ms/1000;update();revealEvent(index);
+}
+function syncPanelHeight(){
+  resultsPanel.style.height=window.matchMedia('(max-width:850px)').matches?'':`${playerPanel.offsetHeight}px`;
 }
 function layoutMarkers(){
   const width=Math.max(timeline.clientWidth,12),lanes=[];
@@ -95,7 +99,7 @@ function render(){
     const text=document.createElement('span');text.textContent=details;row.append(time,text);events.append(row);
   });
   if(!visible.length){const empty=document.createElement('p');empty.textContent='没有审核标记。无标记不代表内容安全。';events.append(empty);}
-  layoutMarkers();update();
+  layoutMarkers();update();syncPanelHeight();
 }
 function update(){
   const current=video.currentTime||0;seek.value=current;document.getElementById('clock').textContent=stamp(current);
@@ -110,7 +114,8 @@ next.onclick=()=>jump(visible.findIndex(m=>m.time_ms/1000>video.currentTime+0.05
 seek.oninput=()=>{video.currentTime=Number(seek.value);update();};category.onchange=render;
 video.addEventListener('timeupdate',update);
 video.addEventListener('loadedmetadata',()=>{message.textContent='';update();});
-window.addEventListener('resize',layoutMarkers);
+new ResizeObserver(syncPanelHeight).observe(playerPanel);
+window.addEventListener('resize',()=>{layoutMarkers();syncPanelHeight();});
 video.addEventListener('error',()=>{message.textContent='无法播放视频：请确保 marked.mp4 和本页在同一目录；若浏览器不支持原视频编码，请用支持章节的播放器打开 marked.mp4。';});
 render();
 </script>
