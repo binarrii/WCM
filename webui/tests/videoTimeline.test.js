@@ -45,6 +45,18 @@ test('active state covers ranges and point tolerance', () => {
   assert.equal(markerIsActive(point, 3.2), false);
 });
 
+test('all findings at the clicked time become active together', () => {
+  const markers = normalizeResults([
+    { timestamp: '6~8', category: '人物', description: '甲' },
+    { timestamp: '6~7', category: '人物', description: '乙' },
+    { timestamp: '9~10', category: '人物', description: '丙' }
+  ]);
+  assert.deepEqual(
+    markers.filter(marker => markerIsActive(marker, 6)).map(marker => marker.findings[0].description),
+    ['乙', '甲']
+  );
+});
+
 test('minimum similarity maps to the legacy distance contract', () => {
   assert.equal(similarityToDistance(0.5), 0.5);
   assert.equal(similarityToDistance(0.1), 0.9);

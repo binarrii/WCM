@@ -23,7 +23,6 @@ const markers = ref([]);
 const category = ref('');
 const currentSeconds = ref(0);
 const durationMs = ref(0);
-const selectedMarkerId = ref('');
 const videoRef = ref(null);
 const timelineRef = ref(null);
 const eventsRef = ref(null);
@@ -47,8 +46,7 @@ const previousIndex = computed(() => {
 const nextIndex = computed(() => visibleMarkers.value.findIndex(marker => marker.time_ms / 1000 > currentSeconds.value + 0.05));
 
 const details = marker => marker.findings.map(finding => `${finding.category}：${finding.description}`).join('\n');
-const markerActive = marker => selectedMarkerId.value === marker.id
-  || (!selectedMarkerId.value && markerIsActive(marker, currentSeconds.value));
+const markerActive = marker => markerIsActive(marker, currentSeconds.value);
 const markerStyle = index => {
   const item = markerLayout.value[index];
   return item ? { left: `${item.left}px`, width: `${item.width}px`, top: `${8 + item.lane * 26}px` } : {};
@@ -70,7 +68,6 @@ const revealEvent = (id) => {
 const jump = async (index) => {
   const marker = visibleMarkers.value[index];
   if (!marker) return;
-  selectedMarkerId.value = marker.id;
   currentSeconds.value = marker.time_ms / 1000;
   if (videoRef.value) videoRef.value.currentTime = currentSeconds.value;
   await nextTick();
@@ -82,7 +79,6 @@ const loadResults = (payload) => {
   rawResults.value = payload;
   markers.value = normalized;
   category.value = '';
-  selectedMarkerId.value = '';
   currentSeconds.value = 0;
 };
 const analyze = async () => {
@@ -96,7 +92,6 @@ const analyze = async () => {
   rawResults.value = null;
   markers.value = [];
   category.value = '';
-  selectedMarkerId.value = '';
   loading.value = true;
   try {
     const payload = await mediaService.analyzeVideo({
@@ -140,7 +135,6 @@ const handleMetadata = () => {
 };
 const handleTimeUpdate = () => { currentSeconds.value = videoRef.value?.currentTime || 0; };
 const handleSeek = (event) => {
-  selectedMarkerId.value = '';
   currentSeconds.value = Number(event.target.value);
   if (videoRef.value) videoRef.value.currentTime = currentSeconds.value;
 };
@@ -156,7 +150,6 @@ const observeTimeline = (element) => {
 };
 
 watch(category, () => {
-  selectedMarkerId.value = '';
   eventRows.clear();
   nextTick(updateWidth);
 });
@@ -197,7 +190,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
 
     <section v-if="videoUrl || rawResults != null" class="review-workspace">
       <div class="review-player-panel">
-        <video ref="videoRef" :src="videoUrl" controls preload="metadata" @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate" @play="selectedMarkerId = ''" @error="error = '视频无法播放，请确认地址可访问且服务支持 Range 请求'" />
+        <video ref="videoRef" :src="videoUrl" controls preload="metadata" @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate" @error="error = '视频无法播放，请确认地址可访问且服务支持 Range 请求'" />
         <div class="review-toolbar">
           <button type="button" :disabled="previousIndex < 0" @click="jump(previousIndex)"><ChevronLeft />上一标记</button>
           <button type="button" :disabled="nextIndex < 0" @click="jump(nextIndex)">下一标记<ChevronRight /></button>
