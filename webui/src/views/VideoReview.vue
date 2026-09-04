@@ -165,7 +165,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
   <div class="video-review animate-fade-in">
     <section class="review-setup-card">
       <div class="setup-heading">
-        <div><h2>创建视频复核时间轴</h2><p>输入可访问的视频地址，系统会识别人脸及其他待复核内容。</p></div>
+        <div><h2>创建视频复核时间轴</h2><p>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
         <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
       </div>
       <form class="review-form" @submit.prevent="analyze">
