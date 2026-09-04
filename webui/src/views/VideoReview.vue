@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { AlertCircle, ChevronLeft, ChevronRight, Download, FileJson, Play, Search, Settings, Video } from '@lucide/vue';
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileJson, Play, Search, Settings, Video } from '@lucide/vue';
 import { mediaService } from '../services/mediaService';
 import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
@@ -22,6 +22,7 @@ const loading = ref(false);
 const error = ref('');
 const rawResults = ref(null);
 const loadedTaskId = ref('');
+const setupExpanded = ref(true);
 const markers = ref([]);
 const category = ref('');
 const currentSeconds = ref(0);
@@ -80,16 +81,18 @@ const jump = async (index) => {
   revealEvent(marker.id);
 };
 
-const loadResults = (payload) => {
+const loadResults = (payload, { collapseSetup = false } = {}) => {
   const normalized = normalizeResults(payload);
   rawResults.value = payload;
   markers.value = normalized;
   category.value = '';
   currentSeconds.value = 0;
+  if (collapseSetup) setupExpanded.value = false;
 };
 const loadReviewTask = async () => {
   const taskId = reviewTaskIdFromHash(window.location.hash);
   if (!taskId) return;
+  setupExpanded.value = true;
   loading.value = true;
   error.value = '';
   try {
@@ -104,7 +107,7 @@ const loadReviewTask = async () => {
       minSimilarity.value = Math.min(1, Math.max(0.1, 1 - Number(parameters.threshold)));
     }
     if (task.status === 'completed') {
-      loadResults(task.results || []);
+      loadResults(task.results || [], { collapseSetup: true });
     } else if (task.status === 'failed') {
       error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
     } else {
@@ -117,6 +120,7 @@ const loadReviewTask = async () => {
   }
 };
 const analyze = async () => {
+  setupExpanded.value = true;
   error.value = '';
   let url;
   try { url = validateVideoUrl(inputUrl.value); } catch (reason) { error.value = reason.message; return; }
@@ -136,7 +140,7 @@ const analyze = async () => {
       topK: topK.value,
       minSimilarity: minSimilarity.value
     });
-    loadResults(payload);
+    loadResults(payload, { collapseSetup: true });
   } catch (reason) {
     error.value = reason.response?.data?.detail || reason.message || '视频分析失败';
   } finally {
@@ -151,7 +155,7 @@ const importResults = async (event) => {
   try {
     const payload = JSON.parse(await file.text());
     const url = validateVideoUrl(inputUrl.value);
-    loadResults(payload);
+    loadResults(payload, { collapseSetup: true });
     videoUrl.value = url;
   } catch (reason) {
     error.value = reason instanceof SyntaxError ? 'JSON 文件格式错误' : reason.message;
@@ -216,29 +220,49 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="video-review animate-fade-in">
-    <section class="review-setup-card">
+    <section :class="['review-setup-card', { collapsed: !setupExpanded }]">
       <div class="setup-heading">
         <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
-        <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
+        <div class="setup-heading-actions">
+          <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
+          <button class="setup-toggle" type="button" :aria-expanded="setupExpanded" aria-controls="review-setup-content" @click="setupExpanded = !setupExpanded">
+            <ChevronUp v-if="setupExpanded" />
+            <ChevronDown v-else />
+            {{ setupExpanded ? '收起参数' : '展开参数' }}
+          </button>
+        </div>
       </div>
-      <form class="review-form" @submit.prevent="analyze">
-        <label class="url-field"><span>视频 HTTP(S) 地址</span><input v-model.trim="inputUrl" type="url" placeholder="http://10.252.25.251:18080/videos/example.mp4" required /></label>
-        <label><span>采样间隔</span><div class="input-unit"><input v-model.number="sampleInterval" type="number" min="0.1" step="0.1" /><small>秒</small></div></label>
-        <label><span>人脸候选数</span><select v-model.number="topK"><option v-for="value in [1, 3, 5, 10]" :key="value" :value="value">{{ value }}</option></select></label>
-        <button class="analyze-button" type="submit" :disabled="loading"><Settings v-if="loading" class="spinner" /><Search v-else />{{ loading ? '分析中…' : '开始分析' }}</button>
-      </form>
-      <div class="similarity-control">
-        <div><label for="video-similarity">最低人脸相似度</label><output>{{ Math.round(minSimilarity * 100) }}%</output></div>
-        <input id="video-similarity" v-model.number="minSimilarity" type="range" min="0.1" max="1" step="0.1" />
-        <div class="similarity-scale"><span v-for="value in 10" :key="value">{{ value * 10 }}%</span></div>
+      <div :class="['setup-body-shell', { collapsed: !setupExpanded }]">
+        <div id="review-setup-content" class="setup-body" :aria-hidden="!setupExpanded">
+          <form class="review-form" @submit.prevent="analyze">
+            <label class="url-field"><span>视频 HTTP(S) 地址</span><input v-model.trim="inputUrl" type="url" placeholder="http://10.252.25.251:18080/videos/example.mp4" required /></label>
+            <label><span>采样间隔</span><div class="input-unit"><input v-model.number="sampleInterval" type="number" min="0.1" step="0.1" /><small>秒</small></div></label>
+            <label><span>人脸候选数</span><select v-model.number="topK"><option v-for="value in [1, 3, 5, 10]" :key="value" :value="value">{{ value }}</option></select></label>
+            <button class="analyze-button" type="submit" :disabled="loading"><Settings v-if="loading" class="spinner" /><Search v-else />{{ loading ? '分析中…' : '开始分析' }}</button>
+          </form>
+          <div class="similarity-control">
+            <div><label for="video-similarity">最低人脸相似度</label><output>{{ Math.round(minSimilarity * 100) }}%</output></div>
+            <input id="video-similarity" v-model.number="minSimilarity" type="range" min="0.1" max="1" step="0.1" />
+            <div class="similarity-scale"><span v-for="value in 10" :key="value">{{ value * 10 }}%</span></div>
+          </div>
+          <div class="setup-secondary-actions">
+            <input ref="jsonInputRef" class="hidden-file" type="file" accept="application/json,.json" @change="importResults" />
+            <button type="button" @click="jsonInputRef.click()"><FileJson />导入已有结果</button>
+            <button type="button" :disabled="rawResults == null" @click="downloadResults"><Download />下载分析结果</button>
+            <span>导入 JSON 时仍需填写视频地址，独立脚本及章节 MP4 导出方式保持不变。</span>
+          </div>
+          <p v-if="error" class="review-error" role="alert"><AlertCircle />{{ error }}</p>
+        </div>
       </div>
-      <div class="setup-secondary-actions">
-        <input ref="jsonInputRef" class="hidden-file" type="file" accept="application/json,.json" @change="importResults" />
-        <button type="button" @click="jsonInputRef.click()"><FileJson />导入已有结果</button>
-        <button type="button" :disabled="rawResults == null" @click="downloadResults"><Download />下载分析结果</button>
-        <span>导入 JSON 时仍需填写视频地址，独立脚本及章节 MP4 导出方式保持不变。</span>
+      <div v-if="!setupExpanded" class="setup-summary" aria-label="当前审核参数摘要">
+        <span class="setup-summary-url" :title="inputUrl"><Video />{{ inputUrl || '尚未填写视频地址' }}</span>
+        <span>采样 {{ sampleInterval }}s</span>
+        <span>候选 {{ topK }}</span>
+        <span>相似度 {{ Math.round(minSimilarity * 100) }}%</span>
+        <strong v-if="rawResults != null">{{ markers.length }} 条标记</strong>
+        <strong v-else>尚未加载结果</strong>
       </div>
-      <p v-if="error" class="review-error" role="alert"><AlertCircle />{{ error }}</p>
+      <p v-if="!setupExpanded && error" class="review-error compact" role="alert"><AlertCircle />{{ error }}</p>
     </section>
 
     <section v-if="videoUrl || rawResults != null" class="review-workspace" :style="{ '--review-player-height': playerPanelHeight ? `${playerPanelHeight}px` : 'auto' }">
