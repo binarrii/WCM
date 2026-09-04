@@ -27,12 +27,14 @@ import {
 import { faceService } from '../services/faceService';
 import { IMAGE_BASE } from '../services/api';
 import { formatImageSimilarity, toSearchRecords } from '../services/searchResults';
+import ConfirmDialog from '../components/ConfirmDialog.vue';
 
 // State
 const records = ref([]);
 const loading = ref(false);
 const loadingMore = ref(false);
 const submitting = ref(false);
+const pendingDeleteRecord = ref(null);
 const searchQuery = ref('');
 const filterType = ref('All');
 
@@ -428,9 +430,18 @@ const handleSubmit = async () => {
 };
 
 // Delete record
-const handleDelete = async (record) => {
-  if (!confirm(`确定要删除 ${record.name} 的人脸及记录吗？此操作不可逆。`)) return;
-  
+const requestDeleteRecord = record => {
+  pendingDeleteRecord.value = record;
+};
+
+const cancelDeleteRecord = () => {
+  if (!submitting.value) pendingDeleteRecord.value = null;
+};
+
+const handleDelete = async () => {
+  const record = pendingDeleteRecord.value;
+  if (!record) return;
+  submitting.value = true;
   try {
     await faceService.deleteRecord(record.id);
     showToast('记录删除成功');
@@ -445,6 +456,9 @@ const handleDelete = async (record) => {
   } catch (error) {
     showToast('删除记录失败', 'error');
     console.error(error);
+  } finally {
+    submitting.value = false;
+    pendingDeleteRecord.value = null;
   }
 };
 
@@ -815,7 +829,7 @@ onUnmounted(() => {
                   <button class="icon-btn edit" @click="openEditModal(record)" title="编辑信息">
                     <Edit3 class="icon-btn-svg" />
                   </button>
-                  <button class="icon-btn delete" @click="handleDelete(record)" title="删除">
+                  <button class="icon-btn delete" @click="requestDeleteRecord(record)" title="删除">
                     <Trash2 class="icon-btn-svg" />
                   </button>
                 </div>
@@ -1127,6 +1141,21 @@ onUnmounted(() => {
         {{ previewImageIndex + 1 }} / {{ previewImageUrls.length }}
       </span>
     </div>
+
+    <ConfirmDialog
+      :open="Boolean(pendingDeleteRecord)"
+      title="删除人物档案"
+      :message="`将永久删除 ${pendingDeleteRecord?.name || ''} 的人物档案及全部关联人脸图片。`"
+      confirm-label="确认删除"
+      :busy="submitting"
+      @cancel="cancelDeleteRecord"
+      @confirm="handleDelete"
+    >
+      <template v-if="pendingDeleteRecord" #details>
+        <strong>{{ pendingDeleteRecord.name }}</strong>
+        <span>{{ pendingDeleteRecord.id }}</span>
+      </template>
+    </ConfirmDialog>
   </div>
 </template>
 

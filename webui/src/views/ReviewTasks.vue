@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, ListVideo, RefreshCw, Search, Trash2 } from '@lucide/vue';
+import ConfirmDialog from '../components/ConfirmDialog.vue';
 import { navigateToReviewTask } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
 
@@ -15,6 +16,7 @@ const deleting = ref(false);
 const error = ref('');
 const notice = ref('');
 const selectedIds = ref(new Set());
+const pendingDelete = ref(null);
 let searchTimer;
 let requestSequence = 0;
 
@@ -71,40 +73,41 @@ const toggleTask = taskId => {
 const toggleAll = event => {
   selectedIds.value = event.target.checked ? new Set(tasks.value.map(task => task.id)) : new Set();
 };
-const deleteTask = async task => {
-  if (!window.confirm(`确认删除审核任务？\n${task.video_url}\n${task.id}`)) return;
-  deleting.value = true;
-  error.value = '';
-  notice.value = '';
-  try {
-    await reviewTaskService.deleteOne(task.id);
-    selectedIds.value.delete(task.id);
-    selectedIds.value = new Set(selectedIds.value);
-    if (tasks.value.length === 1 && page.value > 1) page.value -= 1;
-    notice.value = '已删除 1 条审核任务';
-    await loadTasks();
-  } catch (reason) {
-    error.value = reason.response?.data?.detail || reason.message || '任务删除失败';
-  } finally {
-    deleting.value = false;
-  }
+const requestDeleteTask = task => {
+  pendingDelete.value = { mode: 'single', task, ids: [task.id] };
 };
-const deleteSelected = async () => {
+const requestDeleteSelected = () => {
   const ids = [...selectedIds.value];
-  if (!ids.length || !window.confirm(`确认删除选中的 ${ids.length} 条审核任务？此操作无法撤销。`)) return;
+  if (ids.length) pendingDelete.value = { mode: 'batch', ids };
+};
+const cancelDelete = () => {
+  if (!deleting.value) pendingDelete.value = null;
+};
+const confirmDelete = async () => {
+  const request = pendingDelete.value;
+  if (!request) return;
   deleting.value = true;
   error.value = '';
   notice.value = '';
   try {
-    const result = await reviewTaskService.deleteMany(ids);
-    if (ids.length >= tasks.value.length && page.value > 1) page.value -= 1;
-    clearSelection();
-    notice.value = `已删除 ${result.deleted} 条审核任务`;
+    if (request.mode === 'single') {
+      await reviewTaskService.deleteOne(request.task.id);
+      selectedIds.value.delete(request.task.id);
+      selectedIds.value = new Set(selectedIds.value);
+      if (tasks.value.length === 1 && page.value > 1) page.value -= 1;
+      notice.value = '已删除 1 条审核任务';
+    } else {
+      const result = await reviewTaskService.deleteMany(request.ids);
+      if (request.ids.length >= tasks.value.length && page.value > 1) page.value -= 1;
+      clearSelection();
+      notice.value = `已删除 ${result.deleted} 条审核任务`;
+    }
     await loadTasks();
   } catch (reason) {
-    error.value = reason.response?.data?.detail || reason.message || '批量删除失败';
+    error.value = reason.response?.data?.detail || reason.message || (request.mode === 'single' ? '任务删除失败' : '批量删除失败');
   } finally {
     deleting.value = false;
+    pendingDelete.value = null;
   }
 };
 
@@ -132,7 +135,7 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
     <p v-if="notice" class="task-notice" role="status"><CheckCircle2 />{{ notice }}</p>
 
     <section class="task-table-card">
-      <header><div class="task-table-title"><h2>任务记录</h2><span>共 {{ total }} 条</span></div><div class="task-table-header-actions"><template v-if="selectedIds.size"><span>已选择 {{ selectedIds.size }} 条</span><button type="button" :disabled="deleting" @click="deleteSelected"><Trash2 />批量删除</button></template><small v-else>点击任意一行进入视频审核页并自动加载结果</small></div></header>
+      <header><div class="task-table-title"><h2>任务记录</h2><span>共 {{ total }} 条</span></div><div class="task-table-header-actions"><template v-if="selectedIds.size"><span>已选择 {{ selectedIds.size }} 条</span><button type="button" :disabled="deleting" @click="requestDeleteSelected"><Trash2 />批量删除</button></template><small v-else>点击任意一行进入视频审核页并自动加载结果</small></div></header>
       <div class="task-table-scroll">
         <table>
           <thead><tr><th class="task-select-cell"><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" :disabled="!tasks.length || deleting" aria-label="选择当前页全部任务" @change="toggleAll" /></th><th>状态</th><th>视频地址</th><th>提交参数</th><th>结果</th><th>提交时间</th><th aria-label="操作"></th></tr></thead>
@@ -144,7 +147,7 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
               <td class="task-parameters">{{ parameterSummary(task) }}</td>
               <td>{{ task.result_count }} 条</td>
               <td class="task-date">{{ formatTime(task.created_at) }}</td>
-              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting" @click="deleteTask(task)"><Trash2 /></button></td>
+              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting" @click="requestDeleteTask(task)"><Trash2 /></button></td>
             </tr>
           </tbody>
         </table>
@@ -153,6 +156,21 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
       </div>
       <footer class="task-pagination"><span>第 {{ page }} / {{ pageCount }} 页</span><button type="button" :disabled="page <= 1 || loading" @click="changePage(page - 1)"><ChevronLeft />上一页</button><button type="button" :disabled="page >= pageCount || loading" @click="changePage(page + 1)">下一页<ChevronRight /></button></footer>
     </section>
+
+    <ConfirmDialog
+      :open="Boolean(pendingDelete)"
+      :title="pendingDelete?.mode === 'batch' ? '批量删除审核任务' : '删除审核任务'"
+      :message="pendingDelete?.mode === 'batch' ? `将永久删除选中的 ${pendingDelete.ids.length} 条审核任务及其分析结果。` : '该任务及其分析结果将被永久删除，此操作无法撤销。'"
+      :confirm-label="pendingDelete?.mode === 'batch' ? `删除 ${pendingDelete.ids.length} 条` : '确认删除'"
+      :busy="deleting"
+      @cancel="cancelDelete"
+      @confirm="confirmDelete"
+    >
+      <template v-if="pendingDelete?.mode === 'single'" #details>
+        <strong>{{ pendingDelete.task.video_url }}</strong>
+        <span>{{ pendingDelete.task.id }}</span>
+      </template>
+    </ConfirmDialog>
   </main>
 </template>
 
