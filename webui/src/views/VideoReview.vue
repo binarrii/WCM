@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileJson, Play, Search, Settings, Video } from '@lucide/vue';
 import { mediaService } from '../services/mediaService';
+import { saveJson } from '../services/downloads';
 import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
 import {
@@ -163,12 +164,7 @@ const importResults = async (event) => {
 };
 const downloadResults = () => {
   if (rawResults.value == null) return;
-  const url = URL.createObjectURL(new Blob([JSON.stringify(rawResults.value, null, 2)], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'analysis.json';
-  link.click();
-  URL.revokeObjectURL(url);
+  saveJson(rawResults.value);
 };
 const handleMetadata = () => {
   durationMs.value = Number.isFinite(videoRef.value?.duration) ? Math.round(videoRef.value.duration * 1000) : 0;

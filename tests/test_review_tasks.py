@@ -1,3 +1,6 @@
+import io
+import json
+import zipfile
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -67,6 +70,43 @@ def test_batch_delete_requires_at_least_one_id(monkeypatch):
     with TestClient(create_app()) as client:
         response = client.request("DELETE", "/api/v1/review_tasks", json={"ids": []})
     assert response.status_code == 422
+
+
+def test_single_and_batch_result_downloads(monkeypatch):
+    results = [{"timestamp": "00:00:01.000", "category": "人物", "description": "测试"}]
+    task = {"id": "task-1", "status": "completed", "results": results}
+    monkeypatch.setattr(review_tasks.review_task_store, "get", AsyncMock(return_value=task))
+    monkeypatch.setattr(
+        review_tasks.review_task_store,
+        "get_many",
+        AsyncMock(return_value=[task, {**task, "id": "task-2"}]),
+    )
+
+    with TestClient(create_app()) as client:
+        single = client.get("/api/v1/review_tasks/task-1/results/download")
+        batch = client.post(
+            "/api/v1/review_tasks/results/download", json={"ids": ["task-1", "task-2"]}
+        )
+
+    assert single.status_code == 200
+    assert single.json() == results
+    assert single.headers["content-disposition"] == 'attachment; filename="analysis-task-1.json"'
+    assert batch.status_code == 200
+    assert batch.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(batch.content)) as archive:
+        assert archive.namelist() == ["analysis-task-1.json", "analysis-task-2.json"]
+        assert json.loads(archive.read("analysis-task-2.json")) == results
+
+
+def test_result_download_rejects_unfinished_task(monkeypatch):
+    monkeypatch.setattr(
+        review_tasks.review_task_store,
+        "get",
+        AsyncMock(return_value={"id": "task-1", "status": "processing", "results": None}),
+    )
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/review_tasks/task-1/results/download")
+    assert response.status_code == 409
 
 
 def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch):

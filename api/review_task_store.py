@@ -174,6 +174,25 @@ async def get(task_id: str) -> dict | None:
     return await _run(_get_sync, task_id)
 
 
+def _get_many_sync(task_ids: list[str]) -> list[dict]:
+    if not task_ids:
+        return []
+    placeholders = ", ".join(["%s"] * len(task_ids))
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(f"SELECT * FROM review_tasks WHERE id IN ({placeholders})", task_ids)
+        rows = cursor.fetchall()
+    rows_by_id = {row["id"]: row for row in rows}
+    return [
+        _public_row(rows_by_id[task_id], include_results=True)
+        for task_id in task_ids
+        if task_id in rows_by_id
+    ]
+
+
+async def get_many(task_ids: list[str]) -> list[dict]:
+    return await _run(_get_many_sync, task_ids)
+
+
 def _delete_many_sync(task_ids: list[str]) -> int:
     placeholders = ", ".join(["%s"] * len(task_ids))
     with _connect() as connection, connection.cursor() as cursor:
