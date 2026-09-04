@@ -1,9 +1,4 @@
-"""FastAPI application for face recognition service.
-
-As of the IFS-as-source-of-truth refactor, no Postgres connection is
-required at runtime. The lifespan hook is empty (kept as a placeholder
-for future startup wiring).
-"""
+"""FastAPI application for face recognition and media review."""
 
 import os
 from contextlib import asynccontextmanager
@@ -16,12 +11,15 @@ from wcm_facerec import __version__
 from wcm_facerec.config import settings
 
 from .face_records import face_records_bp
+from .review_task_store import initialize as initialize_review_tasks
+from .review_tasks import review_tasks_bp
 from .routes import api_bp
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler (no-op now that Postgres is gone)."""
+    """Initialize optional service-owned persistence before accepting traffic."""
+    await initialize_review_tasks()
     yield
 
 
@@ -44,6 +42,7 @@ def create_app() -> FastAPI:
     # Register blueprints
     app.include_router(api_bp, prefix="/api/v1")
     app.include_router(face_records_bp, prefix="/api/v1")
+    app.include_router(review_tasks_bp, prefix="/api/v1")
 
     # Mount persisted face images before the SPA catch-all.
     os.makedirs("/tmp/wcm", exist_ok=True)

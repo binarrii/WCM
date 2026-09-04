@@ -19,6 +19,7 @@ dependencies = [
     "opencv-python-headless>=4.10.0.20241230",
     "pydantic-settings>=2.13.1",
     "python-multipart>=0.0.26",
+    "pymysql>=1.1.2",
     # One-shot metadata recovery scripts read the legacy libface_*.xls maps.
     "xlrd>=2.0.2",
     # The InsightFace Server Python SDK is vendored under

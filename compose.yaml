@@ -1,4 +1,30 @@
 services:
+  mysql:
+    image: mysql:8.4
+    container_name: wcm-review-tasks-mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      # Use a non-default host port to avoid colliding with an existing MySQL.
+      - "${WCM_MYSQL_PORT:-13306}:3306"
+    environment:
+      MYSQL_DATABASE: ${WCM_REVIEW_TASKS_DB_NAME:-wcm}
+      MYSQL_USER: ${WCM_REVIEW_TASKS_DB_USER:-wcm}
+      MYSQL_PASSWORD: ${WCM_REVIEW_TASKS_DB_PASSWORD:-wcm}
+      MYSQL_ROOT_PASSWORD: ${WCM_MYSQL_ROOT_PASSWORD:-wcm-root}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - wcm-network
+    volumes:
+      - review-tasks-mysql-data:/var/lib/mysql
+
   api:
     build:
       context: .
@@ -16,6 +42,15 @@ services:
       - WCM_INSIGHTFACE_BASE_URL=${WCM_INSIGHTFACE_BASE_URL:-http://10.252.25.251:18097}
       - WCM_INSIGHTFACE_API_KEY=${WCM_INSIGHTFACE_API_KEY:-}
       - WCM_INSIGHTFACE_VERIFY_SIMILARITY_THRESHOLD=${WCM_INSIGHTFACE_VERIFY_SIMILARITY_THRESHOLD:-0.5}
+      - WCM_REVIEW_TASKS_DB_ENABLED=true
+      - WCM_REVIEW_TASKS_DB_HOST=mysql
+      - WCM_REVIEW_TASKS_DB_PORT=3306
+      - WCM_REVIEW_TASKS_DB_NAME=${WCM_REVIEW_TASKS_DB_NAME:-wcm}
+      - WCM_REVIEW_TASKS_DB_USER=${WCM_REVIEW_TASKS_DB_USER:-wcm}
+      - WCM_REVIEW_TASKS_DB_PASSWORD=${WCM_REVIEW_TASKS_DB_PASSWORD:-wcm}
+    depends_on:
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - wcm-network
@@ -27,3 +62,6 @@ services:
 networks:
   wcm-network:
     driver: bridge
+
+volumes:
+  review-tasks-mysql-data:

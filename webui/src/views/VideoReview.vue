@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertCircle, ChevronLeft, ChevronRight, Download, FileJson, Play, Search, Settings, Video } from '@lucide/vue';
 import { mediaService } from '../services/mediaService';
+import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
+import { reviewTaskService } from '../services/reviewTaskService';
 import {
   formatTimestamp,
   layoutMarkers,
@@ -19,6 +21,7 @@ const topK = ref(10);
 const loading = ref(false);
 const error = ref('');
 const rawResults = ref(null);
+const loadedTaskId = ref('');
 const markers = ref([]);
 const category = ref('');
 const currentSeconds = ref(0);
@@ -84,6 +87,35 @@ const loadResults = (payload) => {
   category.value = '';
   currentSeconds.value = 0;
 };
+const loadReviewTask = async () => {
+  const taskId = reviewTaskIdFromHash(window.location.hash);
+  if (!taskId) return;
+  loading.value = true;
+  error.value = '';
+  try {
+    const task = await reviewTaskService.get(taskId);
+    loadedTaskId.value = task.id;
+    inputUrl.value = task.video_url;
+    videoUrl.value = validateVideoUrl(task.video_url);
+    const parameters = task.parameters || {};
+    sampleInterval.value = Number(parameters.sample_interval ?? 1);
+    topK.value = Number(parameters.top_k ?? 10);
+    if (Number.isFinite(Number(parameters.threshold))) {
+      minSimilarity.value = Math.min(1, Math.max(0.1, 1 - Number(parameters.threshold)));
+    }
+    if (task.status === 'completed') {
+      loadResults(task.results || []);
+    } else if (task.status === 'failed') {
+      error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
+    } else {
+      error.value = '该任务仍在处理中，请稍后从审核任务列表重新打开。';
+    }
+  } catch (reason) {
+    error.value = reason.response?.data?.detail || reason.message || '审核任务加载失败';
+  } finally {
+    loading.value = false;
+  }
+};
 const analyze = async () => {
   error.value = '';
   let url;
@@ -95,6 +127,7 @@ const analyze = async () => {
   rawResults.value = null;
   markers.value = [];
   category.value = '';
+  loadedTaskId.value = '';
   loading.value = true;
   try {
     const payload = await mediaService.analyzeVideo({
@@ -173,6 +206,7 @@ onMounted(() => {
   panelResizeObserver = new ResizeObserver(updatePlayerPanelHeight);
   observeTimeline(timelineRef.value);
   observePlayerPanel(playerPanelRef.value);
+  loadReviewTask();
 });
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
@@ -184,7 +218,7 @@ onBeforeUnmount(() => {
   <div class="video-review animate-fade-in">
     <section class="review-setup-card">
       <div class="setup-heading">
-        <div><h2>创建视频复核时间轴</h2><p>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
+        <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
         <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
       </div>
       <form class="review-form" @submit.prevent="analyze">

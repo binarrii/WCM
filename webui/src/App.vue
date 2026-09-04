@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Database, Monitor, Moon, Sun, Video } from '@lucide/vue';
+import { ClipboardList, Database, Monitor, Moon, Sun, Video } from '@lucide/vue';
 import FaceDashboard from './views/FaceDashboard.vue';
+import ReviewTasks from './views/ReviewTasks.vue';
 import VideoReview from './views/VideoReview.vue';
 import { navigateTo, routeFromHash } from './services/navigation';
 import './app.css';
@@ -20,6 +21,11 @@ const pages = {
     component: VideoReview,
     title: '视频审核',
     description: '分析远程视频并按时间轴快速复核命中画面'
+  },
+  tasks: {
+    component: ReviewTasks,
+    title: '审核任务',
+    description: '检索、查看并继续复核历史视频审核任务'
   }
 };
 const page = computed(() => pages[currentRoute.value]);
@@ -67,6 +73,9 @@ onBeforeUnmount(() => {
         </button>
         <button type="button" :class="['menu-item', { active: currentRoute === 'video' }]" @click="navigateTo('video')">
           <Video /><span>视频审核</span>
+        </button>
+        <button type="button" :class="['menu-item', { active: currentRoute === 'tasks' }]" @click="navigateTo('tasks')">
+          <ClipboardList /><span>审核任务</span>
         </button>
       </nav>
     </aside>

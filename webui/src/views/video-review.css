@@ -4,6 +4,8 @@
 .setup-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
 .setup-heading h2, .events-header h2 { font: 700 1.08rem/1.3 var(--font-display); }
 .setup-heading p { margin-top: 4px; color: var(--text-secondary); font-size: .82rem; }
+.task-back-link { margin-left: 8px; padding: 0; color: var(--color-primary); background: transparent; border: 0; cursor: pointer; font: inherit; font-weight: 700; }
+.task-back-link:hover { text-decoration: underline; }
 .review-safety-note { padding: 6px 11px; color: var(--status-yellow); background: var(--status-yellow-bg); border: 1px solid var(--status-yellow-border); border-radius: 20px; font-size: .72rem; white-space: nowrap; }
 .review-form { display: grid; grid-template-columns: minmax(300px, 1fr) 120px 120px auto; gap: 14px; align-items: end; margin-top: 20px; }
 .review-form label, .events-header label { display: grid; gap: 7px; color: var(--text-secondary); font-size: .75rem; font-weight: 600; }

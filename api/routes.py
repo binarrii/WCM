@@ -8,12 +8,13 @@ from pathlib import Path
 import cv2
 import httpx
 import numpy as np
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 from wcm_facerec import __version__
 from wcm_facerec.config import DEFAULT_DISTANCE_THRESHOLD, settings
 from wcm_facerec.face_engine import get_face_engine
 
+from . import review_task_store
 from .face_records import _image_url_to_path, _item_image_urls
 from .handlers import (
     _process_analyze_media,
@@ -119,12 +120,22 @@ async def health_check():
             status_code=503,
             detail={"status": "unhealthy", "insightface": str(exc)},
         ) from exc
+    try:
+        review_tasks = await review_task_store.health()
+    except review_task_store.ReviewTaskStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "unhealthy", "review_tasks": str(exc)},
+        ) from exc
+    dependencies = {"insightface": upstream.get("status", "healthy")}
+    if review_tasks != "disabled":
+        dependencies["review_tasks"] = review_tasks
     return {
         "status": "healthy",
         "model": settings.insightface_model_name,
         "embedding_dim": settings.embedding_dim,
         "version": __version__,
-        "dependencies": {"insightface": upstream.get("status", "healthy")},
+        "dependencies": dependencies,
     }
 
 
@@ -529,7 +540,7 @@ async def websocket_detect_nsfw(websocket: WebSocket):
 
 
 @api_bp.post("/analyze_media")
-async def analyze_media(request: Request):
+async def analyze_media(request: Request, response: Response):
     """Analyze media for faces, sensitive text, and NSFW content.
 
     Consecutive video face hits with the same category/name use a timestamp
@@ -547,11 +558,31 @@ async def analyze_media(request: Request):
     sample_interval = float(body.get("sample_interval", 1.0))
     top_k = int(body.get("top_k", 10))
     threshold = float(body.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
+    parameters = {key: value for key, value in body.items() if key != "url"}
+    parameters.update(
+        {"sample_interval": sample_interval, "top_k": top_k, "threshold": threshold}
+    )
 
     try:
-        return await _process_analyze_media(url, sample_interval, top_k, threshold)
+        task_id = await review_task_store.create(url, parameters)
+    except review_task_store.ReviewTaskStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        result = await _process_analyze_media(url, sample_interval, top_k, threshold)
     except Exception as e:
+        with contextlib.suppress(Exception):
+            await review_task_store.fail(task_id, str(e))
         raise HTTPException(status_code=400, detail=f"Failed to process media: {str(e)}")
+
+    stored_results = result.get("results", []) if isinstance(result, dict) else result
+    try:
+        await review_task_store.complete(task_id, stored_results)
+    except review_task_store.ReviewTaskStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if task_id:
+        response.headers["X-Review-Task-ID"] = task_id
+    return result
 
 
 @api_bp.websocket("/ws/analyze_media")
@@ -580,14 +611,28 @@ async def websocket_analyze_media(websocket: WebSocket):
             top_k = int(payload.get("top_k", 10))
             threshold = float(payload.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
 
+            parameters = {key: value for key, value in payload.items() if key != "url"}
+            parameters.update(
+                {"sample_interval": sample_interval, "top_k": top_k, "threshold": threshold}
+            )
+            try:
+                await review_task_store.create(url, parameters, task_id)
+            except review_task_store.ReviewTaskStoreUnavailable as exc:
+                await websocket.send_json({"status": "error", "error": str(exc)})
+                continue
+
             await websocket.send_json({"status": "accepted", "taskId": task_id})
 
             try:
                 result = await _process_analyze_media(url, sample_interval, top_k, threshold)
-                result["status"] = "completed"
-                result["taskId"] = task_id
-                await websocket.send_json(result)
+                stored_results = result.get("results", []) if isinstance(result, dict) else result
+                await review_task_store.complete(task_id, stored_results)
+                await websocket.send_json(
+                    {"status": "completed", "taskId": task_id, "results": stored_results}
+                )
             except Exception as e:
+                with contextlib.suppress(Exception):
+                    await review_task_store.fail(task_id, str(e))
                 await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
     except Exception as e:
         with contextlib.suppress(Exception):

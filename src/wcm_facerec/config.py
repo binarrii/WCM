@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = "sk-o8EGlzXqMQi8Ba06E2B1BcF8217c45B6Bb70Ce5765B70c42"
 
+    # ---- Review task storage ----
+    # Disabled by default so local API-only development remains lightweight.
+    # Docker Compose enables it and points the API at the bundled MySQL service.
+    review_tasks_db_enabled: bool = False
+    review_tasks_db_host: str = "127.0.0.1"
+    review_tasks_db_port: int = 3306
+    review_tasks_db_name: str = "wcm"
+    review_tasks_db_user: str = "wcm"
+    review_tasks_db_password: str = "wcm"
+    review_tasks_db_connect_timeout_s: int = 5
+
     # Filesystem
     data_root: str = "/data/wcm"
     default_category: str = "未分类"
