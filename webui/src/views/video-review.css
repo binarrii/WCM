@@ -50,7 +50,7 @@
 .events-header { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding-bottom: 14px; }
 .events-header h2 small { color: var(--text-muted); font-size: .72rem; font-weight: 500; }
 .events-header label { grid-template-columns: auto 150px; align-items: center; }
-.review-events { min-height: 0; display: grid; align-content: start; gap: 9px; overflow-y: auto; padding-right: 4px; }
+.review-events { min-height: 0; flex: 1; display: grid; align-content: start; gap: 9px; overflow-y: auto; padding-right: 4px; }
 .review-event { width: 100%; display: block; padding: 12px; color: var(--text-primary); text-align: left; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 9px; cursor: pointer; }
 .review-event:hover { border-color: var(--border-hover); }
 .review-event.active { background: var(--status-yellow-bg); border-color: var(--status-yellow); }

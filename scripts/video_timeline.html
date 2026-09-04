@@ -21,7 +21,8 @@ button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outli
 .marker.active{background:#fff;outline:2px solid #ffbd66}.marker:hover{background:#fff}
 .scale{display:flex;justify-content:space-between;color:#aebcd0;font-size:12px}.hint{font-size:12px;margin-bottom:0}
 .badge{display:inline-block;color:#ffcc8a;background:#593f20;padding:4px 9px;border-radius:20px;font-size:12px}
-#events{max-height:65vh;overflow:auto;margin-top:16px;display:grid;gap:10px}
+.results-panel{display:flex;flex-direction:column;min-height:0}
+#events{min-height:0;flex:1;overflow:auto;margin-top:16px;display:grid;align-content:start;gap:10px}
 .event{display:block;text-align:left;width:100%;padding:12px;background:#202c40}.event.active{border-color:#ffbd66;background:#342e28}
 .event strong{display:block;color:#ffcc8a;font-size:14px;margin-bottom:6px}.event span{display:block;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:13px}
 #message{color:#ffd18b}#clock{margin-left:auto;font-variant-numeric:tabular-nums;font-size:13px}
@@ -42,7 +43,7 @@ button{cursor:pointer}button:hover,button:focus-visible{background:#334965;outli
 <p class="hint">紫色条：人物合并区间；橙色点：单次命中。重叠标记分行显示。</p>
 <p class="hint">章节副本：marked.mp4。原始结果：analysis.json。播放器章节功能的显示方式可能不同，此页提供独立可点击时间轴。</p>
 </section>
-<aside class="panel"><h2 id="summary">审核标记</h2><div class="toolbar"><label for="category">类别</label><select id="category"><option value="">全部类别</option></select></div><div id="events"></div></aside>
+<aside class="panel results-panel"><h2 id="summary">审核标记</h2><div class="toolbar"><label for="category">类别</label><select id="category"><option value="">全部类别</option></select></div><div id="events"></div></aside>
 </main>
 <script id="review-data" type="application/json">__REVIEW_DATA__</script>
 <script>

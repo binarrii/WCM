@@ -8,6 +8,12 @@ const template = readFileSync(join(__dirname, '../scripts/video_timeline.html'),
 // Execute the template's actual navigation functions, not a duplicate algorithm.
 const navigation = template.slice(template.indexOf('function revealEvent('), template.indexOf('function layoutMarkers('));
 
+test('results list stretches through the remaining panel height', () => {
+  assert.match(template, /\.results-panel\{[^}]*display:flex[^}]*flex-direction:column[^}]*\}/);
+  assert.match(template, /#events\{[^}]*flex:1[^}]*overflow:auto[^}]*\}/);
+  assert.match(template, /<aside class="panel results-panel">/);
+});
+
 function setup(rows, scrollTop = 0, times = rows.map((_, i) => i * 1000)) {
   const events = {
     clientTop: 2, clientHeight: 200, scrollTop,
