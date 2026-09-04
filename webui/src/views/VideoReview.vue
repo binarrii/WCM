@@ -145,16 +145,25 @@ const handleSeek = (event) => {
   if (videoRef.value) videoRef.value.currentTime = currentSeconds.value;
 };
 const updateWidth = () => { timelineWidth.value = timelineRef.value?.clientWidth || 0; };
+const observeTimeline = (element) => {
+  resizeObserver?.disconnect();
+  if (!element) {
+    timelineWidth.value = 0;
+    return;
+  }
+  resizeObserver?.observe(element);
+  updateWidth();
+};
 
 watch(category, () => {
   selectedMarkerId.value = '';
   eventRows.clear();
   nextTick(updateWidth);
 });
+watch(timelineRef, observeTimeline, { flush: 'post' });
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateWidth);
-  if (timelineRef.value) resizeObserver.observe(timelineRef.value);
-  updateWidth();
+  observeTimeline(timelineRef.value);
 });
 onBeforeUnmount(() => resizeObserver?.disconnect());
 </script>
