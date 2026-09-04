@@ -1,11 +1,16 @@
 """Review task management API."""
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from . import review_task_store
 
 review_tasks_bp = APIRouter()
 _STATUSES = {"processing", "completed", "failed"}
+
+
+class ReviewTaskDeleteRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
 
 
 def _storage_error(exc: Exception) -> HTTPException:
@@ -36,3 +41,26 @@ async def get_review_task(task_id: str):
     if task is None:
         raise HTTPException(status_code=404, detail="审核任务不存在")
     return task
+
+
+@review_tasks_bp.delete("/review_tasks/{task_id}")
+async def delete_review_task(task_id: str):
+    try:
+        deleted = await review_task_store.delete_many([task_id])
+    except review_task_store.ReviewTaskStoreUnavailable as exc:
+        raise _storage_error(exc) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="审核任务不存在")
+    return {"deleted": deleted}
+
+
+@review_tasks_bp.delete("/review_tasks")
+async def delete_review_tasks(body: ReviewTaskDeleteRequest):
+    task_ids = list(dict.fromkeys(task_id.strip() for task_id in body.ids if task_id.strip()))
+    if not task_ids:
+        raise HTTPException(status_code=422, detail="至少选择一个审核任务")
+    try:
+        deleted = await review_task_store.delete_many(task_ids)
+    except review_task_store.ReviewTaskStoreUnavailable as exc:
+        raise _storage_error(exc) from exc
+    return {"deleted": deleted, "requested": len(task_ids)}

@@ -174,6 +174,16 @@ async def get(task_id: str) -> dict | None:
     return await _run(_get_sync, task_id)
 
 
+def _delete_many_sync(task_ids: list[str]) -> int:
+    placeholders = ", ".join(["%s"] * len(task_ids))
+    with _connect() as connection, connection.cursor() as cursor:
+        return cursor.execute(f"DELETE FROM review_tasks WHERE id IN ({placeholders})", task_ids)
+
+
+async def delete_many(task_ids: list[str]) -> int:
+    return await _run(_delete_many_sync, task_ids)
+
+
 def _list_sync(query: str, status: str, page: int, page_size: int) -> dict:
     clauses = []
     values: list[Any] = []

@@ -11,5 +11,15 @@ export const reviewTaskService = {
   async get(taskId) {
     const response = await api.get(`/review_tasks/${encodeURIComponent(taskId)}`);
     return response.data;
+  },
+
+  async deleteOne(taskId) {
+    const response = await api.delete(`/review_tasks/${encodeURIComponent(taskId)}`);
+    return response.data;
+  },
+
+  async deleteMany(taskIds) {
+    const response = await api.delete('/review_tasks', { data: { ids: taskIds } });
+    return response.data;
   }
 };

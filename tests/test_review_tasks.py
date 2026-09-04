@@ -41,6 +41,34 @@ def test_review_task_route_rejects_unknown_status(monkeypatch):
     assert response.status_code == 422
 
 
+def test_single_and_batch_delete_routes(monkeypatch):
+    delete_many = AsyncMock(side_effect=[1, 2, 0])
+    monkeypatch.setattr(review_tasks.review_task_store, "delete_many", delete_many)
+
+    with TestClient(create_app()) as client:
+        single = client.delete("/api/v1/review_tasks/task-1")
+        batch = client.request(
+            "DELETE", "/api/v1/review_tasks", json={"ids": ["task-2", "task-3", "task-2"]}
+        )
+        missing = client.delete("/api/v1/review_tasks/missing")
+
+    assert single.json() == {"deleted": 1}
+    assert batch.json() == {"deleted": 2, "requested": 2}
+    assert missing.status_code == 404
+    assert [call.args[0] for call in delete_many.await_args_list] == [
+        ["task-1"],
+        ["task-2", "task-3"],
+        ["missing"],
+    ]
+
+
+def test_batch_delete_requires_at_least_one_id(monkeypatch):
+    monkeypatch.setattr(review_tasks.review_task_store, "delete_many", AsyncMock())
+    with TestClient(create_app()) as client:
+        response = client.request("DELETE", "/api/v1/review_tasks", json={"ids": []})
+    assert response.status_code == 422
+
+
 def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch):
     results = [{"timestamp": "00:00:01.000", "category": "待复核", "description": "内容"}]
     create = AsyncMock(return_value="task-1")
