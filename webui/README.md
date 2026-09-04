@@ -1,5 +1,17 @@
-# Vue 3 + Vite
+# WCM WebUI
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+The WebUI has two hash-routed pages in its left navigation:
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+- `#/people`: person-library management and face search.
+- `#/video`: remote video analysis and an interactive review timeline. It calls
+  `/api/v1/analyze_media`, supports category filters and JSON import/export, and
+  keeps the standalone chapter-export tool under `scripts/` unchanged.
+
+## Development
+
+```bash
+pnpm install
+pnpm dev
+pnpm test
+pnpm build
+```

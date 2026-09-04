@@ -22,10 +22,7 @@ import {
   Settings,
   ArrowUp,
   ChevronLeft,
-  ChevronRight,
-  Sun,
-  Moon,
-  Monitor
+  ChevronRight
 } from '@lucide/vue';
 import { faceService } from '../services/faceService';
 import { IMAGE_BASE } from '../services/api';
@@ -566,33 +563,6 @@ const handleScroll = () => {
   }
 };
 
-// Theme state & handlers
-const currentTheme = ref('system');
-
-const applyTheme = () => {
-  const theme = currentTheme.value;
-  let activeTheme = theme;
-  if (theme === 'system') {
-    activeTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
-  document.documentElement.setAttribute('data-theme', activeTheme);
-};
-
-const setTheme = (themeName) => {
-  currentTheme.value = themeName;
-  localStorage.setItem('theme', themeName);
-};
-
-watch(currentTheme, applyTheme);
-
-// Handle system theme changes dynamically
-const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-const handleSystemThemeChange = () => {
-  if (currentTheme.value === 'system') {
-    applyTheme();
-  }
-};
-
 const handleGlobalPaste = (e) => {
   if (!isModalOpen.value && !isImageSearchModalOpen.value) return;
   const items = e.clipboardData?.items;
@@ -648,61 +618,22 @@ const handleGlobalKeyDown = (e) => {
 };
 
 onMounted(() => {
-  // Load saved theme
-  const savedTheme = localStorage.getItem('theme') || 'system';
-  currentTheme.value = savedTheme;
-  applyTheme();
-  
   fetchRecords(true);
   fetchStats();
   window.addEventListener('scroll', handleScroll);
   window.addEventListener('paste', handleGlobalPaste);
   window.addEventListener('keydown', handleGlobalKeyDown);
-  mediaQuery.addEventListener('change', handleSystemThemeChange);
 });
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll);
   window.removeEventListener('paste', handleGlobalPaste);
   window.removeEventListener('keydown', handleGlobalKeyDown);
-  mediaQuery.removeEventListener('change', handleSystemThemeChange);
 });
 </script>
 
 <template>
   <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="logo-area">
-        <div class="glowing-orb"></div>
-        <div class="brand">
-          <span class="brand-text">WCM Core</span>
-          <span class="sub-brand">智能内容审核库</span>
-        </div>
-      </div>
-      <div class="header-right">
-        <!-- Theme Switcher -->
-        <div class="theme-switcher">
-          <button 
-            v-for="t in ['light', 'dark', 'system']" 
-            :key="t"
-            @click="setTheme(t)"
-            :class="['theme-btn', { active: currentTheme === t }]"
-            :title="t === 'light' ? '浅色模式' : t === 'dark' ? '深色模式' : '跟随系统'"
-          >
-            <Sun v-if="t === 'light'" class="theme-icon" />
-            <Moon v-if="t === 'dark'" class="theme-icon" />
-            <Monitor v-if="t === 'system'" class="theme-icon" />
-          </button>
-        </div>
-        
-        <div class="system-status">
-          <span class="status-indicator"></span>
-          <span class="status-text">系统服务正常</span>
-        </div>
-      </div>
-    </header>
-
     <main class="app-main animate-fade-in">
       <!-- Stats Dashboard -->
       <section class="stats-grid">
