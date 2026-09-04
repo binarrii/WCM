@@ -18,7 +18,7 @@ const pages = {
   },
   video: {
     component: VideoReview,
-    title: '视频审核标记',
+    title: '视频审核',
     description: '分析远程视频并按时间轴快速复核命中画面'
   }
 };
@@ -66,7 +66,7 @@ onBeforeUnmount(() => {
           <Database /><span>人物库管理</span>
         </button>
         <button type="button" :class="['menu-item', { active: currentRoute === 'video' }]" @click="navigateTo('video')">
-          <Video /><span>视频审核标记</span>
+          <Video /><span>视频审核</span>
         </button>
       </nav>
     </aside>
