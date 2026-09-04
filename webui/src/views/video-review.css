@@ -16,7 +16,7 @@
 .analyze-button:hover { background: var(--color-primary-hover); }
 .analyze-button:disabled { opacity: .55; cursor: wait; }
 .analyze-button svg { width: 17px; height: 17px; }
-.similarity-control { max-width: 760px; margin-top: 18px; padding: 14px 16px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 11px; }
+.similarity-control { width: 100%; margin-top: 18px; padding: 14px 16px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 11px; }
 .similarity-control > div:first-child { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: .78rem; font-weight: 600; }
 .similarity-control output { color: var(--color-primary); font-size: .9rem; font-weight: 800; }
 .similarity-control input { width: 100%; margin-top: 12px; accent-color: var(--color-primary); }
