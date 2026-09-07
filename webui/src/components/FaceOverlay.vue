@@ -48,7 +48,7 @@ const boxStyle = box => ({
       <div class="face-label" :style="labelStyle(face)">
         <button v-for="candidate in face.candidates" :key="candidate.markerId + candidate.name" type="button"
           :aria-pressed="candidate.markerId === selected" @click="$emit('select', candidate.markerId)">
-          <span>候选 · {{ candidate.name }}</span>
+          <span>{{ candidate.name }}</span>
           <small v-if="Number.isFinite(candidate.similarity)">{{ Math.round(candidate.similarity * 100) }}%</small>
         </button>
       </div>
