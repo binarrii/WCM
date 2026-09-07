@@ -457,6 +457,33 @@ class InsightFaceAdapter:
         cid = collection_id or self._collection_id
         self._client.delete_person(cid, person_id)
 
+    def add_person_image(
+        self, person_id: str, image_bytes: bytes, *, collection_id: str | None = None
+    ) -> list[str]:
+        cid = collection_id or self._collection_id
+        result = self._client.add_faces(cid, person_id, images=[image_bytes])
+        faces = result.faces or []
+        if not faces:
+            raise ValueError("照片未能注册人脸，请使用单人清晰照片")
+        return [str(face["id"]) for face in faces]
+
+    def delete_person_image(
+        self, person_id: str, face_id: str, *, collection_id: str | None = None
+    ) -> None:
+        self._client.delete_face(collection_id or self._collection_id, person_id, face_id)
+
+    def person_face_ids(self, person_id: str, *, collection_id: str | None = None) -> list[str]:
+        cursor = None
+        ids = []
+        while True:
+            page = self._client.list_faces(
+                collection_id or self._collection_id, person_id, limit=100, cursor=cursor
+            )
+            ids.extend(str(face["id"]) for face in page.faces)
+            cursor = page.next_cursor
+            if not cursor:
+                return ids
+
     # ------------------------------------------------------------------
     # Person CRUD (list / get / update)
     # ------------------------------------------------------------------
@@ -741,4 +768,5 @@ def _person_to_item(person: dict[str, Any] | None) -> dict[str, Any]:
         "remarks": metadata.get("remarks"),
         "file_path": metadata.get("file_path"),
         "image_paths": metadata.get("image_paths"),
+        "metadata": metadata,
     }

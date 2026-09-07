@@ -1,4 +1,30 @@
 /* App Layout Container */
+.merge-selection-bar, .person-select, .append-person-summary {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  align-items: center;
+}
+.merge-selection-bar { justify-content: space-between; flex-wrap: wrap; }
+.person-select { border-radius: 0; cursor: pointer; font-size: 0.85rem; }
+.person-select input, .merge-candidate input { accent-color: var(--color-primary); width: 18px; height: 18px; flex-shrink: 0; }
+.record-card.record-selected { outline: 2px solid var(--color-primary); }
+.person-record-id { color: var(--text-muted); font-size: 0.72rem; overflow-wrap: anywhere; margin: 0 0 12px; }
+.append-person-summary { align-items: flex-start; flex-direction: column; overflow-wrap: anywhere; }
+.append-person-summary span, .merge-history-note { color: var(--text-secondary); font-size: 0.85rem; }
+.append-person-summary p { margin: 0; }
+.merge-candidates { display: flex; flex-direction: column; gap: 12px; }
+.merge-candidate { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border-color); border-radius: 12px; cursor: pointer; }
+.merge-candidate.active { border-color: var(--color-primary); background: var(--bg-primary); }
+.merge-candidate img { width: 64px; height: 72px; object-fit: cover; border-radius: 8px; }
+.merge-candidate span { flex: 1; min-width: 0; }
+.merge-candidate small { display: block; color: var(--text-secondary); overflow-wrap: anywhere; margin-top: 4px; }
+.merge-candidate b { color: var(--color-primary); white-space: nowrap; font-size: 0.8rem; }
+.modal-card.merge-modal { max-height: 90vh; overflow-y: auto; }
+
 .app-container {
   max-width: 1400px;
   margin: 0 auto;

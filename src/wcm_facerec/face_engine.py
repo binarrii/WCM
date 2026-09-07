@@ -34,6 +34,7 @@ import numpy as np
 
 from .config import DEFAULT_DISTANCE_THRESHOLD, settings
 from .ifs_adapter import InsightFaceAdapter, crop_query_face
+from .person_library import gallery, library_write, mutate_gallery
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +354,7 @@ class FaceEngine:
     # ------------------------------------------------------------------
     # Write paths
     # ------------------------------------------------------------------
+    @library_write
     async def register_from_image(
         self,
         name: str,
@@ -507,11 +509,30 @@ class FaceEngine:
 
     @staticmethod
     def _item_metadata(item: dict) -> dict:
+        if isinstance(item.get("metadata"), dict):
+            return dict(item["metadata"])
         return {
-            key: item.get(key) or ""
-            for key in ("category", "occupation", "type", "remarks", "file_path")
+            **(item.get("metadata") or {}),
+            **{
+                key: item.get(key) or ""
+                for key in ("category", "occupation", "type", "remarks", "file_path")
+            },
+            **({"image_paths": item["image_paths"]} if item.get("image_paths") is not None else {}),
         }
 
+    @library_write
+    async def add_person_image(self, person_id: str, image_bytes: bytes) -> dict:
+        return await mutate_gallery(
+            self, person_id, image=image_bytes, image_ext=_detect_image_ext(image_bytes)
+        )
+
+    @library_write
+    async def merge_person_records(self, target_id: str, source_ids: list[str]) -> dict:
+        if not source_ids or target_id in source_ids or len(set(source_ids)) != len(source_ids):
+            raise ValueError("请选择不同的人物档案，并指定一个保留 ID")
+        return await mutate_gallery(self, target_id, source_ids=source_ids)
+
+    @library_write
     async def update_person_record(
         self,
         person_id: str,
@@ -579,6 +600,15 @@ class FaceEngine:
                 )
                 prepared_new_mirror = {"id": person_id, "_created": True}
 
+            if prepared_new_mirror and prepared_new_mirror.get("_created"):
+                for path in gallery(current)[1:]:
+                    await self._run(
+                        self._adapter.add_person_image,
+                        prepared_new_mirror["id"],
+                        Path(path).read_bytes(),
+                        collection_id=new_cid,
+                    )
+
             updated = await self._run(
                 self._adapter.update_person,
                 person_id,
@@ -626,6 +656,7 @@ class FaceEngine:
                     logger.exception("failed to roll back category mirror for %s", person_id)
             raise
 
+    @library_write
     async def delete_person_record(self, person_id: str) -> dict | None:
         """Delete aggregate/category records, including orphaned mirrors."""
         resolved = await self._resolve_aggregate_person(person_id)
@@ -650,13 +681,11 @@ class FaceEngine:
                 return None
             current = mirrors[0][1]
 
-        rollback_images: dict[tuple[str, str], bytes | None] = {}
+        rollback_images: dict[tuple[str, str], list[bytes]] = {}
         for cid, mirror in mirrors:
-            file_path = mirror.get("file_path")
-            image_path = Path(str(file_path)) if file_path else None
-            rollback_images[(cid, mirror["id"])] = (
-                image_path.read_bytes() if image_path and image_path.is_file() else None
-            )
+            rollback_images[(cid, mirror["id"])] = [
+                Path(path).read_bytes() for path in gallery(mirror) if Path(path).is_file()
+            ]
 
         deleted: list[tuple[str, dict]] = []
         try:
@@ -671,18 +700,25 @@ class FaceEngine:
                 await self._run(self._adapter.delete_person, aggregate_id)
         except Exception:
             for cid, mirror in deleted:
-                image_bytes = rollback_images[(cid, mirror["id"])]
-                if image_bytes is not None:
+                images = rollback_images[(cid, mirror["id"])]
+                if images:
                     try:
                         await self._run(
                             self._adapter.register_person,
                             name=mirror.get("name") or current.get("name") or "",
-                            image_bytes=image_bytes,
+                            image_bytes=images[0],
                             metadata=self._item_metadata(mirror),
                             external_id=mirror.get("external_id") or aggregate_id or person_id,
                             person_id=mirror["id"],
                             collection_id=cid,
                         )
+                        for image_bytes in images[1:]:
+                            await self._run(
+                                self._adapter.add_person_image,
+                                mirror["id"],
+                                image_bytes,
+                                collection_id=cid,
+                            )
                     except Exception:
                         logger.exception("failed to restore category mirror %s", mirror["id"])
             raise

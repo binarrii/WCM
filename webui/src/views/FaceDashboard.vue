@@ -59,6 +59,44 @@ const stats = ref({
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
 const editingRecordId = ref(null);
+const isAppendMode = ref(false);
+const mergeMode = ref(false);
+const selectedPeople = ref([]);
+const isMergeModalOpen = ref(false);
+const mergeTargetId = ref('');
+
+const togglePersonSelection = (record) => {
+  const index = selectedPeople.value.findIndex(item => item.id === record.id);
+  if (index >= 0) selectedPeople.value.splice(index, 1);
+  else if (selectedPeople.value.length < 20) selectedPeople.value.push(record);
+  else showToast('一次最多合并 20 个人物档案', 'error');
+};
+const toggleMergeMode = () => {
+  mergeMode.value = !mergeMode.value;
+  selectedPeople.value = [];
+};
+const openMergeModal = () => {
+  mergeTargetId.value = selectedPeople.value[0]?.id || '';
+  isMergeModalOpen.value = true;
+};
+const handleMerge = async () => {
+  if (submitting.value || selectedPeople.value.length < 2 || !mergeTargetId.value) return;
+  submitting.value = true;
+  try {
+    await faceService.mergeRecords(mergeTargetId.value, selectedPeople.value.filter(item => item.id !== mergeTargetId.value).map(item => item.id));
+    isMergeModalOpen.value = false;
+    mergeMode.value = false;
+    selectedPeople.value = [];
+    isImageSearchActive.value = false;
+    imageSearchResults.value = null;
+    await Promise.all([fetchRecords(true), fetchStats()]);
+    showToast('人物合并成功，照片已归入保留的 ID');
+  } catch (error) {
+    showToast(error.response?.data?.detail || '人物合并失败，请刷新后重试', 'error');
+  } finally {
+    submitting.value = false;
+  }
+};
 
 // Form state
 const form = ref({
@@ -308,6 +346,7 @@ const handleDrop = (e) => {
 
 // Open modal for creating
 const openCreateModal = () => {
+  isAppendMode.value = false;
   isEditMode.value = false;
   editingRecordId.value = null;
   form.value = {
@@ -323,6 +362,7 @@ const openCreateModal = () => {
 
 // Open modal for editing
 const openEditModal = (record) => {
+  isAppendMode.value = false;
   isEditMode.value = true;
   editingRecordId.value = record.id;
   form.value = {
@@ -337,7 +377,15 @@ const openEditModal = (record) => {
 };
 
 // Close modal
+const openAppendModal = (record) => {
+  openEditModal(record);
+  isEditMode.value = false;
+  isAppendMode.value = true;
+  imagePreviewUrl.value = null;
+};
+
 const closeModal = () => {
+  if (submitting.value) return;
   isModalOpen.value = false;
   if (imagePreviewUrl.value && !isEditMode.value) {
     URL.revokeObjectURL(imagePreviewUrl.value);
@@ -346,6 +394,7 @@ const closeModal = () => {
 
 // Submit form (Save / Update)
 const handleSubmit = async () => {
+  if (submitting.value) return;
   if (!form.value.name.trim()) {
     showToast('请输入姓名', 'error');
     return;
@@ -359,7 +408,21 @@ const handleSubmit = async () => {
   submitting.value = true;
   
   try {
-    if (isEditMode.value) {
+    if (isAppendMode.value) {
+      const formData = new FormData();
+      formData.append('file', form.value.file);
+      const result = await faceService.appendImage(editingRecordId.value, formData);
+      submitting.value = false;
+      closeModal();
+      records.value = records.value.map(item => item.id === result.record.id ? result.record : item);
+      if (isImageSearchActive.value) {
+        isImageSearchActive.value = false;
+        imageSearchResults.value = null;
+        await fetchRecords(true);
+      }
+      await fetchStats();
+      showToast(result.added_images ? '照片已追加，人物 ID 保持不变' : '该照片已存在，无需重复追加');
+    } else if (isEditMode.value) {
       await faceService.updateRecord(editingRecordId.value, {
         name: form.value.name,
         occupation: form.value.occupation,
@@ -367,6 +430,7 @@ const handleSubmit = async () => {
         remarks: form.value.remarks
       });
       showToast('人脸及人物记录更新成功');
+      submitting.value = false;
       closeModal();
       
       // Update image search results dynamically if active
@@ -416,6 +480,7 @@ const handleSubmit = async () => {
       await faceService.createRecord(formData);
       
       showToast('人脸及人物档案注册成功！');
+      submitting.value = false;
       closeModal();
       fetchRecords(true);
       fetchStats();
@@ -619,6 +684,10 @@ const handleGlobalKeyDown = (e) => {
     return;
   }
   if (e.key === 'Escape' || e.keyCode === 27) {
+    if (isMergeModalOpen.value) {
+      if (!submitting.value) isMergeModalOpen.value = false;
+      return;
+    }
     if (isImagePreviewOpen.value) {
       closeImagePreview();
     } else if (showCropperModal.value) {
@@ -736,12 +805,20 @@ onUnmounted(() => {
             </button>
           </div>
 
+          <button class="btn-secondary" @click="toggleMergeMode" :disabled="submitting">
+            <Layers class="btn-icon" />{{ mergeMode ? '退出合并' : '人物合并' }}
+          </button>
           <button class="add-btn" @click="openCreateModal">
             <UserPlus class="btn-icon" />
             <span>新增人脸</span>
           </button>
         </div>
       </section>
+
+      <div v-if="mergeMode" class="merge-selection-bar">
+        <span>勾选同一人的重复档案（已选 {{ selectedPeople.length }} 个）</span>
+        <button class="btn-primary" :disabled="selectedPeople.length < 2 || submitting" @click="openMergeModal">合并所选人物</button>
+      </div>
 
       <!-- Records Display Grid -->
       <section class="records-section">
@@ -775,7 +852,12 @@ onUnmounted(() => {
             v-for="record in filteredRecords" 
             :key="record.id" 
             class="record-card"
+            :class="{ 'record-selected': selectedPeople.some(item => item.id === record.id) }"
           >
+            <label v-if="mergeMode" class="person-select">
+              <input type="checkbox" :checked="selectedPeople.some(item => item.id === record.id)" @change="togglePersonSelection(record)" :disabled="submitting" />
+              选择合并 · {{ record.name }}
+            </label>
             <!-- Card Image -->
             <div class="card-image-container" @click="getActiveCardImage(record) && openImagePreview(getRecordImages(record).map(url => `${IMAGE_BASE}${url}`), getActiveCardImageIndex(record))">
               <img 
@@ -815,6 +897,7 @@ onUnmounted(() => {
               <div class="card-header-row">
                 <h4 class="card-title">{{ record.name }}</h4>
               </div>
+              <p class="person-record-id" :title="record.id">ID: {{ record.id }}</p>
               
               <div class="card-info-item remarks-item">
                 <FileText class="info-icon" />
@@ -826,6 +909,9 @@ onUnmounted(() => {
               <div class="card-footer-row">
                 <span class="date-text">时间: {{ new Date(record.created_at).toLocaleDateString() }}</span>
                 <div class="action-buttons">
+                  <button class="icon-btn edit" @click="openAppendModal(record)" title="追加照片" aria-label="追加照片">
+                    <ImageIcon class="icon-btn-svg" />
+                  </button>
                   <button class="icon-btn edit" @click="openEditModal(record)" title="编辑信息">
                     <Edit3 class="icon-btn-svg" />
                   </button>
@@ -853,7 +939,7 @@ onUnmounted(() => {
       <div class="modal-card animate-fade-in">
         <div class="modal-header">
           <h3 class="modal-title">
-            {{ isEditMode ? '修改人脸档案' : '新增人脸' }}
+            {{ isAppendMode ? '追加照片' : isEditMode ? '修改人脸档案' : '新增人脸' }}
           </h3>
           <button class="close-btn" @click="closeModal">
             <X class="close-icon" />
@@ -861,6 +947,10 @@ onUnmounted(() => {
         </div>
 
         <form @submit.prevent="handleSubmit" class="modal-form">
+          <div v-if="isAppendMode" class="append-person-summary">
+            <strong>{{ form.name }}</strong><span>ID: {{ editingRecordId }}</span>
+            <p>照片将加入该人物的图库，沿用已有 ID 和档案信息。</p>
+          </div>
           <!-- Image upload zone -->
           <div class="upload-section">
             <label class="form-label">人脸照片 (只能包含单张人脸，禁止合照及无人脸图)</label>
@@ -899,7 +989,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Text Info Fields -->
-          <div class="form-fields">
+          <div v-if="!isAppendMode" class="form-fields">
             <div class="form-group">
               <label for="name" class="form-label required">姓名</label>
               <input 
@@ -941,10 +1031,35 @@ onUnmounted(() => {
             </button>
             <button type="submit" class="btn-primary" :disabled="submitting">
               <Settings v-if="submitting" class="spinner btn-spinner" />
-              <span>{{ submitting ? '人脸特征检测与注册中...' : '确认提交' }}</span>
+              <span>{{ submitting ? '人脸特征检测与注册中...' : isAppendMode ? '确认追加照片' : '确认提交' }}</span>
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div v-if="isMergeModalOpen" class="modal-overlay" @click.self="!submitting && (isMergeModalOpen = false)">
+      <div class="modal-card merge-modal" role="dialog" aria-modal="true" aria-labelledby="merge-title">
+        <div class="modal-header">
+          <h3 id="merge-title" class="modal-title">合并人物 · 选择保留的档案</h3>
+          <button class="close-btn" :disabled="submitting" @click="isMergeModalOpen = false" aria-label="关闭合并窗口"><X class="close-icon" /></button>
+        </div>
+        <div class="modal-form">
+          <p>照片将集中到选定 ID，姓名、类别和备注以保留档案为准。其余 ID 将移除。请确认所选档案属于同一个人。</p>
+          <div class="merge-candidates">
+            <label v-for="person in selectedPeople" :key="person.id" class="merge-candidate" :class="{ active: mergeTargetId === person.id }">
+              <input type="radio" name="merge-target" :value="person.id" v-model="mergeTargetId" :disabled="submitting" />
+              <img v-if="person.image_url" :src="`${IMAGE_BASE}${person.image_url}`" :alt="person.name" />
+              <span><strong>{{ person.name }}</strong><small>ID: {{ person.id }}</small><small>{{ person.person?.type || '其它' }} · {{ getRecordImages(person).length }} 张照片</small><small>{{ person.person?.remarks || '暂无备注' }}</small></span>
+              <b v-if="mergeTargetId === person.id">保留</b>
+            </label>
+          </div>
+          <p class="merge-history-note">历史审核结果保留当时的记录；后续识别使用合并后的档案。</p>
+          <div class="modal-actions">
+            <button class="btn-secondary" :disabled="submitting" @click="isMergeModalOpen = false">取消</button>
+            <button class="btn-primary" :disabled="submitting" @click="handleMerge"><Settings v-if="submitting" class="spinner btn-spinner" />{{ submitting ? '正在合并，请稍候...' : '确认合并' }}</button>
+          </div>
+        </div>
       </div>
     </div>
 

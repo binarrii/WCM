@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field, model_validator
 
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
@@ -306,6 +307,60 @@ async def update_face_record(record_id: str, request: Request):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+class MergePeopleRequest(BaseModel):
+    target_id: str = Field(min_length=1, max_length=256)
+    source_ids: list[str] = Field(min_length=1, max_length=19)
+
+    @model_validator(mode="after")
+    def distinct_people(self):
+        if (
+            self.target_id in self.source_ids
+            or len(set(self.source_ids)) != len(self.source_ids)
+            or any(not value.strip() or len(value) > 256 for value in self.source_ids)
+        ):
+            raise ValueError("请选择不同的人物档案，并指定一个保留 ID")
+        return self
+
+
+@face_records_bp.post("/face_records/merge")
+async def merge_face_records(body: MergePeopleRequest):
+    try:
+        result = await get_face_engine().merge_person_records(body.target_id, body.source_ids)
+        return {**result, "record": _item_with_person(result["record"])}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"人物合并失败：{exc}") from exc
+
+
+@face_records_bp.post("/face_records/{record_id}/images")
+async def append_face_image(record_id: str, request: Request):
+    engine = get_face_engine()
+    async with request.form(max_files=1, max_fields=5) as form:
+        file = form.get("file")
+        if not file or not getattr(file, "filename", None):
+            raise HTTPException(status_code=400, detail="请上传图片")
+        contents = await file.read(settings.max_file_size_mb * 1024 * 1024 + 1)
+    if len(contents) > settings.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="文件过大")
+    if not contents or cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR) is None:
+        raise HTTPException(status_code=400, detail="图片格式错误，无法解析")
+    try:
+        faces = await engine.detect_faces(contents)
+        if len(faces) != 1:
+            raise ValueError("请上传仅包含单张清晰人脸的图片")
+        result = await engine.add_person_image(record_id, contents)
+        return {**result, "record": _item_with_person(result["record"])}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"追加照片失败：{exc}") from exc
 
 
 @face_records_bp.delete("/face_records/{record_id}")

@@ -525,6 +525,74 @@ def test_update_and_delete_delegate_to_consistent_engine_methods(client_for):
     assert engine.deleted == "p1"
 
 
+def test_merge_route_validates_ids_and_serializes_gallery(client_for, monkeypatch, tmp_path):
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+    paths = [tmp_path / "a.jpg", tmp_path / "b.jpg"]
+    for path in paths:
+        path.write_bytes(b"image")
+    class MergeEngine(StubEngine):
+        async def merge_person_records(self, target_id, source_ids):
+            self.args = (target_id, source_ids)
+            return {
+                "record": {
+                    "id": target_id,
+                    "name": "保留人物",
+                    "image_paths": [str(path) for path in paths],
+                },
+                "merged_ids": source_ids,
+                "added_images": 1,
+            }
+
+    engine = MergeEngine()
+    client = client_for(engine)
+    for body in [
+        {"target_id": "a", "source_ids": ["a"]},
+        {"target_id": "a", "source_ids": []},
+        {"target_id": "a", "source_ids": ["b", "b"]},
+    ]:
+        assert client.post("/api/v1/face_records/merge", json=body).status_code == 422
+    response = client.post(
+        "/api/v1/face_records/merge", json={"target_id": "a", "source_ids": ["b"]}
+    )
+    assert response.status_code == 200
+    assert engine.args == ("a", ["b"])
+    assert response.json()["record"]["image_urls"] == ["/images/a.jpg", "/images/b.jpg"]
+    assert "/tmp/wcm" not in response.text
+
+
+@pytest.mark.parametrize("face_count", [0, 1, 2])
+def test_append_route_enforces_single_face_and_existing_identity(
+    client_for, sample_image_bytes, face_count
+):
+    class AppendEngine(StubEngine):
+        async def detect_faces(self, contents):
+            return [{}] * face_count
+
+        async def add_person_image(self, person_id, contents):
+            self.args = (person_id, contents)
+            return {"record": {"id": person_id}, "added_images": 1, "merged_ids": []}
+
+    engine = AppendEngine()
+    client = client_for(engine)
+    response = client.post(
+        "/api/v1/face_records/existing/images",
+        files={"file": ("face.jpg", sample_image_bytes, "image/jpeg")},
+    )
+    assert response.status_code == (200 if face_count == 1 else 400)
+    if face_count == 1:
+        assert engine.args == ("existing", sample_image_bytes)
+    else:
+        assert not hasattr(engine, "args")
+    for data in [b"", b"not an image"]:
+        assert (
+            client.post(
+                "/api/v1/face_records/existing/images", files={"file": ("face.jpg", data)}
+            ).status_code
+            == 400
+        )
+    assert client.post("/api/v1/face_records/existing/images").status_code == 400
+
+
 def test_video_search_awaits_async_engine_and_handles_zero_interval(monkeypatch, tmp_path):
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
 

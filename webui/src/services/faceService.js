@@ -26,6 +26,16 @@ export const faceService = {
   },
 
   // Update face record
+  async appendImage(id, formData) {
+    const response = await api.post(`/face_records/${encodeURIComponent(id)}/images`, formData);
+    return response.data;
+  },
+
+  async mergeRecords(targetId, sourceIds) {
+    const response = await api.post('/face_records/merge', { target_id: targetId, source_ids: sourceIds });
+    return response.data;
+  },
+
   async updateRecord(id, data) {
     const response = await api.put(`/face_records/${id}`, data);
     return response.data;
