@@ -69,6 +69,9 @@ async def test_face_crop_uses_query_coordinates_and_preserves_sample_metadata():
     assert len(results) == 1
     _, expected = cv2.imencode(".jpg", frame[60:120, 80:128])
     assert base64.b64decode(results[0]["face_image_b64"]) == expected.tobytes()
+    assert results[0]["face_location"] == {
+        "x": 80 / 200, "y": 60 / 180, "w": 48 / 200, "h": 60 / 180
+    }
     assert results[0]["source_w"] == 12
     assert results[0]["source_h"] == 20
 
@@ -90,6 +93,7 @@ async def test_missing_query_coordinates_never_fall_back_to_sample(bbox):
 
     assert len(results) == 1
     assert "face_image_b64" not in results[0]
+    assert "face_location" not in results[0]
 
 
 @pytest.mark.parametrize(
@@ -157,4 +161,9 @@ def test_analyze_media_allows_48px_faces_through_real_engine_and_adapter(
     assert len(search_calls) == int(keep)
     if keep:
         assert response.json()[0]["description"] == "test-match"
+        sample = response.json()[0]["face_samples"][0]
+        assert sample["time_ms"] == 0
+        assert sample["bbox"] == {"x": 20 / 150, "y": 20 / 150,
+                                  "w": width / 150, "h": height / 150}
+        assert sample["similarity"] == 0.9
         assert b'name="threshold"\r\n\r\n0.5\r\n' in search_calls[0]

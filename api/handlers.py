@@ -455,6 +455,11 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
                 y1, y2 = max(0, y), min(frame.shape[0], y + h)
                 x1, x2 = max(0, x), min(frame.shape[1], x + w)
                 if y2 > y1 and x2 > x1:
+                    r["face_location"] = {
+                        "x": x1 / frame.shape[1], "y": y1 / frame.shape[0],
+                        "w": (x2 - x1) / frame.shape[1],
+                        "h": (y2 - y1) / frame.shape[0],
+                    }
                     crop = frame[y1:y2, x1:x2]
                     ok, buf = cv2.imencode(".jpg", crop)
                     if ok:
@@ -476,8 +481,18 @@ def _merge_person_timelines(frame_results: list, sample_interval: float) -> list
         formatted_ts = _format_timestamp(ts)
         for face in face_res:
             key = (face.get("category") or "敏感人物", face.get("name", "敏感人物"))
+            location = face.get("face_location")
+            sample = None
+            if location:
+                sample = {"time_ms": round(ts * 1000), "bbox": location}
+                similarity = face.get("similarity")
+                if similarity is not None:
+                    sample["similarity"] = float(similarity)
             if key in current:
-                continue  # Multiple matching samples for one person in the same frame.
+                row = current[key][2]
+                if sample and sample not in row.setdefault("face_samples", []):
+                    row["face_samples"].append(sample)
+                continue
             prior = previous.get(key)
             if prior is not None and 0 <= ts - prior[1] <= max_gap:
                 start, _, row = prior
@@ -487,6 +502,8 @@ def _merge_person_timelines(frame_results: list, sample_interval: float) -> list
                 start = formatted_ts
                 row = {"timestamp": start, "category": key[0], "description": key[1]}
                 results.append(row)
+            if sample:
+                row.setdefault("face_samples", []).append(sample)
             current[key] = (start, ts, row)
         # A sampled frame without this person terminates their current interval.
         previous = current

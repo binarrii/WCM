@@ -1,3 +1,5 @@
+import { normalizeFaceSamples } from './faceOverlay.js';
+
 const TIMESTAMP = /^(\d+):([0-5]\d):([0-5]\d)(?:\.(\d{1,3}))?$/;
 
 export function timestampMs(value) {
@@ -58,10 +60,11 @@ export function normalizeResults(payload) {
     const key = [start, end, end > start ? category : '', end > start ? description : ''].join('\u0000');
     if (!grouped.has(key)) grouped.set(key, { start, end, findings: [] });
     const finding = { category, description };
+    if (Array.isArray(item.face_samples)) finding.face_samples = normalizeFaceSamples(item.face_samples, start, end);
     const findings = grouped.get(key).findings;
-    if (!findings.some(value => value.category === category && value.description === description)) {
-      findings.push(finding);
-    }
+    const existing = findings.find(value => value.category === category && value.description === description);
+    if (!existing) findings.push(finding);
+    else if (finding.face_samples) existing.face_samples = [...(existing.face_samples || []), ...finding.face_samples];
   });
   return [...grouped.values()]
     .sort((a, b) => a.start - b.start || a.end - b.end)

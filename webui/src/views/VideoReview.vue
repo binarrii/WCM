@@ -13,6 +13,43 @@ import {
   validateVideoUrl
 } from '../services/videoTimeline';
 
+import FaceOverlay from '../components/FaceOverlay.vue';
+import { facesAtTime, containedVideoRect, faceSampleTimes } from '../services/faceOverlay';
+
+const overlayMode = ref('corners');
+const selectedMarker = ref('');
+const paused = ref(true);
+const seeking = ref(false);
+const videoRect = ref(null);
+const videoStageRef = ref(null);
+let videoResizeObserver;
+const sampleFaces = computed(() => paused.value && !seeking.value
+  ? facesAtTime(visibleMarkers.value, currentSeconds.value, category.value) : []);
+const sampleTimes = computed(() => faceSampleTimes(visibleMarkers.value, category.value));
+const hasFaceLocations = computed(() => faceSampleTimes(markers.value).length > 0);
+const previousSample = computed(() => sampleTimes.value.findLast(time => time < currentSeconds.value * 1000 - 45));
+const nextSample = computed(() => sampleTimes.value.find(time => time > currentSeconds.value * 1000 + 45));
+const jumpToSample = async time => {
+  if (!Number.isFinite(time)) return;
+  const video = videoRef.value;
+  if (!video || !video.readyState) return;
+  video.pause();
+  selectedMarker.value = '';
+  currentSeconds.value = time / 1000;
+  video.currentTime = currentSeconds.value;
+};
+const updateVideoRect = () => {
+  const video = videoRef.value;
+  videoRect.value = video ? containedVideoRect(video.clientWidth, video.clientHeight, video.videoWidth, video.videoHeight) : null;
+};
+const selectFace = id => { selectedMarker.value = id; revealEvent(id); };
+const toggleFullscreen = async () => {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await videoStageRef.value?.requestFullscreen();
+  } catch { error.value = '当前浏览器不支持此全屏模式'; }
+};
+
 const DEFAULT_SIMILARITY = 0.5;
 const inputUrl = ref('');
 const videoUrl = ref('');
@@ -28,6 +65,7 @@ const markers = ref([]);
 const category = ref('');
 const currentSeconds = ref(0);
 const durationMs = ref(0);
+const pendingSeek = ref(null);
 const videoRef = ref(null);
 const playerPanelRef = ref(null);
 const timelineRef = ref(null);
@@ -76,14 +114,22 @@ const revealEvent = (id) => {
 const jump = async (index) => {
   const marker = visibleMarkers.value[index];
   if (!marker) return;
-  currentSeconds.value = marker.time_ms / 1000;
-  if (videoRef.value) videoRef.value.currentTime = currentSeconds.value;
+  selectedMarker.value = marker.id;
+  const samples = faceSampleTimes([marker], category.value);
+  currentSeconds.value = (samples.length ? samples[0] : marker.time_ms) / 1000;
+  if (videoRef.value) {
+    videoRef.value.pause();
+    if (videoRef.value.readyState) videoRef.value.currentTime = currentSeconds.value;
+    else pendingSeek.value = currentSeconds.value;
+  }
   await nextTick();
   revealEvent(marker.id);
 };
 
 const loadResults = (payload, { collapseSetup = false } = {}) => {
   const normalized = normalizeResults(payload);
+  selectedMarker.value = '';
+  pendingSeek.value = null;
   rawResults.value = payload;
   markers.value = normalized;
   category.value = '';
@@ -167,10 +213,16 @@ const downloadResults = () => {
   saveJson(rawResults.value);
 };
 const handleMetadata = () => {
+  updateVideoRect();
+  if (pendingSeek.value != null) {
+    videoRef.value.currentTime = pendingSeek.value;
+    pendingSeek.value = null;
+  }
   durationMs.value = Number.isFinite(videoRef.value?.duration) ? Math.round(videoRef.value.duration * 1000) : 0;
 };
 const handleTimeUpdate = () => { currentSeconds.value = videoRef.value?.currentTime || 0; };
 const handleSeek = (event) => {
+  selectedMarker.value = '';
   currentSeconds.value = Number(event.target.value);
   if (videoRef.value) videoRef.value.currentTime = currentSeconds.value;
 };
@@ -197,11 +249,19 @@ const observePlayerPanel = (element) => {
 
 watch(category, () => {
   eventRows.clear();
+  selectedMarker.value = '';
   nextTick(updateWidth);
 });
 watch(timelineRef, observeTimeline, { flush: 'post' });
 watch(playerPanelRef, observePlayerPanel, { flush: 'post' });
+watch(videoRef, element => {
+  videoResizeObserver?.disconnect();
+  if (element) videoResizeObserver?.observe(element);
+  updateVideoRect();
+}, { flush: 'post' });
 onMounted(() => {
+  videoResizeObserver = new ResizeObserver(updateVideoRect);
+  if (videoRef.value) videoResizeObserver.observe(videoRef.value);
   resizeObserver = new ResizeObserver(updateWidth);
   panelResizeObserver = new ResizeObserver(updatePlayerPanelHeight);
   observeTimeline(timelineRef.value);
@@ -209,6 +269,7 @@ onMounted(() => {
   loadReviewTask();
 });
 onBeforeUnmount(() => {
+  videoResizeObserver?.disconnect();
   resizeObserver?.disconnect();
   panelResizeObserver?.disconnect();
 });
@@ -263,7 +324,28 @@ onBeforeUnmount(() => {
 
     <section v-if="videoUrl || rawResults != null" class="review-workspace" :style="{ '--review-player-height': playerPanelHeight ? `${playerPanelHeight}px` : 'auto' }">
       <div ref="playerPanelRef" class="review-player-panel">
-        <video ref="videoRef" :src="videoUrl" controls preload="metadata" @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate" @error="error = '视频无法播放，请确认地址可访问且服务支持 Range 请求'" />
+        <div ref="videoStageRef" class="video-stage">
+          <video ref="videoRef" :src="videoUrl" controls controlslist="nofullscreen" preload="metadata"
+            @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate"
+            @play="paused = false; selectedMarker = ''" @pause="paused = true; handleTimeUpdate()"
+            @seeking="seeking = true" @seeked="seeking = false; handleTimeUpdate()"
+            @emptied="videoRect = null; durationMs = 0; paused = true; seeking = false"
+            @error="error = '视频无法播放，请确认地址可访问且服务支持 Range 请求'" />
+          <FaceOverlay :faces="sampleFaces" :rect="videoRect" :selected="selectedMarker" :mode="overlayMode" @select="selectFace" />
+          <button class="overlay-fullscreen" type="button" @click="toggleFullscreen">切换全屏</button>
+        </div>
+        <div class="face-controls">
+          <label>人脸标记 <select v-model="overlayMode" aria-label="人脸标记显示模式"><option value="corners">四角框</option><option value="boxes">完整框</option><option value="hidden">隐藏</option></select></label>
+          <div v-if="hasFaceLocations" class="sample-navigation">
+            <button type="button" :disabled="previousSample == null" @click="jumpToSample(previousSample)" aria-label="上一人脸采样帧"><ChevronLeft />上一采样帧</button>
+            <button type="button" :disabled="nextSample == null" @click="jumpToSample(nextSample)" aria-label="下一人脸采样帧">下一采样帧<ChevronRight /></button>
+          </div>
+          <span v-if="!hasFaceLocations">此结果暂无人脸位置，重新分析后可显示。</span>
+          <span v-else-if="overlayMode === 'hidden'">已隐藏人脸标记</span>
+          <span v-else-if="!paused">暂停到命中采样帧可查看人脸标记</span>
+          <span v-else-if="sampleFaces.length">当前 {{ sampleFaces.length }} 张命中人脸 · 悬浮查看候选，点击联动记录</span>
+          <span v-else>当前帧无位置标记，点击右侧记录定位采样帧</span>
+        </div>
         <div class="review-toolbar">
           <button type="button" :disabled="previousIndex < 0" @click="jump(previousIndex)"><ChevronLeft />上一标记</button>
           <button type="button" :disabled="nextIndex < 0" @click="jump(nextIndex)">下一标记<ChevronRight /></button>
@@ -281,7 +363,7 @@ onBeforeUnmount(() => {
       <aside class="review-events-panel">
         <div class="events-header"><h2>{{ visibleMarkers.length }} 条标记 <small>· 共 {{ markers.length }} 条</small></h2><label><span>类别</span><select v-model="category"><option value="">全部类别</option><option v-for="value in categories" :key="value" :value="value">{{ value }}</option></select></label></div>
         <div ref="eventsRef" class="review-events">
-          <button v-for="(marker, index) in visibleMarkers" :key="marker.id" :ref="element => setEventRow(marker.id, element)" type="button" :class="['review-event', { active: markerActive(marker) }]" @click="jump(index)"><strong>{{ marker.timestamp }}</strong><span>{{ details(marker) }}</span></button>
+          <button v-for="(marker, index) in visibleMarkers" :key="marker.id" :ref="element => setEventRow(marker.id, element)" type="button" :class="['review-event', { active: markerActive(marker), selected: selectedMarker === marker.id }]" :aria-pressed="selectedMarker === marker.id" @click="jump(index)"><strong>{{ marker.timestamp }}</strong><span>{{ details(marker) }}</span></button>
           <div v-if="rawResults != null && !visibleMarkers.length" class="empty-review"><Video /><p>没有审核标记</p><small>无标记不代表内容安全，请结合人工复核。</small></div>
         </div>
       </aside>
