@@ -23,7 +23,7 @@ const labelStyle = face => {
   return {
     left: `${left - x}px`, top: useAbove ? '0' : `${faceHeight}px`,
     transform: useAbove ? 'translateY(-100%)' : 'none',
-    width: `${labelWidth}px`, maxHeight: `${Math.max(38, Math.min(240, useAbove ? above : below))}px`
+    width: 'max-content', maxWidth: `${labelWidth}px`, maxHeight: `${Math.max(38, Math.min(240, useAbove ? above : below))}px`
   };
 };
 const layerStyle = computed(() => props.rect ? Object.fromEntries(
@@ -70,11 +70,11 @@ const boxStyle = box => ({
 .face-target:focus-visible { outline: 2px solid white; outline-offset: 3px; }
 .face-label { display: none; position: absolute; padding: 4px 0; overflow-y: auto; pointer-events: auto; }
 .face-hit:hover .face-label, .face-hit:focus-within .face-label, .selected .face-label, .full .face-label { display: grid; }
-.face-label button { display: flex; gap: 12px; justify-content: space-between; align-items: center; padding: 7px 10px; border: 0; background: #201f2eed; color: #fff; cursor: pointer; font-family: inherit; font-size: 12px; line-height: 1.5; text-align: left; }
+.face-label button { display: flex; gap: 6px; justify-content: flex-start; align-items: center; padding: 7px 10px; border: 0; background: #201f2eed; color: #fff; cursor: pointer; font-family: inherit; font-size: 10px; line-height: 1.5; text-align: left; }
 .face-label button:first-child { border-radius: 6px 6px 0 0; }
 .face-label button:last-child { border-radius: 0 0 6px 6px; }
 .face-label button:only-child { border-radius: 6px; }
 .face-label button:hover, .face-label button:focus-visible { background: #514054; }
 .face-label span { overflow-wrap: anywhere; }
-.face-label small { flex-shrink: 0; color: #ffb5b8; }
+.face-label small { flex-shrink: 0; font-size: 8px; color: #ffb5b8; }
 </style>
