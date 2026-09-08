@@ -405,7 +405,6 @@ async def _request_nsfw_caption(
             },
         ],
         "max_tokens": max_tokens,
-        "temperature": 0.0,
     }
     if context:
         # Never pass the raw context caption to the verifier: JoyCaption can
@@ -413,8 +412,16 @@ async def _request_nsfw_caption(
         # inspection topics cross this boundary; they assert no visible facts.
         focus = _nsfw_focus_questions(context)
         payload["messages"][-1]["content"][0]["text"] = focus + prompt
-    for token_budget in (max_tokens, max(512, max_tokens * 2)):
+    original_prompt = payload["messages"][-1]["content"][0]["text"]
+    for attempt, token_budget in enumerate((max_tokens, max(512, max_tokens * 2))):
         payload["max_tokens"] = token_budget
+        if attempt:
+            # Keep Chinese output and the original image/context boundaries
+            # while asking for a concise, non-repeating caption on retry.
+            payload["messages"][-1]["content"][0]["text"] = (
+                original_prompt
+                + " 请用简短中文描述，不要重复语句或罗列不存在的特征，描述完成后立即结束。"
+            )
         response = await client.post(
             settings.model_api_url,
             headers={"Authorization": f"Bearer {settings.model_api_key}"},
@@ -424,7 +431,7 @@ async def _request_nsfw_caption(
         choice = response.json()["choices"][0]
         if choice.get("finish_reason") != "length":
             break
-        # Retry once with more room; never send a partial caption to Guard.
+        # Never send a partial caption to Guard, including after the retry.
         _logger.warning("NSFW caption truncated at max_tokens=%s", token_budget)
     if choice.get("finish_reason") == "length":
         raise ValueError("NSFW caption was truncated")
@@ -479,6 +486,7 @@ async def _call_nsfw_analysis(
             sheet, layout = await asyncio.to_thread(_compose_nsfw_frames, images, timestamps)
     except Exception as exc:
         raise NsfwAnalysisError("NSFW 窗口图片拼接失败") from exc
+    stage = "context" if len(images) > 1 else "target"
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             context = ""
@@ -502,11 +510,16 @@ async def _call_nsfw_analysis(
             )
             # The downstream guard sees only this target-only verification.
             # No fallback to the context caption if verification fails.
+            stage = "target"
             return await _request_nsfw_caption(
                 client, target_image, prompt, context=context, max_tokens=160
             )
     except Exception as exc:
-        _logger.exception("NSFW model request or target verification failed")
+        _logger.exception(
+            "NSFW model request or target verification failed: stage=%s timestamps=%s",
+            stage,
+            timestamps,
+        )
         raise NsfwAnalysisError("NSFW 模型请求或目标帧复核失败，请检查模型服务") from exc
 
 

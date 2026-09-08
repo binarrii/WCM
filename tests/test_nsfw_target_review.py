@@ -100,7 +100,18 @@ async def test_truncated_caption_retries_with_more_room(monkeypatch, context_tru
     assert result == "verified target"
     original, retry = calls[:2] if context_truncated else calls[1:]
     assert retry["max_tokens"] > original["max_tokens"]
-    assert retry["messages"] == original["messages"]
+    assert retry["messages"][0] == original["messages"][0]
+    original_content = original["messages"][-1]["content"]
+    retry_content = retry["messages"][-1]["content"]
+    assert retry_content[1:] == original_content[1:]
+    assert retry_content[0]["text"].startswith(original_content[0]["text"])
+    assert "Chinese" in retry_content[0]["text"]
+    assert "English" not in retry_content[0]["text"]
+    assert "请用简短中文描述" in retry_content[0]["text"]
+    assert "partial" not in retry_content[0]["text"]
+    if context_truncated:
+        assert "TARGET 1" in retry_content[0]["text"]
+        assert "Do not transfer later-only content" in retry_content[0]["text"]
 
 
 @pytest.mark.asyncio

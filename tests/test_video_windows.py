@@ -241,7 +241,7 @@ async def test_nsfw_request_sends_one_contact_sheet_with_context_prompt(monkeypa
     assert await handlers._call_nsfw_analysis(images, [i / 2 for i in range(count)]) == "普通场景"
     assert len(captured) == (2 if count > 1 else 1)
     for payload in captured:
-        assert payload["temperature"] == 0
+        assert "temperature" not in payload
         assert len([x for x in payload["messages"][-1]["content"] if x["type"] == "image_url"]) == 1
     final_content = captured[-1]["messages"][-1]["content"]
     final_image = [x["image_url"]["url"] for x in final_content if x["type"] == "image_url"][
