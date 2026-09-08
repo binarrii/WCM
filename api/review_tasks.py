@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from . import review_task_store
 
 review_tasks_bp = APIRouter()
-_STATUSES = {"processing", "completed", "failed"}
+_STATUSES = {"processing", "completed", "partial", "failed"}
 
 
 class ReviewTaskDeleteRequest(BaseModel):
@@ -27,7 +27,7 @@ def _task_ids(ids: list[str]) -> list[str]:
 
 
 def _result_bytes(task: dict) -> bytes:
-    if task["status"] != "completed" or task.get("results") is None:
+    if task["status"] not in {"completed", "partial"} or task.get("results") is None:
         raise HTTPException(status_code=409, detail=f"审核任务 {task['id']} 的分析结果尚未就绪")
     return json.dumps(task["results"], ensure_ascii=False, indent=2).encode("utf-8")
 
@@ -72,7 +72,9 @@ async def download_review_task_results(body: ReviewTaskDeleteRequest):
     return Response(
         content=archive.getvalue(),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="analysis-results-{len(tasks)}.zip"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="analysis-results-{len(tasks)}.zip"'
+        },
     )
 
 

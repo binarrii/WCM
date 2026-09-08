@@ -2,21 +2,23 @@ import io
 import json
 import zipfile
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api import review_task_store, review_tasks, routes
 from api.main import create_app
 
 
-def test_review_task_list_and_detail_routes(monkeypatch):
+@pytest.mark.parametrize("status", ["completed", "partial"])
+def test_review_task_list_and_detail_routes(monkeypatch, status):
     created = datetime(2026, 9, 4, 10, 30)
     item = {
         "id": "task-1",
         "video_url": "https://example.com/video.mp4",
         "parameters": {"sample_interval": 1, "top_k": 10, "threshold": 0.5},
-        "status": "completed",
+        "status": status,
         "result_count": 2,
         "error": None,
         "created_at": created.isoformat() + "Z",
@@ -28,12 +30,12 @@ def test_review_task_list_and_detail_routes(monkeypatch):
     monkeypatch.setattr(review_tasks.review_task_store, "get", get_task)
 
     with TestClient(create_app()) as client:
-        response = client.get("/api/v1/review_tasks?q=video&status=completed")
+        response = client.get(f"/api/v1/review_tasks?q=video&status={status}")
         detail = client.get("/api/v1/review_tasks/task-1")
 
     assert response.status_code == 200
     assert response.json()["items"][0]["id"] == "task-1"
-    list_tasks.assert_awaited_once_with("video", "completed", 1, 30)
+    list_tasks.assert_awaited_once_with("video", status, 1, 30)
     assert detail.json()["results"][0]["timestamp"] == "00:00:01.000"
 
 
@@ -72,9 +74,20 @@ def test_batch_delete_requires_at_least_one_id(monkeypatch):
     assert response.status_code == 422
 
 
-def test_single_and_batch_result_downloads(monkeypatch):
+@pytest.mark.parametrize("status", ["completed", "partial"])
+def test_single_and_batch_result_downloads(monkeypatch, status):
     results = [{"timestamp": "00:00:01.000", "category": "人物", "description": "测试"}]
-    task = {"id": "task-1", "status": "completed", "results": results}
+    if status == "partial":
+        results.append(
+            {
+                "timestamp": "00:00:02.000",
+                "category": "审核未完成",
+                "description": "视觉审核超时",
+                "stage": "visual",
+                "review_status": "incomplete",
+            }
+        )
+    task = {"id": "task-1", "status": status, "results": results}
     monkeypatch.setattr(review_tasks.review_task_store, "get", AsyncMock(return_value=task))
     monkeypatch.setattr(
         review_tasks.review_task_store,
@@ -109,8 +122,19 @@ def test_result_download_rejects_unfinished_task(monkeypatch):
     assert response.status_code == 409
 
 
-def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch):
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch, incomplete):
     results = [{"timestamp": "00:00:01.000", "category": "待复核", "description": "内容"}]
+    if incomplete:
+        results.append(
+            {
+                "timestamp": "00:00:02.000",
+                "category": "审核未完成",
+                "description": "视觉审核超时",
+                "stage": "visual",
+                "review_status": "incomplete",
+            }
+        )
     create = AsyncMock(return_value="task-1")
     complete = AsyncMock()
     monkeypatch.setattr(routes.review_task_store, "create", create)
@@ -172,3 +196,28 @@ def test_store_public_row_decodes_json_and_utc_timestamps():
     assert item["parameters"] == {"top_k": 5}
     assert item["results"][0]["timestamp"] == "00:00:01.000"
     assert item["created_at"] == "2026-09-04T10:30:00Z"
+
+
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_completion_persists_gaps_and_partial_status(monkeypatch, incomplete):
+    results = [{"timestamp": "00:00:01.000", "category": "人物", "description": "测试"}]
+    if incomplete:
+        results.extend(
+            {"timestamp": "00:00:02.000", "review_status": "incomplete", "stage": stage}
+            for stage in ("visual", "ocr")
+        )
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    cursor = connection.cursor.return_value.__enter__.return_value
+    monkeypatch.setattr(review_task_store, "_connect", lambda: connection)
+    review_task_store._complete_sync("task-1", results)
+    cursor.execute.assert_called_once()
+    status, payload, count, error, task_id = cursor.execute.call_args.args[1]
+    assert status == ("partial" if incomplete else "completed")
+    assert json.loads(payload) == results
+    assert count == len(results)
+    assert task_id == "task-1"
+    if incomplete:
+        assert "1 个采样时间点、2 项" in error
+    else:
+        assert error is None

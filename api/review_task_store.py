@@ -132,14 +132,20 @@ async def create(video_url: str, parameters: dict, task_id: str | None = None) -
 
 
 def _complete_sync(task_id: str, results: list[dict]) -> None:
+    incomplete = [item for item in results if item.get("review_status") == "incomplete"]
+    status = "partial" if incomplete else "completed"
+    error = None
+    if incomplete:
+        timestamps = {item["timestamp"] for item in incomplete}
+        error = f"{len(timestamps)} 个采样时间点、{len(incomplete)} 项审核未完成，请查看结果并人工复核。"
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(
             """
             UPDATE review_tasks
-            SET status = 'completed', results = %s, result_count = %s, error = NULL
+            SET status = %s, results = %s, result_count = %s, error = %s
             WHERE id = %s
             """,
-            (_json_dump(results), len(results), task_id),
+            (status, _json_dump(results), len(results), error, task_id),
         )
 
 

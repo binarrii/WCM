@@ -60,9 +60,13 @@ export function normalizeResults(payload) {
     const key = [start, end, end > start ? category : '', end > start ? description : ''].join('\u0000');
     if (!grouped.has(key)) grouped.set(key, { start, end, findings: [] });
     const finding = { category, description };
+    if (item.review_status === 'incomplete') {
+      finding.review_status = 'incomplete';
+      finding.stage = item.stage;
+    }
     if (Array.isArray(item.face_samples)) finding.face_samples = normalizeFaceSamples(item.face_samples, start, end);
     const findings = grouped.get(key).findings;
-    const existing = findings.find(value => value.category === category && value.description === description);
+    const existing = findings.find(value => value.category === category && value.description === description && value.review_status === finding.review_status && value.stage === finding.stage);
     if (!existing) findings.push(finding);
     else if (finding.face_samples) existing.face_samples = [...(existing.face_samples || []), ...finding.face_samples];
   });

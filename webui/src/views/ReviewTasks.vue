@@ -5,6 +5,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue';
 import { saveBlob } from '../services/downloads';
 import { navigateToReviewTask } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
+import { reviewResultsReady } from '../services/reviewStatus';
 
 const query = ref('');
 const status = ref('');
@@ -27,9 +28,9 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const allSelected = computed(() => tasks.value.length > 0 && tasks.value.every(task => selectedIds.value.has(task.id)));
 const someSelected = computed(() => !allSelected.value && tasks.value.some(task => selectedIds.value.has(task.id)));
 const downloadableSelectedIds = computed(() => tasks.value
-  .filter(task => selectedIds.value.has(task.id) && task.status === 'completed')
+  .filter(task => selectedIds.value.has(task.id) && reviewResultsReady(task.status))
   .map(task => task.id));
-const statusLabel = value => ({ processing: '处理中', completed: '已完成', failed: '失败' }[value] || value);
+const statusLabel = value => ({ processing: '处理中', completed: '已完成', partial: '含未审核项', failed: '失败' }[value] || value);
 const formatTime = value => value ? new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
@@ -81,7 +82,7 @@ const toggleAll = event => {
   selectedIds.value = event.target.checked ? new Set(tasks.value.map(task => task.id)) : new Set();
 };
 const downloadTaskResults = async task => {
-  if (task.status !== 'completed' || downloadingIds.value.has(task.id)) return;
+  if (!reviewResultsReady(task.status) || downloadingIds.value.has(task.id)) return;
   downloadingIds.value = new Set([...downloadingIds.value, task.id]);
   error.value = '';
   notice.value = '';
@@ -167,7 +168,7 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
         <Search />
         <input v-model="query" type="search" placeholder="检索任务 ID、视频地址或失败原因" aria-label="检索审核任务" />
       </form>
-      <label class="task-status-filter"><span>任务状态</span><select v-model="status"><option value="">全部状态</option><option value="processing">处理中</option><option value="completed">已完成</option><option value="failed">失败</option></select></label>
+      <label class="task-status-filter"><span>任务状态</span><select v-model="status"><option value="">全部状态</option><option value="processing">处理中</option><option value="completed">已完成</option><option value="partial">含未审核项</option><option value="failed">失败</option></select></label>
       <button class="task-refresh" type="button" :disabled="loading" @click="loadTasks"><RefreshCw :class="{ spinner: loading }" />刷新</button>
     </section>
 
@@ -175,7 +176,7 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
     <p v-if="notice" class="task-notice" role="status"><CheckCircle2 />{{ notice }}</p>
 
     <section class="task-table-card">
-      <header><div class="task-table-title"><h2>任务记录</h2><span>共 {{ total }} 条</span></div><div class="task-table-header-actions"><template v-if="selectedIds.size"><span>已选择 {{ selectedIds.size }} 条</span><button class="download-selected" type="button" :disabled="deleting || batchDownloading || !downloadableSelectedIds.length" :title="downloadableSelectedIds.length ? `下载 ${downloadableSelectedIds.length} 条已完成任务的结果` : '所选任务暂无可下载结果'" @click="downloadSelectedResults"><Download />{{ batchDownloading ? '打包中…' : `批量下载 (${downloadableSelectedIds.length})` }}</button><button type="button" :disabled="deleting || batchDownloading" @click="requestDeleteSelected"><Trash2 />批量删除</button></template><small v-else>点击任意一行进入视频审核页并自动加载结果</small></div></header>
+      <header><div class="task-table-title"><h2>任务记录</h2><span>共 {{ total }} 条</span></div><div class="task-table-header-actions"><template v-if="selectedIds.size"><span>已选择 {{ selectedIds.size }} 条</span><button class="download-selected" type="button" :disabled="deleting || batchDownloading || !downloadableSelectedIds.length" :title="downloadableSelectedIds.length ? `下载 ${downloadableSelectedIds.length} 条任务的结果` : '所选任务暂无可下载结果'" @click="downloadSelectedResults"><Download />{{ batchDownloading ? '打包中…' : `批量下载 (${downloadableSelectedIds.length})` }}</button><button type="button" :disabled="deleting || batchDownloading" @click="requestDeleteSelected"><Trash2 />批量删除</button></template><small v-else>点击任意一行进入视频审核页并自动加载结果</small></div></header>
       <div class="task-table-scroll">
         <table>
           <thead><tr><th class="task-select-cell"><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" :disabled="!tasks.length || deleting" aria-label="选择当前页全部任务" @change="toggleAll" /></th><th>状态</th><th>视频地址</th><th>提交参数</th><th>结果</th><th>提交时间</th><th aria-label="操作"></th></tr></thead>
@@ -183,11 +184,11 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
             <tr v-for="task in tasks" :key="task.id" :class="{ selected: selectedIds.has(task.id) }" tabindex="0" @click="navigateToReviewTask(task.id)" @keydown.enter="navigateToReviewTask(task.id)">
               <td class="task-select-cell" @click.stop @keydown.enter.stop><input type="checkbox" :checked="selectedIds.has(task.id)" :disabled="deleting" :aria-label="`选择任务 ${task.id}`" @change="toggleTask(task.id)" /></td>
               <td><span :class="['task-status', task.status]">{{ statusLabel(task.status) }}</span></td>
-              <td class="task-video"><strong :title="task.video_url">{{ task.video_url }}</strong><small>{{ task.id }}</small><em v-if="task.error" :title="task.error">{{ task.error }}</em></td>
+              <td class="task-video"><strong :title="task.video_url">{{ task.video_url }}</strong><small>{{ task.id }}</small><em v-if="task.error" :class="{ partial: task.status === 'partial' }" :title="task.error">{{ task.error }}</em></td>
               <td class="task-parameters">{{ parameterSummary(task) }}</td>
               <td>{{ task.result_count }} 条</td>
               <td class="task-date">{{ formatTime(task.created_at) }}</td>
-              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="task.status === 'completed' ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || task.status !== 'completed' || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting || batchDownloading" @click="requestDeleteTask(task)"><Trash2 /></button></td>
+              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="reviewResultsReady(task.status) ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || !reviewResultsReady(task.status) || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting || batchDownloading" @click="requestDeleteTask(task)"><Trash2 /></button></td>
             </tr>
           </tbody>
         </table>

@@ -20,9 +20,9 @@ test('action column remains a table cell so row separators span the full width',
   assert.match(css, /\.task-actions button\s*\{[^}]*display:\s*inline-grid/);
 });
 
-test('completed task results support single JSON and selected ZIP downloads', () => {
-  assert.match(component, /title="task\.status === 'completed' \? '下载分析结果'/);
-  assert.match(component, /task\.status !== 'completed'/);
+test('completed and partial task results support single JSON and selected ZIP downloads', () => {
+  assert.match(component, /title="reviewResultsReady\(task\.status\) \? '下载分析结果'/);
+  assert.match(component, /!reviewResultsReady\(task\.status\)/);
   assert.match(component, /批量下载 \(\$\{downloadableSelectedIds\.length\}\)/);
   assert.match(service, /responseType:\s*'blob'/);
   assert.match(service, /review_tasks\/results\/download/);

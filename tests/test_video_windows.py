@@ -39,7 +39,7 @@ class Capture:
 
 
 @pytest.mark.asyncio
-async def test_model_failure_fails_review_and_releases_capture(monkeypatch):
+async def test_model_failure_records_every_unaudited_frame_and_releases_capture(monkeypatch):
     cap = Capture(2)
     monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
     monkeypatch.setattr(
@@ -55,8 +55,11 @@ async def test_model_failure_fails_review_and_releases_capture(monkeypatch):
         "_call_nsfw_analysis",
         AsyncMock(side_effect=handlers.NsfwAnalysisError("offline")),
     )
-    with pytest.raises(handlers.NsfwAnalysisError, match="offline"):
-        await handlers._process_analyze_media("http://test/video.mp4", 0.5, 5, 0.5)
+    result = await handlers._process_analyze_media("http://test/video.mp4", 0.5, 5, 0.5)
+    assert [item["timestamp"] for item in result] == ["00:00:00.000", "00:00:00.500"]
+    assert all(
+        item["review_status"] == "incomplete" and item["stage"] == "visual" for item in result
+    )
     guard.assert_not_called()
     assert cap.released
 

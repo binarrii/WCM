@@ -5,6 +5,7 @@ import { mediaService } from '../services/mediaService';
 import { saveJson } from '../services/downloads';
 import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
+import { reviewResultsReady } from '../services/reviewStatus';
 import {
   formatTimestamp,
   layoutMarkers,
@@ -63,6 +64,7 @@ const loadedTaskId = ref('');
 const setupExpanded = ref(true);
 const markers = ref([]);
 const category = ref('');
+const incompleteCount = computed(() => markers.value.reduce((count, marker) => count + marker.findings.filter(finding => finding.review_status === 'incomplete').length, 0));
 const currentSeconds = ref(0);
 const durationMs = ref(0);
 const pendingSeek = ref(null);
@@ -153,7 +155,7 @@ const loadReviewTask = async () => {
     if (Number.isFinite(Number(parameters.threshold))) {
       minSimilarity.value = Math.min(1, Math.max(0.1, 1 - Number(parameters.threshold)));
     }
-    if (task.status === 'completed') {
+    if (reviewResultsReady(task.status)) {
       loadResults(task.results || [], { collapseSetup: true });
     } else if (task.status === 'failed') {
       error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
@@ -277,6 +279,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="video-review animate-fade-in">
+    <p v-if="incompleteCount" class="review-warning" role="status"><AlertCircle /><span>有 {{ incompleteCount }} 项审核未完成，已保留其他审核结果。请筛选“审核未完成”并逐一人工复核，不能视为安全通过。</span><button type="button" @click="category = '审核未完成'">查看未审核项</button></p>
     <section :class="['review-setup-card', { collapsed: !setupExpanded }]">
       <div class="setup-heading">
         <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
