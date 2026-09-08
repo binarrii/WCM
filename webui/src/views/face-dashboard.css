@@ -324,6 +324,23 @@
   align-items: center;
 }
 
+.filter-actions .toolbar-action {
+  box-sizing: border-box;
+  height: 44px;
+  padding: 0 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.toolbar-action .btn-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
 .filter-group {
   display: flex;
   background-color: var(--bg-primary);

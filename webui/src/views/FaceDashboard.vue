@@ -869,10 +869,11 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <button class="btn-secondary" @click="toggleMergeMode" :disabled="submitting">
-            <Layers class="btn-icon" />{{ mergeMode ? '退出合并' : '人物合并' }}
+          <button class="btn-secondary toolbar-action" @click="toggleMergeMode" :disabled="submitting">
+            <Layers class="btn-icon" />
+            <span>{{ mergeMode ? '退出合并' : '人物合并' }}</span>
           </button>
-          <button class="add-btn" @click="openCreateModal">
+          <button class="add-btn toolbar-action" @click="openCreateModal">
             <UserPlus class="btn-icon" />
             <span>新增人脸</span>
           </button>
