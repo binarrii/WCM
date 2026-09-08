@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 IMAGE_ROOT = Path("/tmp/wcm")
 
 
+class SameNamePeopleError(ValueError):
+    def __init__(self, people: list[dict]):
+        super().__init__("已存在同名人物，请选择合并或新建")
+        self.people = people
+
+
 def library_write(func):
     """Serialize library writes across Gunicorn workers, without blocking reads."""
 

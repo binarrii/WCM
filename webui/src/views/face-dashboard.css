@@ -1,4 +1,14 @@
 /* App Layout Container */
+.same-name-upload { display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--bg-primary); border-radius: 12px; }
+.same-name-upload img { width: 64px; height: 72px; object-fit: cover; border-radius: 8px; }
+.same-name-upload strong, .same-name-upload small { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.same-name-upload span { min-width: 0; }
+.same-name-upload small { color: var(--text-secondary); }
+.modal-card.same-name-modal { display: flex; flex-direction: column; overflow: hidden; }
+.same-name-modal .modal-form { min-height: 0; overflow-y: auto; }
+.same-name-modal .modal-header { flex-shrink: 0; }
+.same-name-actions { flex-wrap: wrap; flex-shrink: 0; padding: 16px 24px; margin: 0; border-top: 1px solid var(--border-color); }
+.same-name-actions button { flex: 1; padding: 12px; white-space: nowrap; }
 .merge-selection-bar, .person-select, .append-person-summary {
   display: flex;
   gap: 12px;

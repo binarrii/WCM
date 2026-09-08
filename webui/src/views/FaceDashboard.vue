@@ -64,6 +64,70 @@ const mergeMode = ref(false);
 const selectedPeople = ref([]);
 const isMergeModalOpen = ref(false);
 const mergeTargetId = ref('');
+const sameNamePeople = ref([]);
+const pendingCreate = ref(null);
+const sameNameTargetId = ref('');
+const isSameNameModalOpen = computed(() => pendingCreate.value !== null);
+const checkingName = ref(false);
+
+const showSameNameChoice = (draft, people) => {
+  pendingCreate.value = draft;
+  sameNamePeople.value = people;
+  sameNameTargetId.value = '';
+};
+const cancelSameNameChoice = () => {
+  if (submitting.value) return;
+  if (pendingCreate.value) form.value = { ...pendingCreate.value };
+  pendingCreate.value = null;
+  sameNamePeople.value = [];
+  sameNameTargetId.value = '';
+};
+const finishNewPerson = async (message) => {
+  pendingCreate.value = null;
+  sameNamePeople.value = [];
+  submitting.value = false;
+  closeModal();
+  isImageSearchActive.value = false;
+  imageSearchResults.value = null;
+  await Promise.all([fetchRecords(true), fetchStats()]);
+  showToast(message);
+};
+const submitNewPerson = async (draft, forceNew = false) => {
+  const formData = new FormData();
+  for (const key of ['name', 'occupation', 'type', 'remarks', 'file']) formData.append(key, draft[key]);
+  formData.append('category', draft.type);
+  formData.append('check_name', forceNew ? 'false' : 'true');
+  try {
+    await faceService.createRecord(formData);
+  } catch (error) {
+    const detail = error.response?.data?.detail;
+    if (error.response?.status === 409 && detail?.code === 'same_name_people') {
+      showSameNameChoice(draft, detail.items);
+      return;
+    }
+    throw error;
+  }
+  await finishNewPerson('人脸及人物档案注册成功！');
+};
+const resolveSameName = async (action) => {
+  if (submitting.value || !pendingCreate.value) return;
+  if (action === 'merge' && !sameNameTargetId.value) return;
+  submitting.value = true;
+  try {
+    if (action === 'merge') {
+      const payload = new FormData();
+      payload.append('file', pendingCreate.value.file);
+      const result = await faceService.appendImage(sameNameTargetId.value, payload);
+      await finishNewPerson(result.added_images ? '照片已合入已有档案，人物 ID 保持不变' : '该照片已在已有档案中，无需重复添加');
+    } else {
+      await submitNewPerson(pendingCreate.value, true);
+    }
+  } catch (error) {
+    showToast(error.response?.data?.detail || '操作失败，请重试或返回修改', 'error');
+  } finally {
+    submitting.value = false;
+  }
+};
 
 const togglePersonSelection = (record) => {
   const index = selectedPeople.value.findIndex(item => item.id === record.id);
@@ -394,7 +458,7 @@ const closeModal = () => {
 
 // Submit form (Save / Update)
 const handleSubmit = async () => {
-  if (submitting.value) return;
+  if (submitting.value || isSameNameModalOpen.value) return;
   if (!form.value.name.trim()) {
     showToast('请输入姓名', 'error');
     return;
@@ -469,27 +533,22 @@ const handleSubmit = async () => {
       
       fetchStats();
     } else {
-      const formData = new FormData();
-      formData.append('name', form.value.name);
-      formData.append('occupation', form.value.occupation);
-      formData.append('type', form.value.type);
-      formData.append('category', form.value.type);
-      formData.append('remarks', form.value.remarks);
-      formData.append('file', form.value.file);
-      
-      await faceService.createRecord(formData);
-      
-      showToast('人脸及人物档案注册成功！');
-      submitting.value = false;
-      closeModal();
-      fetchRecords(true);
-      fetchStats();
+      const draft = { ...form.value, name: form.value.name.trim() };
+      checkingName.value = true;
+      const people = await faceService.findSameName(draft.name);
+      checkingName.value = false;
+      if (people.length) {
+        showSameNameChoice(draft, people);
+        return;
+      }
+      await submitNewPerson(draft);
     }
   } catch (error) {
     const errorMsg = error.response?.data?.detail || '操作失败';
     showToast(errorMsg, 'error');
     console.error(error);
   } finally {
+    checkingName.value = false;
     submitting.value = false;
   }
 };
@@ -643,6 +702,7 @@ const handleScroll = () => {
 };
 
 const handleGlobalPaste = (e) => {
+  if (submitting.value || isSameNameModalOpen.value) return;
   if (!isModalOpen.value && !isImageSearchModalOpen.value) return;
   const items = e.clipboardData?.items;
   if (!items) return;
@@ -684,6 +744,10 @@ const handleGlobalKeyDown = (e) => {
     return;
   }
   if (e.key === 'Escape' || e.keyCode === 27) {
+    if (isSameNameModalOpen.value) {
+      cancelSameNameChoice();
+      return;
+    }
     if (isMergeModalOpen.value) {
       if (!submitting.value) isMergeModalOpen.value = false;
       return;
@@ -935,7 +999,7 @@ onUnmounted(() => {
     </main>
 
     <!-- Glassmorphic Add/Edit Modal -->
-    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
+    <div v-if="isModalOpen && !isSameNameModalOpen" class="modal-overlay" @click.self="closeModal">
       <div class="modal-card animate-fade-in">
         <div class="modal-header">
           <h3 class="modal-title">
@@ -1031,7 +1095,7 @@ onUnmounted(() => {
             </button>
             <button type="submit" class="btn-primary" :disabled="submitting">
               <Settings v-if="submitting" class="spinner btn-spinner" />
-              <span>{{ submitting ? '人脸特征检测与注册中...' : isAppendMode ? '确认追加照片' : '确认提交' }}</span>
+              <span>{{ checkingName ? '正在查询同名人物...' : submitting ? '人脸特征检测与注册中...' : isAppendMode ? '确认追加照片' : '确认提交' }}</span>
             </button>
           </div>
         </form>
@@ -1060,6 +1124,35 @@ onUnmounted(() => {
             <button class="btn-primary" :disabled="submitting" @click="handleMerge"><Settings v-if="submitting" class="spinner btn-spinner" />{{ submitting ? '正在合并，请稍候...' : '确认合并' }}</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div v-if="isSameNameModalOpen" class="modal-overlay" @click.self="cancelSameNameChoice">
+      <div class="modal-card merge-modal same-name-modal" role="dialog" aria-modal="true" aria-labelledby="same-name-title">
+        <div class="modal-header">
+          <h3 id="same-name-title" class="modal-title">发现同名人物</h3>
+          <button class="close-btn" :disabled="submitting" @click="cancelSameNameChoice" aria-label="返回修改"><X class="close-icon" /></button>
+        </div>
+        <div class="modal-form">
+          <p>数据库中有 {{ sameNamePeople.length }} 个名为「{{ pendingCreate.name }}」的档案。请选择合并到已有档案，或作为同名的另一人新建。</p>
+          <div class="same-name-upload">
+            <img v-if="imagePreviewUrl" :src="imagePreviewUrl" alt="本次上传的照片" />
+            <span>本次上传<strong>{{ pendingCreate.name }}</strong><small>{{ pendingCreate.type }} · {{ pendingCreate.remarks || '暂无备注' }}</small></span>
+          </div>
+          <div class="merge-candidates">
+            <label v-for="person in sameNamePeople" :key="person.id" class="merge-candidate" :class="{ active: sameNameTargetId === person.id }">
+              <input type="radio" name="same-name-target" :value="person.id" v-model="sameNameTargetId" :disabled="submitting" />
+              <img v-if="person.image_url" :src="`${IMAGE_BASE}${person.image_url}`" :alt="person.name" />
+              <span><strong>{{ person.name }}</strong><small>ID: {{ person.id }}</small><small>{{ person.person?.type || '其它' }} · {{ person.face_count ?? getRecordImages(person).length }} 张照片</small><small>{{ person.person?.remarks || '暂无备注' }}</small></span>
+            </label>
+          </div>
+          <p class="merge-history-note">合并仅追加本次照片，保留已有 ID、类别和备注；新建则使用本次填写的信息。</p>
+        </div>
+          <div class="modal-actions same-name-actions">
+            <button class="btn-secondary" :disabled="submitting" @click="cancelSameNameChoice">返回修改</button>
+            <button class="btn-secondary" :disabled="submitting" @click="resolveSameName('create')">仍然新建人物</button>
+            <button class="btn-primary" :disabled="submitting || !sameNameTargetId" @click="resolveSameName('merge')"><Settings v-if="submitting" class="spinner btn-spinner" />{{ submitting ? '正在处理...' : '合并到所选人物' }}</button>
+          </div>
       </div>
     </div>
 

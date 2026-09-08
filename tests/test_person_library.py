@@ -5,6 +5,41 @@ import pytest
 from wcm_facerec import person_library
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine
+from wcm_facerec.person_library import SameNamePeopleError
+
+
+@pytest.mark.asyncio
+async def test_same_name_checks_all_pages_exact_names_and_all_categories(library):
+    engine, seed, _ = library
+    calls = []
+
+    def list_persons(**kwargs):
+        calls.append(kwargs)
+        if kwargs["cursor"] is None:
+            return [
+                {"id": "similar", "name": "高洁明"},
+                {"id": "one", "name": "高洁", "type": "A"},
+            ], "next"
+        return [{"id": "two", "name": " 高洁 ", "type": "B"}], None
+
+    engine._adapter.list_persons = list_persons
+    people = await engine.find_people_by_name(" 高洁 ")
+    assert [person["id"] for person in people] == ["one", "two"]
+    assert [call["cursor"] for call in calls] == [None, "next"]
+    assert all(call["search"] == "高洁" and "collection_id" not in call for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_register_rechecks_same_name_before_any_write(library):
+    engine, seed, _ = library
+    seed("one", "A", [b"first"])
+    original = deepcopy(engine._adapter.people)
+    engine._adapter.list_persons = lambda **kwargs: ([{"id": "one", "name": "高洁"}], None)
+    with pytest.raises(SameNamePeopleError) as error:
+        await engine.register_from_image("高洁", b"new", check_name=True)
+    assert error.value.people == [{"id": "one", "name": "高洁"}]
+    assert engine._adapter.people == original
+    assert engine._adapter.calls == []
 
 
 class MemoryAdapter:

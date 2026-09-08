@@ -1,6 +1,10 @@
 import api from './api';
 
 export const faceService = {
+  async findSameName(name) {
+    const response = await api.get('/face_records/name_matches', { params: { name } });
+    return response.data.items;
+  },
   // Get face records with pagination, search, and type filters
   async getRecords({ cursor = null, limit = 12, search = '', type = 'All' }) {
     const response = await api.get('/face_records', {

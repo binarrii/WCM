@@ -9,6 +9,48 @@ from fastapi.testclient import TestClient
 
 from api import face_records, handlers, routes
 from api.main import create_app
+from wcm_facerec.person_library import SameNamePeopleError
+
+
+def test_name_matches_route_preserves_ids_and_reports_lookup_failure(client_for):
+    class NameEngine(StubEngine):
+        async def find_people_by_name(self, name):
+            if name == "fail":
+                raise RuntimeError("upstream offline")
+            return [{"id": "canonical-id", "name": name, "type": "其它"}]
+
+    client = client_for(NameEngine())
+    response = client.get("/api/v1/face_records/name_matches", params={"name": "高洁"})
+    assert response.status_code == 200
+    assert response.json()["items"][0]["id"] == "canonical-id"
+    assert (
+        client.get("/api/v1/face_records/name_matches", params={"name": "fail"}).status_code == 502
+    )
+
+
+@pytest.mark.parametrize("check_name", ["true", "false"])
+def test_create_conflict_requires_explicit_new_choice(client_for, sample_image_bytes, check_name):
+    class NameEngine(StubEngine):
+        async def detect_faces(self, contents):
+            return [{}]
+
+        async def register_from_image(self, **kwargs):
+            if kwargs["check_name"]:
+                raise SameNamePeopleError([{"id": "existing", "name": kwargs["name"]}])
+            return {"id": "new", "name": kwargs["name"]}
+
+    response = client_for(NameEngine()).post(
+        "/api/v1/face_records",
+        data={"name": "高洁", "check_name": check_name},
+        files={"file": ("face.jpg", sample_image_bytes, "image/jpeg")},
+    )
+    if check_name == "true":
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "same_name_people"
+        assert response.json()["detail"]["items"][0]["id"] == "existing"
+    else:
+        assert response.status_code == 200
+        assert response.json()["id"] == "new"
 
 
 class StubEngine:
@@ -530,6 +572,7 @@ def test_merge_route_validates_ids_and_serializes_gallery(client_for, monkeypatc
     paths = [tmp_path / "a.jpg", tmp_path / "b.jpg"]
     for path in paths:
         path.write_bytes(b"image")
+
     class MergeEngine(StubEngine):
         async def merge_person_records(self, target_id, source_ids):
             self.args = (target_id, source_ids)

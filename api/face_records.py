@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
+from wcm_facerec.person_library import SameNamePeopleError
 
 face_records_bp = APIRouter()
 
@@ -236,6 +237,17 @@ async def get_face_records_stats():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@face_records_bp.get("/face_records/name_matches")
+async def find_same_name_people(name: str = Query(min_length=1, max_length=256)):
+    try:
+        people = await get_face_engine().find_people_by_name(name)
+        return {"items": [_item_with_person(person) for person in people]}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="同名人物查询失败，请稍后重试") from exc
+
+
 @face_records_bp.post("/face_records")
 async def create_face_record(request: Request):
     engine = get_face_engine()
@@ -277,8 +289,17 @@ async def create_face_record(request: Request):
             occupation=form.get("occupation") or None,
             type_=record_type,
             remarks=form.get("remarks") or None,
+            check_name=form.get("check_name") == "true",
         )
         return _item_with_person(record)
+    except SameNamePeopleError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "same_name_people",
+                "items": [_item_with_person(person) for person in exc.people],
+            },
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"注册人脸失败: {exc}") from exc
 

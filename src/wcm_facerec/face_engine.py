@@ -34,7 +34,7 @@ import numpy as np
 
 from .config import DEFAULT_DISTANCE_THRESHOLD, settings
 from .ifs_adapter import InsightFaceAdapter, crop_query_face
-from .person_library import gallery, library_write, mutate_gallery
+from .person_library import SameNamePeopleError, gallery, library_write, mutate_gallery
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +354,23 @@ class FaceEngine:
     # ------------------------------------------------------------------
     # Write paths
     # ------------------------------------------------------------------
+    async def find_people_by_name(self, name: str) -> list[dict]:
+        """Check all aggregate pages, across categories, for the exact name."""
+        name = name.strip()
+        if not name:
+            raise ValueError("姓名是必填项")
+        cursor = None
+        matches = {}
+        while True:
+            people, cursor = await self._run(
+                self._adapter.list_persons, search=name, limit=100, cursor=cursor
+            )
+            for person in people:
+                if (person.get("name") or "").strip().casefold() == name.casefold():
+                    matches[person["id"]] = person
+            if not cursor:
+                return list(matches.values())
+
     @library_write
     async def register_from_image(
         self,
@@ -364,6 +381,7 @@ class FaceEngine:
         occupation: str | None = None,
         type_: str | None = None,
         remarks: str | None = None,
+        check_name: bool = False,
     ) -> dict:
         """Persist bytes to ``/tmp/wcm`` and enroll into InsightFace Server.
 
@@ -379,6 +397,11 @@ class FaceEngine:
         ``ifs_adapter._person_to_item``) keyed by the aggregate IFS
         ``Person.id`` (which becomes the webui's ``record.id``).
         """
+        if check_name:
+            name = name.strip()
+            matches = await self.find_people_by_name(name)
+            if matches:
+                raise SameNamePeopleError(matches)
         try:
             image_bytes = _to_bytes(img_source)
         except ValueError as exc:
