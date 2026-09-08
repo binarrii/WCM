@@ -188,13 +188,15 @@ async def _call_llm_guard(text: str) -> dict:
 
             for line in analysis.split("\n"):
                 line = line.strip()
-                if "safety:" in line.lower() and "unsafe" in line.lower():
+                # The Guard also emits Controversial for content that needs
+                # human review. Both verdicts must reach the review results.
+                if re.search(r"\bsafety\s*:\s*(unsafe|controversial)\b", line, re.IGNORECASE):
                     is_safe = False
                 elif "categories:" in line.lower():
                     idx = line.lower().find("categories:")
                     category = line[idx + len("categories:") :].strip()
 
-            if not is_safe and not category and "unsafe" in analysis.lower():
+            if not is_safe and not category:
                 # fallback extraction
                 category = "未知敏感内容"
 
