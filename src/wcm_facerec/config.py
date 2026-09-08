@@ -1,5 +1,7 @@
 """Configuration management for face recognition service."""
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # InsightFace Server is a single-model service (currently buffalo_m v0.7,
@@ -71,6 +73,10 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 100
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = "sk-o8EGlzXqMQi8Ba06E2B1BcF8217c45B6Bb70Ce5765B70c42"
+
+    # Multi-image Qwen input, with contact-sheet compatibility fallback.
+    nsfw_image_mode: Literal["auto", "montage"] = "auto"
+    nsfw_verify_target: bool = False
 
     # ---- Review task storage ----
     # Disabled by default so local API-only development remains lightweight.

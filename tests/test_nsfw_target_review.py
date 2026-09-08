@@ -1,4 +1,4 @@
-"""Context is advisory; only a successful target-only caption reaches Guard."""
+"""Multi-image fast path and conservative contact-sheet fallback."""
 
 import asyncio
 import base64
@@ -12,6 +12,12 @@ import numpy as np
 import pytest
 
 from api import handlers
+
+
+@pytest.fixture(autouse=True)
+def default_mode(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "nsfw_image_mode", "auto")
+    monkeypatch.setattr(handlers.settings, "nsfw_verify_target", False)
 
 
 def image(value):
@@ -47,6 +53,7 @@ def caption(text, finish_reason="stop"):
 
 @pytest.mark.asyncio
 async def test_only_verified_target_description_reaches_guard(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "nsfw_verify_target", True)
     calls = install_client(monkeypatch, [caption("后续画面发生暴力"), caption("目标帧为普通街景")])
     monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
     monkeypatch.setattr(
@@ -77,41 +84,22 @@ def test_context_can_only_select_fixed_questions_not_inject_objects_or_instructi
     "failure", [httpx.ReadTimeout("offline"), caption(""), caption("partial", "length")]
 )
 async def test_target_verification_failure_never_falls_back_to_context(monkeypatch, failure):
+    monkeypatch.setattr(handlers.settings, "nsfw_verify_target", True)
     replies = [caption("context must not be returned"), failure]
-    truncated = isinstance(failure, dict) and failure.get("finish_reason") == "length"
-    if truncated:
-        replies.append(failure)
     calls = install_client(monkeypatch, replies)
     with pytest.raises(handlers.NsfwAnalysisError, match="目标帧复核失败"):
         await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
-    assert len(calls) == (3 if truncated else 2)
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("context_truncated", [False, True])
-async def test_truncated_caption_retries_with_more_room(monkeypatch, context_truncated):
-    replies = (
-        [caption("partial", "length"), caption("context"), caption("verified target")]
-        if context_truncated
-        else [caption("context"), caption("partial", "length"), caption("verified target")]
-    )
-    calls = install_client(monkeypatch, replies)
-    result = await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
-    assert result == "verified target"
-    original, retry = calls[:2] if context_truncated else calls[1:]
-    assert retry["max_tokens"] > original["max_tokens"]
-    assert retry["messages"][0] == original["messages"][0]
-    original_content = original["messages"][-1]["content"]
-    retry_content = retry["messages"][-1]["content"]
-    assert retry_content[1:] == original_content[1:]
-    assert retry_content[0]["text"].startswith(original_content[0]["text"])
-    assert "Chinese" in retry_content[0]["text"]
-    assert "English" not in retry_content[0]["text"]
-    assert "请用简短中文描述" in retry_content[0]["text"]
-    assert "partial" not in retry_content[0]["text"]
-    if context_truncated:
-        assert "TARGET 1" in retry_content[0]["text"]
-        assert "Do not transfer later-only content" in retry_content[0]["text"]
+@pytest.mark.parametrize("failure", [caption("partial", "length"), caption(""), caption(None)])
+async def test_incomplete_description_fails_without_retry_or_fallback(monkeypatch, failure):
+    calls = install_client(monkeypatch, [failure])
+    with pytest.raises(handlers.NsfwAnalysisError):
+        await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
+    assert len(calls) == 1
+    assert calls[0]["max_tokens"] == 1024
 
 
 @pytest.mark.asyncio
@@ -124,6 +112,7 @@ async def test_context_failure_aborts_review(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cancellation_during_verification_closes_client(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "nsfw_verify_target", True)
     started = asyncio.Event()
     closed = []
 
@@ -152,3 +141,60 @@ async def test_cancellation_during_verification_closes_client(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert closed == [True]
+
+
+def status_error(status, message):
+    response = httpx.Response(status, text=message, request=httpx.Request("POST", "https://fixture"))
+    return httpx.HTTPStatusError(message, request=response.request, response=response)
+
+
+def images_in(payload):
+    return [x for x in payload["messages"][-1]["content"] if x["type"] == "image_url"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["Multiple images are not supported", "Only one image is supported", "最多1张图片"])
+async def test_unsupported_multi_image_falls_back_to_montage_and_verification(monkeypatch, message):
+    calls = install_client(monkeypatch, [status_error(400, message), caption("context 暴力"), caption("目标场景")])
+    assert await handlers._call_nsfw_analysis([image(60), image(130), image(220)], [0, 1, 2]) == "目标场景"
+    assert [len(images_in(p)) for p in calls] == [3, 1, 1]
+    assert all(p["max_tokens"] == 1024 for p in calls)
+    assert "large TARGET 1" in calls[1]["messages"][-1]["content"][0]["text"]
+    assert "context 暴力" not in str(calls[2])
+    assert "visible injuries" in str(calls[2])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,message", [(401, "unauthorized"), (429, "limit exceeded"), (500, "unknown renderer qwen3.8"), (400, "invalid image data"), (422, "max_tokens exceeds context length")])
+async def test_unrelated_http_errors_do_not_trigger_more_requests(monkeypatch, status, message):
+    calls = install_client(monkeypatch, [status_error(status, message)])
+    with pytest.raises(handlers.NsfwAnalysisError):
+        await handlers._call_nsfw_analysis([image(60), image(220)])
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_montage_skips_multi_image_probe(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "nsfw_image_mode", "montage")
+    calls = install_client(monkeypatch, [caption("context"), caption("target")])
+    assert await handlers._call_nsfw_analysis([image(60), image(220)]) == "target"
+    assert [len(images_in(p)) for p in calls] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_fallback_failure_is_not_a_safe_caption(monkeypatch):
+    calls = install_client(monkeypatch, [status_error(422, "Only one image allowed"), httpx.ReadTimeout("offline")])
+    with pytest.raises(handlers.NsfwAnalysisError):
+        await handlers._call_nsfw_analysis([image(60), image(220)])
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_successful_multi_image_never_composes_or_reverifies(monkeypatch):
+    calls = install_client(monkeypatch, [caption("目标图描述")])
+    compose = AsyncMock(side_effect=AssertionError("must not stitch"))
+    monkeypatch.setattr(handlers, "_compose_nsfw_frames", compose)
+    result = await handlers._call_nsfw_analysis([image(60), image(130), image(220)])
+    assert result == "目标图描述"
+    assert len(calls) == 1
+    compose.assert_not_called()

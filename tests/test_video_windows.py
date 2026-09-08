@@ -206,59 +206,29 @@ async def test_combined_and_standalone_tasks_use_identical_windows(monkeypatch, 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("count", [1, 2, 3])
-async def test_nsfw_request_sends_one_contact_sheet_with_context_prompt(monkeypatch, count):
-    captured = []
+async def test_nsfw_request_sends_independent_images_in_order(monkeypatch, count):
+    from tests.test_nsfw_target_review import caption, install_client
 
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def post(self, url, **kwargs):
-            captured.append(kwargs["json"])
-            return SimpleNamespace(
-                raise_for_status=lambda: None,
-                json=lambda: {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": "普通场景"
-                                if len(captured) == (2 if count > 1 else 1)
-                                else "后续画面线索"
-                            }
-                        }
-                    ]
-                },
-            )
-
-    monkeypatch.setattr(handlers.httpx, "AsyncClient", Client)
-    images = [encoded_frame((80, 120), value) for value in (60, 130, 220)][:count]
+    monkeypatch.setattr(handlers.settings, "nsfw_image_mode", "auto")
+    monkeypatch.setattr(handlers.settings, "nsfw_verify_target", False)
+    captured = install_client(monkeypatch, [caption("普通场景")])
+    values = (60, 130, 220)[:count]
+    images = [encoded_frame((80, 120), value) for value in values]
     assert await handlers._call_nsfw_analysis(images, [i / 2 for i in range(count)]) == "普通场景"
-    assert len(captured) == (2 if count > 1 else 1)
-    for payload in captured:
-        assert "temperature" not in payload
-        assert len([x for x in payload["messages"][-1]["content"] if x["type"] == "image_url"]) == 1
-    final_content = captured[-1]["messages"][-1]["content"]
-    final_image = [x["image_url"]["url"] for x in final_content if x["type"] == "image_url"][
-        0
-    ].split(",", 1)[1]
-    # The verification request contains only the original target scene.
-    assert decode_frame(final_image).shape == (80, 120, 3)
-    assert np.all(abs(decode_frame(final_image).astype(int) - 60) <= 2)
-    if count > 1:
-        prompt = final_content[0]["text"]
-        assert "后续画面线索" not in prompt
-        assert len(captured[-1]["messages"]) == 2
-        assert all("后续画面线索" not in str(message) for message in captured[-1]["messages"])
-        first_prompt = captured[0]["messages"][1]["content"][0]["text"]
-        assert (
-            "TARGET" in first_prompt and "CONTEXT" in first_prompt and "scene cut" in first_prompt
-        )
+    assert len(captured) == 1
+    payload = captured[0]
+    assert payload["max_tokens"] == 1024
+    content = payload["messages"][-1]["content"]
+    pictures = [x["image_url"]["url"].split(",", 1)[1] for x in content if x["type"] == "image_url"]
+    assert len(pictures) == count
+    for index, (picture, value) in enumerate(zip(pictures, values, strict=True)):
+        frame = decode_frame(picture)
+        assert frame.shape == (80, 120, 3)
+        assert np.all(abs(frame.astype(int) - value) <= 2)
+        label = content[1 + index * 2]["text"]
+        assert ("TARGET 1" if index == 0 else f"CONTEXT {index + 1}") in label
+        assert f"{index / 2:.3f}s" in label
+    assert "镜头切换" in payload["messages"][0]["content"]
 
 
 def encoded_frame(shape, value):
@@ -319,6 +289,6 @@ def test_contact_sheet_accepts_different_frame_sizes_without_cropping():
 async def test_corrupt_context_frame_fails_instead_of_sending_incomplete_window(monkeypatch):
     client = AsyncMock()
     monkeypatch.setattr(handlers.httpx, "AsyncClient", client)
-    with pytest.raises(handlers.NsfwAnalysisError, match="拼接失败"):
+    with pytest.raises(handlers.NsfwAnalysisError, match="解码失败"):
         await handlers._call_nsfw_analysis([encoded_frame((80, 120), 60), "broken"], [0, 1])
     client.assert_not_called()
