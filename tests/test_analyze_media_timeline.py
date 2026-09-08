@@ -67,6 +67,9 @@ def test_http_video_response_merges_faces_but_not_other_sources(monkeypatch, sam
     class Video:
         index = 0
 
+        def isOpened(self):
+            return True
+
         def read(self):
             self.index += 1
             return (
