@@ -97,7 +97,7 @@ def test_window_anchors_cover_every_sample_once_without_padding(monkeypatch, cou
     with utils.VideoFrameSampler(Path("unused"), interval) as sampler:
         windows = list(sampler)
         assert sampler.frames_read == count
-        assert sampler.interval == max(int(2 * interval), 1) / 2
+        assert sampler.interval == interval
     sampled = list(range(0, count, max(int(2 * interval), 1)))
     assert [[int(f.image[0, 0, 0]) for f in w] for w in windows] == [
         sampled[i : i + 3] for i in range(len(sampled))
@@ -223,29 +223,42 @@ async def test_nsfw_request_sends_one_contact_sheet_with_context_prompt(monkeypa
             captured.append(kwargs["json"])
             return SimpleNamespace(
                 raise_for_status=lambda: None,
-                json=lambda: {"choices": [{"message": {"content": "普通场景"}}]},
+                json=lambda: {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "普通场景"
+                                if len(captured) == (2 if count > 1 else 1)
+                                else "后续画面线索"
+                            }
+                        }
+                    ]
+                },
             )
 
     monkeypatch.setattr(handlers.httpx, "AsyncClient", Client)
     images = [encoded_frame((80, 120), value) for value in (60, 130, 220)][:count]
     assert await handlers._call_nsfw_analysis(images, [i / 2 for i in range(count)]) == "普通场景"
-    content = captured[0]["messages"][1]["content"]
-    urls = [item["image_url"]["url"] for item in content if item["type"] == "image_url"]
-    assert len(urls) == 1
-    sent_image = urls[0].split(",", 1)[1]
-    if count == 1:
-        assert sent_image == images[0]
-    else:
-        sheet = decode_frame(sent_image)
-        # All source scenes survive, with the first scene above later context.
-        centers = [scene_pixels(sheet, value).mean(axis=0) for value in (60, 130, 220)[:count]]
-        assert all(np.isfinite(center).all() for center in centers)
-        assert all(a[0] < b[0] for a, b in zip(centers, centers[1:]))
-    text = " ".join(item["text"] for item in content if item["type"] == "text")
-    assert "第一张是本次待审核" in text and "不足三张" in text and "镜头切换" in text
-    assert f"{(count - 1) / 2:.3f} 秒" in text
+    assert len(captured) == (2 if count > 1 else 1)
+    for payload in captured:
+        assert payload["temperature"] == 0
+        assert len([x for x in payload["messages"][-1]["content"] if x["type"] == "image_url"]) == 1
+    final_content = captured[-1]["messages"][-1]["content"]
+    final_image = [x["image_url"]["url"] for x in final_content if x["type"] == "image_url"][
+        0
+    ].split(",", 1)[1]
+    # The verification request contains only the original target scene.
+    assert decode_frame(final_image).shape == (80, 120, 3)
+    assert np.all(abs(decode_frame(final_image).astype(int) - 60) <= 2)
     if count > 1:
-        assert "从上到下" in text and "不属于原视频内容" in text
+        prompt = final_content[0]["text"]
+        assert "后续画面线索" not in prompt
+        assert len(captured[-1]["messages"]) == 2
+        assert all("后续画面线索" not in str(message) for message in captured[-1]["messages"])
+        first_prompt = captured[0]["messages"][1]["content"][0]["text"]
+        assert (
+            "TARGET" in first_prompt and "CONTEXT" in first_prompt and "scene cut" in first_prompt
+        )
 
 
 def encoded_frame(shape, value):
@@ -282,9 +295,13 @@ def test_contact_sheet_preserves_aspect_ratio_order_and_bounds(count, shape):
         h, w = np.ptp(pixels, axis=0) + 1
         assert w / h == pytest.approx(shape[1] / shape[0], rel=0.03)
         positions.append(pixels.mean(axis=0))
+    target_area = len(scene_pixels(sheet, values[0]))
+    assert all(target_area > 3.5 * len(scene_pixels(sheet, value)) for value in values[1:])
     axis = 0 if shape[1] >= shape[0] else 1
-    assert all(a[axis] < b[axis] for a, b in zip(positions, positions[1:]))
-    assert ("从上到下" if axis == 0 else "从左到右") in layout
+    assert all(positions[0][axis] < point[axis] for point in positions[1:])
+    if count == 3:
+        assert positions[1][1 - axis] < positions[2][1 - axis]
+    assert "TARGET 1" in layout and "CONTEXT" in layout
 
 
 def test_contact_sheet_accepts_different_frame_sizes_without_cropping():
@@ -293,7 +310,9 @@ def test_contact_sheet_accepts_different_frame_sizes_without_cropping():
     sheet = decode_frame(encoded)
     for shape, value in [((80, 120), 60), ((160, 60), 130)]:
         pixels = scene_pixels(sheet, value)
-        assert tuple(np.ptp(pixels, axis=0) + 1) == shape
+        actual_h, actual_w = np.ptp(pixels, axis=0) + 1
+        assert actual_w / actual_h == pytest.approx(shape[1] / shape[0], rel=0.12)
+        assert actual_w <= shape[1] and actual_h <= shape[0]
 
 
 @pytest.mark.asyncio
