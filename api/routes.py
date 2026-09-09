@@ -26,6 +26,7 @@ from .handlers import (
 from .review_coverage import ReviewCoverage
 from .review_progress import ReviewProgress
 from .review_results import consolidate_results
+from .review_stream import push_review_progress, stream_review_tasks
 from .utils import VIDEO_EXTENSIONS, _download_url_safe
 
 api_bp = APIRouter()
@@ -628,6 +629,9 @@ async def websocket_analyze_media(websocket: WebSocket):
             except WebSocketDisconnect:
                 break
 
+            if payload.get("type") == "subscribe":
+                await stream_review_tasks(websocket, payload)
+                return
             url = payload.get("url")
             if not url:
                 await websocket.send_json({"status": "error", "error": "url is required"})
@@ -651,7 +655,8 @@ async def websocket_analyze_media(websocket: WebSocket):
             await websocket.send_json({"status": "accepted", "taskId": task_id})
 
             try:
-                result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+                async with push_review_progress(websocket, task_id):
+                    result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
             except Exception as e:
                 with contextlib.suppress(Exception):
                     await websocket.send_json(
@@ -661,8 +666,18 @@ async def websocket_analyze_media(websocket: WebSocket):
             # A disconnected browser cannot change an already persisted task to failed.
             stored_results = result.get("results", []) if isinstance(result, dict) else result
             try:
+                task = None
+                if review_task_store.is_enabled():
+                    with contextlib.suppress(Exception):
+                        summaries = await review_task_store.get_summaries([task_id])
+                        task = summaries[0] if summaries else None
                 await websocket.send_json(
-                    {"status": "completed", "taskId": task_id, "results": stored_results}
+                    {
+                        "status": "completed",
+                        "taskId": task_id,
+                        "results": stored_results,
+                        "task": task,
+                    }
                 )
             except Exception:
                 break

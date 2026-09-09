@@ -1,6 +1,10 @@
-import api from './api';
+import api, { API_BASE } from './api';
+import { createReviewStream, reviewStreamUrl } from './reviewStream';
 
 export const reviewTaskService = {
+  stream(callbacks) {
+    return createReviewStream({ url: reviewStreamUrl(API_BASE, window.location.href), ...callbacks });
+  },
   async list({ query = '', status = '', page = 1, pageSize = 30 } = {}) {
     const response = await api.get('/review_tasks', {
       params: { q: query || undefined, status: status || undefined, page, page_size: pageSize }

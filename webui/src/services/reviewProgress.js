@@ -33,29 +33,3 @@ export const taskProgress = task => {
   }));
   return { label, percent, details: details.join(' · '), windows, active: task?.status === 'processing' };
 };
-
-/** Run the next poll only after the previous request settles; stop invalidates in-flight results. */
-export const createTaskPoller = ({ getTask, onTask, onError = () => {}, delay = 2000 }) => {
-  let generation = 0;
-  let timer;
-  const stop = () => { generation += 1; clearTimeout(timer); };
-  const start = id => {
-    stop();
-    const current = generation;
-    const poll = async () => {
-      let active = true;
-      try {
-        const task = await getTask(id);
-        if (current !== generation) return;
-        onTask(task);
-        active = task.status === 'processing';
-      } catch (error) {
-        if (current !== generation) return;
-        onError(error);
-      }
-      if (active && current === generation) timer = setTimeout(poll, delay);
-    };
-    poll();
-  };
-  return { start, stop };
-};

@@ -11,6 +11,7 @@ from wcm_facerec import __version__
 from wcm_facerec.config import settings
 
 from .face_records import face_records_bp
+from .review_events import review_events
 from .review_task_store import initialize as initialize_review_tasks
 from .review_tasks import review_tasks_bp
 from .routes import api_bp
@@ -20,7 +21,11 @@ from .routes import api_bp
 async def lifespan(app: FastAPI):
     """Initialize optional service-owned persistence before accepting traffic."""
     await initialize_review_tasks()
-    yield
+    await review_events.start()
+    try:
+        yield
+    finally:
+        await review_events.close()
 
 
 def create_app() -> FastAPI:

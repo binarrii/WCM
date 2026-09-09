@@ -7,6 +7,7 @@ import { saveBlob } from '../services/downloads';
 import { navigateToReviewTask } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
 import { reviewResultsReady } from '../services/reviewStatus';
+import { mergeReviewTask } from '../services/reviewStream';
 
 const query = ref('');
 const status = ref('');
@@ -24,8 +25,19 @@ const selectedIds = ref(new Set());
 const pendingDelete = ref(null);
 let searchTimer;
 let requestSequence = 0;
-let refreshTimer;
-let disposed = false;
+const streamState = ref('connecting');
+const taskStream = reviewTaskService.stream({
+  onState: state => { streamState.value = state; },
+  onReady: () => loadTasks({ silent: true }),
+  onError: reason => { error.value = reason.message; },
+  onEvent: event => {
+    if (event.type === 'changed') return loadTasks({ silent: true });
+    const updates = event.type === 'snapshot' ? event.tasks : event.type === 'progress'
+      ? [{ id: event.task_id, status: 'processing', progress: event.progress }] : [];
+    const byId = new Map(updates.map(task => [task.id, task]));
+    tasks.value = tasks.value.map(task => byId.has(task.id) ? mergeReviewTask(task, byId.get(task.id)) : task);
+  }
+});
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 const allSelected = computed(() => tasks.value.length > 0 && tasks.value.every(task => selectedIds.value.has(task.id)));
@@ -51,7 +63,6 @@ const parameterSummary = task => {
 };
 
 const loadTasks = async ({ silent = false } = {}) => {
-  clearTimeout(refreshTimer);
   const sequence = ++requestSequence;
   if (!silent) { loading.value = true; error.value = ''; }
   try {
@@ -59,11 +70,13 @@ const loadTasks = async ({ silent = false } = {}) => {
       query: query.value.trim(), status: status.value, page: page.value, pageSize
     });
     if (sequence !== requestSequence) return;
-    tasks.value = payload.items;
+    const previous = new Map(tasks.value.map(task => [task.id, task]));
+    tasks.value = payload.items.map(task => mergeReviewTask(previous.get(task.id), task));
     total.value = payload.total;
     const visibleIds = new Set(payload.items.map(task => task.id));
     selectedIds.value = new Set([...selectedIds.value].filter(id => visibleIds.has(id)));
     if (page.value > pageCount.value) page.value = pageCount.value;
+    taskStream.start(tasks.value.map(task => task.id), { watchList: true });
   } catch (reason) {
     if (sequence === requestSequence) {
       error.value = reason.response?.data?.detail || reason.message || '任务列表加载失败';
@@ -71,9 +84,6 @@ const loadTasks = async ({ silent = false } = {}) => {
   } finally {
     if (sequence === requestSequence) {
       loading.value = false;
-      if (!disposed && (tasks.value.some(task => task.status === 'processing') || status.value === 'processing')) {
-        refreshTimer = setTimeout(() => loadTasks({ silent: true }), 2000);
-      }
     }
   }
 };
@@ -166,7 +176,7 @@ watch(query, () => {
 });
 watch(status, searchNow);
 onMounted(loadTasks);
-onBeforeUnmount(() => { disposed = true; requestSequence += 1; clearTimeout(searchTimer); clearTimeout(refreshTimer); });
+onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStream.stop(); });
 </script>
 
 <template>
@@ -182,6 +192,7 @@ onBeforeUnmount(() => { disposed = true; requestSequence += 1; clearTimeout(sear
 
     <p v-if="error" class="task-error" role="alert"><AlertCircle />{{ error }}</p>
     <p v-if="notice" class="task-notice" role="status"><CheckCircle2 />{{ notice }}</p>
+    <p v-if="streamState === 'reconnecting'" class="task-notice" role="status">进度连接中断，正在重连…</p>
 
     <section class="task-table-card">
       <header><div class="task-table-title"><h2>任务记录</h2><span>共 {{ total }} 条</span></div><div class="task-table-header-actions"><template v-if="selectedIds.size"><span>已选择 {{ selectedIds.size }} 条</span><button class="download-selected" type="button" :disabled="deleting || batchDownloading || !downloadableSelectedIds.length" :title="downloadableSelectedIds.length ? `下载 ${downloadableSelectedIds.length} 条任务的结果` : '所选任务暂无可下载结果'" @click="downloadSelectedResults"><Download />{{ batchDownloading ? '打包中…' : `批量下载 (${downloadableSelectedIds.length})` }}</button><button type="button" :disabled="deleting || batchDownloading" @click="requestDeleteSelected"><Trash2 />批量删除</button></template><small v-else>点击任意一行进入视频审核页并自动加载结果</small></div></header>

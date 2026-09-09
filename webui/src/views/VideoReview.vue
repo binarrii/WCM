@@ -7,7 +7,7 @@ import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
 import { reviewResultsReady } from '../services/reviewStatus';
 import ReviewProgress from '../components/ReviewProgress.vue';
-import { createTaskPoller } from '../services/reviewProgress';
+import { mergeReviewTask } from '../services/reviewStream';
 import {
   formatTimestamp,
   layoutMarkers,
@@ -150,15 +150,47 @@ const loadResults = (payload, { collapseSetup = false } = {}) => {
   currentSeconds.value = 0;
   if (collapseSetup) setupExpanded.value = false;
 };
-const taskPoller = createTaskPoller({
-  getTask: id => reviewTaskService.get(id),
-  onTask: task => {
-    currentTask.value = task;
+const streamState = ref('stopped');
+let refreshingTask;
+let submissionController;
+const refreshCurrentTask = id => {
+  if (refreshingTask?.id === id) return refreshingTask.promise;
+  const promise = reviewTaskService.get(id).then(task => {
+    if (disposed || currentTask.value?.id !== id) return;
+    currentTask.value = mergeReviewTask(currentTask.value, task);
     if (task.status === 'processing') return;
+    taskStream.stop();
     loading.value = false;
     if (reviewResultsReady(task)) loadResults(task.results || [], { collapseSetup: true });
     else error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
-  }
+  }).catch(reason => {
+    if (!disposed && currentTask.value?.id === id) error.value = reason.response?.data?.detail || reason.message;
+  }).finally(() => { if (refreshingTask?.promise === promise) refreshingTask = null; });
+  refreshingTask = { id, promise };
+  return promise;
+};
+const handleTaskEvent = event => {
+    const id = currentTask.value?.id;
+    if (disposed || !id) return;
+    if (event.type === 'completed' && event.task?.id === id) { currentTask.value = mergeReviewTask(currentTask.value, event.task); loading.value = false; streamState.value = 'stopped'; return; }
+    if (event.type === 'changed') {
+      if (event.reason === 'deleted') { taskStream.stop(); loading.value = false; error.value = '该审核任务已删除'; return; }
+      return refreshCurrentTask(id);
+    }
+    if (event.type === 'snapshot' && event.missing_ids?.includes(id)) {
+      taskStream.stop(); loading.value = false; error.value = '该审核任务不存在'; return;
+    }
+    const task = event.type === 'snapshot' ? event.tasks.find(task => task.id === id)
+      : event.type === 'progress' && event.task_id === id ? { id, status: 'processing', progress: event.progress } : null;
+    if (task) {
+      currentTask.value = mergeReviewTask(currentTask.value, task);
+      if (task.status !== 'processing') return refreshCurrentTask(id);
+    }
+};
+const taskStream = reviewTaskService.stream({
+  onState: state => { streamState.value = state; },
+  onError: reason => { error.value = reason.message; },
+  onEvent: handleTaskEvent
 });
 const loadReviewTask = async () => {
   const taskId = reviewTaskIdFromHash(window.location.hash);
@@ -184,7 +216,7 @@ const loadReviewTask = async () => {
     } else if (task.status === 'failed') {
       error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
     } else {
-      taskPoller.start(task.id);
+      taskStream.start([task.id]);
     }
   } catch (reason) {
     error.value = reason.response?.data?.detail || reason.message || '审核任务加载失败';
@@ -193,7 +225,9 @@ const loadReviewTask = async () => {
   }
 };
 const analyze = async () => {
-  taskPoller.stop();
+  submissionController?.abort();
+  submissionController = new AbortController();
+  taskStream.stop();
   currentTask.value = null;
   setupExpanded.value = true;
   error.value = '';
@@ -218,19 +252,19 @@ const analyze = async () => {
         if (disposed) return;
         loadedTaskId.value = id;
         currentTask.value = { id, status: 'processing', progress: { phase: 'downloading' } };
-        taskPoller.start(id);
-      }
+        streamState.value = 'connected';
+      },
+      onTaskEvent: handleTaskEvent,
+      signal: submissionController.signal
     });
     if (disposed) return;
-    taskPoller.stop();
-    if (currentTask.value?.status === 'processing') {
-      currentTask.value = { ...currentTask.value, status: 'completed', progress: { ...currentTask.value.progress, phase: 'finished', percent: 100, active_windows: [] } };
-      // Resolve the persisted coverage outcome (completed / partial / failed).
-      taskPoller.start(currentTask.value.id);
-    }
+    if (currentTask.value?.status === 'processing') await refreshCurrentTask(currentTask.value.id);
     loadResults(payload, { collapseSetup: true });
   } catch (reason) {
-    if (!disposed && !reason.taskId) error.value = reason.response?.data?.detail || reason.message || '视频分析失败';
+    if (!disposed) {
+      if (reason.taskId) taskStream.start([reason.taskId]);
+      else error.value = reason.response?.data?.detail || reason.message || '视频分析失败';
+    }
   } finally {
     if (!disposed) loading.value = currentTask.value?.status === 'processing';
   }
@@ -322,7 +356,8 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   disposed = true;
-  taskPoller.stop();
+  submissionController?.abort();
+  taskStream.stop();
   frameObserver?.stop();
   videoResizeObserver?.disconnect();
   resizeObserver?.disconnect();
@@ -376,6 +411,7 @@ onBeforeUnmount(() => {
         <strong v-else>尚未加载结果</strong>
       </div>
       <p v-if="!setupExpanded && error" class="review-error compact" role="alert"><AlertCircle />{{ error }}</p>
+      <p v-if="streamState === 'reconnecting'" role="status" class="inline-error">进度连接中断，正在重连…</p>
       <ReviewProgress v-if="currentTask" :key="currentTask.id" :task="currentTask" />
     </section>
 

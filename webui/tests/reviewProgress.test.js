@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { taskProgress, sampleTime, createTaskPoller } from '../src/services/reviewProgress.js';
+import { taskProgress, sampleTime } from '../src/services/reviewProgress.js';
 import { reviewSocketUrl, submitReview } from '../src/services/reviewSubmission.js';
 
 test('unknown progress is indeterminate; only finished work displays 100%', () => {
@@ -20,14 +20,6 @@ test('each concurrent window exposes its selected samples and current module', (
   assert.match(view.windows[0].stages,/文字：00:00:22.000/);
   assert.match(view.windows[1].stages,/人脸：00:00:24.000/);
   assert.equal(sampleTime(8.9999),'00:00:09.000');
-});
-
-test('stopping a poller ignores late results and does not queue another poll', async () => {
-  let done; const seen=[];
-  const poller=createTaskPoller({getTask:()=>new Promise(resolve=>done=resolve),onTask:task=>seen.push(task)});
-  poller.start('task');poller.stop();done({status:'processing'});
-  await Promise.resolve();await Promise.resolve();
-  assert.equal(seen.length,0);
 });
 
 test('submission returns the task id before results and never resubmits on disconnect', async () => {

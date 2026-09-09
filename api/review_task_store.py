@@ -14,6 +14,7 @@ from pymysql.cursors import DictCursor
 from wcm_facerec.config import settings
 
 from .review_coverage import completion_status, coverage_message
+from .review_events import review_events
 from .review_results import consolidate_results, flatten_findings
 
 
@@ -151,6 +152,7 @@ async def create(video_url: str, parameters: dict, task_id: str | None = None) -
         return None
     resolved_id = task_id or str(uuid.uuid4())
     await _run(_create_sync, video_url, parameters, resolved_id)
+    await review_events.publish({"type": "changed", "task_ids": [resolved_id], "reason": "created"})
     return resolved_id
 
 
@@ -189,6 +191,9 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
 async def complete(task_id: str | None, results: list[dict], summary: dict | None = None) -> None:
     if task_id and is_enabled():
         await _run(_complete_sync, task_id, results, summary)
+        await review_events.publish(
+            {"type": "changed", "task_ids": [task_id], "reason": "completed"}
+        )
 
 
 def _fail_sync(task_id: str, error: str) -> None:
@@ -206,20 +211,23 @@ def _fail_sync(task_id: str, error: str) -> None:
 async def fail(task_id: str | None, error: str) -> None:
     if task_id and is_enabled():
         await _run(_fail_sync, task_id, error)
+        await review_events.publish({"type": "changed", "task_ids": [task_id], "reason": "failed"})
 
 
-def _update_progress_sync(task_id: str, progress: dict) -> None:
+def _update_progress_sync(task_id: str, progress: dict) -> bool:
     with _connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            "UPDATE review_tasks SET progress = %s WHERE id = %s AND status = 'processing' "
-            "AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(progress, '$.sequence')) AS SIGNED), -1) < %s",
-            (_json_dump(progress), task_id, progress["sequence"]),
+        return bool(
+            cursor.execute(
+                "UPDATE review_tasks SET progress = %s WHERE id = %s AND status = 'processing' "
+                "AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(progress, '$.sequence')) AS SIGNED), -1) < %s",
+                (_json_dump(progress), task_id, progress["sequence"]),
+            )
         )
 
 
 async def update_progress(task_id: str | None, progress: dict) -> None:
-    if task_id and is_enabled():
-        await _run(_update_progress_sync, task_id, progress)
+    if task_id and is_enabled() and await _run(_update_progress_sync, task_id, progress):
+        await review_events.publish({"type": "progress", "task_id": task_id, "progress": progress})
 
 
 def _get_sync(task_id: str) -> dict | None:
@@ -252,6 +260,23 @@ async def get_many(task_ids: list[str]) -> list[dict]:
     return await _run(_get_many_sync, task_ids)
 
 
+def _get_summaries_sync(task_ids: list[str]) -> list[dict]:
+    if not task_ids:
+        return []
+    placeholders = ", ".join(["%s"] * len(task_ids))
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT id, video_url, parameters, status, result_count, error, review_summary, progress, "
+            f"results IS NOT NULL AS has_results, created_at, updated_at FROM review_tasks WHERE id IN ({placeholders})",
+            task_ids,
+        )
+        return [_public_row(row, include_results=False) for row in cursor.fetchall()]
+
+
+async def get_summaries(task_ids: list[str]) -> list[dict]:
+    return await _run(_get_summaries_sync, task_ids) if task_ids else []
+
+
 def _delete_many_sync(task_ids: list[str]) -> int:
     placeholders = ", ".join(["%s"] * len(task_ids))
     with _connect() as connection, connection.cursor() as cursor:
@@ -259,7 +284,10 @@ def _delete_many_sync(task_ids: list[str]) -> int:
 
 
 async def delete_many(task_ids: list[str]) -> int:
-    return await _run(_delete_many_sync, task_ids)
+    deleted = await _run(_delete_many_sync, task_ids)
+    if deleted:
+        await review_events.publish({"type": "changed", "task_ids": task_ids, "reason": "deleted"})
+    return deleted
 
 
 def _list_sync(query: str, status: str, page: int, page_size: int) -> dict:
