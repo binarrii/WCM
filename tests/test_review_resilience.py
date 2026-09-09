@@ -148,9 +148,10 @@ async def test_ocr_uses_recognition_task_prompt_and_preserves_text(monkeypatch):
     assert await handlers._call_ocr_api("fixture-image") == "测试字幕\nHello World 123"
     payload = client.post.await_args.kwargs["json"]
     assert payload["max_tokens"] == 300
-    assert "**输出不超过500个字符**" in payload["messages"][0]["content"]
+    assert len(payload["messages"]) == 1
+    assert payload["messages"][0]["role"] == "user"
     assert payload["stream"] is True
-    assert payload["messages"][1]["content"] == [
+    assert payload["messages"][0]["content"] == [
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,fixture-image"}},
         {"type": "text", "text": "OCR:"},
     ]

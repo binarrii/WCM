@@ -237,20 +237,14 @@ async def _call_ocr_api(base64_image: str) -> str:
         "model": "WasuAI/PaddleOCR-VL-1.6",
         "messages": [
             {
-                "role": "system",
-                "content": _prompt_text("""
-                    ## 输出要求
-                    - **输出不超过500个字符**。
-                """),
-            },
-            {
                 "role": "user",
                 "content": [
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
                     },
-                    # PaddleOCR-VL uses task prompts, not chat instructions.
+                    # Extra system instructions can trigger whitespace loops.
+                    # Keep the native task prompt; ocr.py enforces 500 characters.
                     # https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6
                     {"type": "text", "text": "OCR:"},
                 ],
