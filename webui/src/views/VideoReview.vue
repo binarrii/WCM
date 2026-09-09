@@ -376,7 +376,7 @@ onBeforeUnmount(() => {
         <strong v-else>尚未加载结果</strong>
       </div>
       <p v-if="!setupExpanded && error" class="review-error compact" role="alert"><AlertCircle />{{ error }}</p>
-      <ReviewProgress v-if="currentTask" :task="currentTask" />
+      <ReviewProgress v-if="currentTask" :key="currentTask.id" :task="currentTask" />
     </section>
 
     <section v-if="videoUrl || rawResults != null" class="review-workspace" :style="{ '--review-player-height': playerPanelHeight ? `${playerPanelHeight}px` : 'auto' }">

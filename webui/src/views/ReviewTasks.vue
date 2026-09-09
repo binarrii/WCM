@@ -200,7 +200,7 @@ onBeforeUnmount(() => { disposed = true; requestSequence += 1; clearTimeout(sear
               <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="reviewResultsReady(task) ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || !reviewResultsReady(task) || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting || batchDownloading" @click="requestDeleteTask(task)"><Trash2 /></button></td>
             </tr>
             <tr v-if="task.status === 'processing'" class="task-progress-row" :class="{ selected: selectedIds.has(task.id) }">
-              <td colspan="7"><ReviewProgress :task="task" /></td>
+              <td colspan="7"><ReviewProgress :task="task" collapsible /></td>
             </tr>
             </template>
           </tbody>

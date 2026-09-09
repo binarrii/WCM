@@ -1,18 +1,24 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { taskProgress } from '../services/reviewProgress';
-const props = defineProps({ task: { type: Object, required: true } });
+const props = defineProps({ task: { type: Object, required: true }, collapsible: { type: Boolean, default: true } });
 const state = computed(() => taskProgress(props.task));
+const expanded = ref(false);
 </script>
 
 <template>
   <div :class="['review-task-progress', task.status]">
-    <div class="progress-heading"><span>{{ state.label }}</span><strong>{{ state.percent == null ? '—' : `${state.percent.toFixed(1)}%` }}</strong></div>
+    <div class="progress-heading">
+      <span>{{ state.label }}</span>
+      <span v-if="collapsible && state.details" class="progress-summary">{{ state.details }}</span>
+      <strong>{{ state.percent == null ? '—' : `${state.percent.toFixed(1)}%` }}</strong>
+      <button v-if="collapsible && state.windows.length" type="button" class="progress-toggle" :aria-expanded="expanded" :aria-controls="`review-progress-${task.id}`" @click.stop="expanded = !expanded">{{ expanded ? '收起详情 ▴' : '展开详情 ▾' }}</button>
+    </div>
     <div class="progress-track" role="progressbar" aria-label="审核任务处理进度" :aria-valuenow="state.percent ?? undefined" aria-valuemin="0" aria-valuemax="100" :aria-valuetext="`${state.label} ${state.percent ?? ''} ${state.details}`" title="审核中按已处理视频位置估算；处理结束不代表内容安全" :class="{ indeterminate: state.percent == null && state.active }">
       <span :style="{ width: `${state.percent ?? 0}%` }"></span>
     </div>
-    <small v-if="state.details" :title="state.details">{{ state.details }}</small>
-    <div v-if="state.windows.length" class="active-windows">
+    <small v-if="!collapsible && state.details" :title="state.details">{{ state.details }}</small>
+    <div v-if="state.windows.length && (!collapsible || expanded)" :id="`review-progress-${task.id}`" class="active-windows">
     <div v-for="window in state.windows" :key="window.title" class="active-window">
       <strong>{{ window.title }}</strong>
       <small>{{ window.samples }}</small>
@@ -24,8 +30,12 @@ const state = computed(() => taskProgress(props.task));
 
 <style scoped>
 .review-task-progress { --progress-color: var(--primary, #6366f1); min-width: 150px; color: var(--text-secondary, #64748b); }
-.progress-heading { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; margin-bottom: 7px; }
-.progress-heading strong { color: var(--progress-color); font-variant-numeric: tabular-nums; }
+.progress-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; margin-bottom: 7px; }
+.progress-heading strong { margin-left: auto; color: var(--progress-color); font-variant-numeric: tabular-nums; }
+.progress-summary { font-size: 11px; }
+.progress-toggle { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--progress-color); font: inherit; font-size: 11px; cursor: pointer; }
+.progress-toggle:hover { background: var(--color-primary-glow, #6366f11a); }
+.progress-toggle:focus-visible { outline: 2px solid var(--progress-color); outline-offset: 2px; }
 .progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--bg-secondary, #e2e8f0); }
 .progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--progress-color); transition: width .3s ease; }
 .indeterminate span { width: 35% !important; animation: review-progress-pulse 1.5s ease-in-out infinite; }

@@ -33,7 +33,7 @@ tbody tr { cursor: pointer; transition: background .15s; }
 tbody tr:hover, tbody tr:focus { background: var(--modal-hover-bg); outline: none; }
 tbody tr.selected { background: var(--color-primary-glow); }
 .task-progress-row { cursor: default; }
-.task-progress-row td { padding: 14px 24px 18px 54px; }
+.task-progress-row td { padding: 10px 24px 12px 54px; }
 .task-select-cell { padding-inline: 12px 4px; text-align: center; }
 .task-select-cell input { width: 15px; height: 15px; accent-color: var(--color-primary); cursor: pointer; }
 .task-status { display: inline-flex; padding: 3px 7px; border: 1px solid; border-radius: 20px; font-size: .66rem; font-weight: 700; }
