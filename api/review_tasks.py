@@ -28,7 +28,7 @@ def _task_ids(ids: list[str]) -> list[str]:
 
 
 def _result_bytes(task: dict) -> bytes:
-    if task["status"] not in {"completed", "partial"} or task.get("results") is None:
+    if task["status"] == "processing" or not isinstance(task.get("results"), list):
         raise HTTPException(status_code=409, detail=f"审核任务 {task['id']} 的分析结果尚未就绪")
     return json.dumps(consolidate_results(task["results"]), ensure_ascii=False, indent=2).encode(
         "utf-8"

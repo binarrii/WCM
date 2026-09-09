@@ -21,8 +21,8 @@ test('action column remains a table cell so row separators span the full width',
 });
 
 test('completed and partial task results support single JSON and selected ZIP downloads', () => {
-  assert.match(component, /title="reviewResultsReady\(task\.status\) \? '下载分析结果'/);
-  assert.match(component, /!reviewResultsReady\(task\.status\)/);
+  assert.match(component, /title="reviewResultsReady\(task\) \? '下载分析结果'/);
+  assert.match(component, /!reviewResultsReady\(task\)/);
   assert.match(component, /批量下载 \(\$\{downloadableSelectedIds\.length\}\)/);
   assert.match(service, /responseType:\s*'blob'/);
   assert.match(service, /review_tasks\/results\/download/);

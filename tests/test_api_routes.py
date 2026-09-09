@@ -96,7 +96,7 @@ def test_matching_threshold_defaults_and_explicit_overrides(
         received.append(threshold)
         return 1, []
 
-    async def analyze(url, sample_interval, top_k, threshold):
+    async def analyze(url, sample_interval, top_k, threshold, *, coverage=None):
         received.append(threshold)
         return {"results": []}
 

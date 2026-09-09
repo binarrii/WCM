@@ -128,7 +128,14 @@ def merge_window_results(completed, max_gap):
 
 
 async def analyze_video(
-    url, sample_interval, top_k=10, threshold=0.5, *, include_faces=False, include_visual=True
+    url,
+    sample_interval,
+    top_k=10,
+    threshold=0.5,
+    *,
+    include_faces=False,
+    include_visual=True,
+    coverage=None,
 ):
     engine = handlers.get_face_engine() if include_faces else None
     ocr_cache, face_cache, guard_cache = AsyncMemo(), AsyncMemo(128), AsyncMemo(512)
@@ -139,6 +146,8 @@ async def analyze_video(
     queue = asyncio.Queue(maxsize=concurrency * 2)
     planner = ReviewWindowPlanner(settings.nsfw_window_max_seconds)
     selected_frames = 0
+    if coverage is not None:
+        coverage.add([])
 
     async def guard(text):
         return await guard_cache.get(_digest(text), lambda: handlers._call_llm_guard(text))
@@ -284,11 +293,15 @@ async def analyze_video(
                 ready = planner.push(sample)
                 if ready is not None:
                     selected_frames += len(ready.frames)
+                    if coverage is not None:
+                        coverage.add(frame.timestamp for frame in ready.frames)
                     await queue.put(ready)
                 await asyncio.sleep(0)
             ready = planner.flush()
             if ready is not None:
                 selected_frames += len(ready.frames)
+                if coverage is not None:
+                    coverage.add(frame.timestamp for frame in ready.frames)
                 await queue.put(ready)
         await queue.join()
         logger.info(

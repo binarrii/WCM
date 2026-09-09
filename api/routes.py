@@ -22,6 +22,7 @@ from .handlers import (
     _process_detect_sensitive,
     _search_video_frames,
 )
+from .review_coverage import ReviewCoverage
 from .review_results import consolidate_results
 from .utils import VIDEO_EXTENSIONS, _download_url_safe
 
@@ -568,7 +569,10 @@ async def analyze_media(request: Request, response: Response):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        result = await _process_analyze_media(url, sample_interval, top_k, threshold)
+        coverage = ReviewCoverage()
+        result = await _process_analyze_media(
+            url, sample_interval, top_k, threshold, coverage=coverage
+        )
         result = (
             consolidate_results(result)
             if isinstance(result, list)
@@ -581,7 +585,9 @@ async def analyze_media(request: Request, response: Response):
 
     stored_results = result.get("results", []) if isinstance(result, dict) else result
     try:
-        await review_task_store.complete(task_id, stored_results)
+        await review_task_store.complete(
+            task_id, stored_results, coverage.summarize(stored_results)
+        )
     except review_task_store.ReviewTaskStoreUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if task_id:
@@ -628,14 +634,19 @@ async def websocket_analyze_media(websocket: WebSocket):
             await websocket.send_json({"status": "accepted", "taskId": task_id})
 
             try:
-                result = await _process_analyze_media(url, sample_interval, top_k, threshold)
+                coverage = ReviewCoverage()
+                result = await _process_analyze_media(
+                    url, sample_interval, top_k, threshold, coverage=coverage
+                )
                 result = (
                     consolidate_results(result)
                     if isinstance(result, list)
                     else {**result, "results": consolidate_results(result.get("results", []))}
                 )
                 stored_results = result.get("results", []) if isinstance(result, dict) else result
-                await review_task_store.complete(task_id, stored_results)
+                await review_task_store.complete(
+                    task_id, stored_results, coverage.summarize(stored_results)
+                )
                 await websocket.send_json(
                     {"status": "completed", "taskId": task_id, "results": stored_results}
                 )

@@ -28,7 +28,7 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const allSelected = computed(() => tasks.value.length > 0 && tasks.value.every(task => selectedIds.value.has(task.id)));
 const someSelected = computed(() => !allSelected.value && tasks.value.some(task => selectedIds.value.has(task.id)));
 const downloadableSelectedIds = computed(() => tasks.value
-  .filter(task => selectedIds.value.has(task.id) && reviewResultsReady(task.status))
+  .filter(task => selectedIds.value.has(task.id) && reviewResultsReady(task))
   .map(task => task.id));
 const statusLabel = value => ({ processing: '处理中', completed: '已完成', partial: '含未审核项', failed: '失败' }[value] || value);
 const formatTime = value => value ? new Intl.DateTimeFormat('zh-CN', {
@@ -82,7 +82,7 @@ const toggleAll = event => {
   selectedIds.value = event.target.checked ? new Set(tasks.value.map(task => task.id)) : new Set();
 };
 const downloadTaskResults = async task => {
-  if (!reviewResultsReady(task.status) || downloadingIds.value.has(task.id)) return;
+  if (!reviewResultsReady(task) || downloadingIds.value.has(task.id)) return;
   downloadingIds.value = new Set([...downloadingIds.value, task.id]);
   error.value = '';
   notice.value = '';
@@ -183,12 +183,12 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
           <tbody>
             <tr v-for="task in tasks" :key="task.id" :class="{ selected: selectedIds.has(task.id) }" tabindex="0" @click="navigateToReviewTask(task.id)" @keydown.enter="navigateToReviewTask(task.id)">
               <td class="task-select-cell" @click.stop @keydown.enter.stop><input type="checkbox" :checked="selectedIds.has(task.id)" :disabled="deleting" :aria-label="`选择任务 ${task.id}`" @change="toggleTask(task.id)" /></td>
-              <td><span :class="['task-status', task.status]">{{ statusLabel(task.status) }}</span></td>
-              <td class="task-video"><strong :title="task.video_url">{{ task.video_url }}</strong><small>{{ task.id }}</small><em v-if="task.error" :class="{ partial: task.status === 'partial' }" :title="task.error">{{ task.error }}</em></td>
+              <td><span :class="['task-status', task.status]" title="未完成采样占比：≤10% 已完成，≥30% 失败，其余含未审核项">{{ statusLabel(task.status) }}</span></td>
+              <td class="task-video"><strong :title="task.video_url">{{ task.video_url }}</strong><small>{{ task.id }}</small><em v-if="task.error" :class="{ partial: task.status === 'partial' || task.status === 'completed' }" :title="task.error">{{ task.error }}</em></td>
               <td class="task-parameters">{{ parameterSummary(task) }}</td>
               <td>{{ task.result_count }} 条</td>
               <td class="task-date">{{ formatTime(task.created_at) }}</td>
-              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="reviewResultsReady(task.status) ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || !reviewResultsReady(task.status) || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting || batchDownloading" @click="requestDeleteTask(task)"><Trash2 /></button></td>
+              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="reviewResultsReady(task) ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || !reviewResultsReady(task) || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting || batchDownloading" @click="requestDeleteTask(task)"><Trash2 /></button></td>
             </tr>
           </tbody>
         </table>

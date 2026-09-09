@@ -909,17 +909,20 @@ def _merge_person_timelines(
 
 
 async def _process_analyze_media(
-    url: str, sample_interval: float, top_k: int, threshold: float
+    url: str, sample_interval: float, top_k: int, threshold: float, *, coverage=None
 ) -> list:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     if is_video and settings.nsfw_review_mode == "window":
         return await review_windows.analyze_video(
-            url, sample_interval, top_k, threshold, include_faces=True
+            url, sample_interval, top_k, threshold, include_faces=True, coverage=coverage
         )
     engine = get_face_engine()
     merge_interval = sample_interval
     sample_times = []
     errors = []
+
+    if coverage is not None:
+        coverage.add([])
 
     async def _process_window(window, *, review_visual=True, sampled=True):
         frame, b64_img, current_frame_time = window[0]
@@ -969,6 +972,8 @@ async def _process_analyze_media(
 
             async def producer(sampler):
                 for window in sampler:
+                    if coverage is not None:
+                        coverage.add([window[0].timestamp])
                     if window.sampled:
                         sample_times.append(window[0].timestamp)
                     await queue.put(
@@ -1034,6 +1039,8 @@ async def _process_analyze_media(
         _, buffer = cv2.imencode(".jpg", small_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
         b64_img = base64.b64encode(buffer).decode("utf-8")
 
+        if coverage is not None:
+            coverage.add([0.0])
         res = await _process_window(((frame, b64_img, 0.0),))
         frame_results = [res]
 

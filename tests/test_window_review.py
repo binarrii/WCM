@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from api import handlers, review_windows
+from api.review_coverage import ReviewCoverage
 from api.utils import ReviewWindowPlanner, VideoFrame, VideoWindow
 from tests.test_nsfw_target_review import caption, image, install_client
 
@@ -206,9 +207,13 @@ async def test_failed_module_keeps_other_findings_and_later_windows(monkeypatch,
     monkeypatch.setattr(
         handlers, "_call_llm_guard", AsyncMock(return_value={"safe": False, "category": "复核"})
     )
+    coverage = ReviewCoverage()
     rows = await asyncio.wait_for(
-        handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5), 2
+        handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5, coverage=coverage), 2
     )
+    summary = coverage.summarize(rows)
+    assert summary["total_samples"] == 6
+    assert summary["incomplete_samples"] == (3 if failure == "visual" else 1)
     errors = [r for r in rows if r.get("review_status") == "incomplete"]
     assert len(errors) == 1 and errors[0]["stage"] == failure
     assert errors[0]["timestamp"] == (

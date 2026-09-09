@@ -13,6 +13,7 @@ from pymysql.cursors import DictCursor
 
 from wcm_facerec.config import settings
 
+from .review_coverage import completion_status, coverage_message
 from .review_results import consolidate_results, flatten_findings
 
 
@@ -67,6 +68,7 @@ def _initialize_sync() -> None:
                 results JSON NULL,
                 result_count INT UNSIGNED NOT NULL DEFAULT 0,
                 error TEXT NULL,
+                review_summary JSON NULL,
                 created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
                 updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
                     ON UPDATE CURRENT_TIMESTAMP(3),
@@ -75,6 +77,15 @@ def _initialize_sync() -> None:
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
             """
         )
+
+        cursor.execute("SHOW COLUMNS FROM review_tasks LIKE 'review_summary'")
+        if not cursor.fetchone():
+            try:
+                cursor.execute("ALTER TABLE review_tasks ADD COLUMN review_summary JSON NULL")
+            except pymysql.err.OperationalError as exc:
+                # Multiple API workers can initialize the existing table together.
+                if exc.args[0] != 1060:
+                    raise
 
 
 async def initialize() -> None:
@@ -106,9 +117,13 @@ def _public_row(row: dict, *, include_results: bool) -> dict:
         "status": row["status"],
         "result_count": row["result_count"],
         "error": row["error"],
+        "review_summary": _json_load(row.get("review_summary")),
+        "has_results": bool(row.get("has_results", row.get("results") is not None)),
         "created_at": _iso(row["created_at"]),
         "updated_at": _iso(row["updated_at"]),
     }
+    if row["status"] == "partial" and item["review_summary"] is None:
+        item["error"] = (item["error"] or "含未审核项。") + "（历史任务未记录总采样数，比例未知）"
     if include_results:
         results = _json_load(row.get("results"))
         item["results"] = consolidate_results(results) if isinstance(results, list) else results
@@ -136,7 +151,7 @@ async def create(video_url: str, parameters: dict, task_id: str | None = None) -
     return resolved_id
 
 
-def _complete_sync(task_id: str, results: list[dict]) -> None:
+def _complete_sync(task_id: str, results: list[dict], summary: dict | None = None) -> None:
     incomplete = [
         item for item in flatten_findings(results) if item.get("review_status") == "incomplete"
     ]
@@ -145,21 +160,31 @@ def _complete_sync(task_id: str, results: list[dict]) -> None:
     error = None
     if incomplete:
         timestamps = {item["timestamp"] for item in incomplete}
-        error = f"{len(timestamps)} 个采样时间点、{len(incomplete)} 项审核未完成，请查看结果并人工复核。"
+        error = f"{len(timestamps)} 个采样时间点、{len(incomplete)} 项审核未完成；缺少总采样数，比例未知，请人工复核。"
+    if summary is not None:
+        status = completion_status(summary)
+        error = coverage_message(summary)
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(
             """
             UPDATE review_tasks
-            SET status = %s, results = %s, result_count = %s, error = %s
+            SET status = %s, results = %s, result_count = %s, error = %s, review_summary = %s
             WHERE id = %s
             """,
-            (status, _json_dump(results), len(results), error, task_id),
+            (
+                status,
+                _json_dump(results),
+                len(results),
+                error,
+                _json_dump(summary) if summary is not None else None,
+                task_id,
+            ),
         )
 
 
-async def complete(task_id: str | None, results: list[dict]) -> None:
+async def complete(task_id: str | None, results: list[dict], summary: dict | None = None) -> None:
     if task_id and is_enabled():
-        await _run(_complete_sync, task_id, results)
+        await _run(_complete_sync, task_id, results, summary)
 
 
 def _fail_sync(task_id: str, error: str) -> None:
@@ -233,7 +258,8 @@ def _list_sync(query: str, status: str, page: int, page_size: int) -> dict:
         cursor.execute(f"SELECT COUNT(*) AS total FROM review_tasks{where}", values)
         total = cursor.fetchone()["total"]
         cursor.execute(
-            "SELECT id, video_url, parameters, status, result_count, error, "
+            "SELECT id, video_url, parameters, status, result_count, error, review_summary, "
+            "results IS NOT NULL AS has_results, "
             f"created_at, updated_at FROM review_tasks{where} "
             "ORDER BY created_at DESC LIMIT %s OFFSET %s",
             [*values, page_size, (page - 1) * page_size],

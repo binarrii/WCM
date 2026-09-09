@@ -163,7 +163,7 @@ const loadReviewTask = async () => {
     if (Number.isFinite(Number(parameters.threshold))) {
       minSimilarity.value = Math.min(1, Math.max(0.1, 1 - Number(parameters.threshold)));
     }
-    if (reviewResultsReady(task.status)) {
+    if (reviewResultsReady(task)) {
       loadResults(task.results || [], { collapseSetup: true });
     } else if (task.status === 'failed') {
       error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;

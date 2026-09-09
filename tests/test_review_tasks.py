@@ -74,7 +74,7 @@ def test_batch_delete_requires_at_least_one_id(monkeypatch):
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("status", ["completed", "partial"])
+@pytest.mark.parametrize("status", ["completed", "partial", "failed"])
 def test_single_and_batch_result_downloads(monkeypatch, status):
     results = [{"timestamp": "00:00:01.000", "category": "人物", "description": "测试"}]
     if status == "partial":
@@ -159,7 +159,7 @@ def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch, inco
         "https://example.com/video.mp4",
         {"sample_interval": 2.0, "top_k": 5, "threshold": 0.4},
     )
-    complete.assert_awaited_once_with("task-1", results)
+    complete.assert_awaited_once_with("task-1", results, None)
 
 
 def test_analyze_media_records_failure(monkeypatch):
@@ -178,6 +178,41 @@ def test_analyze_media_records_failure(monkeypatch):
     assert response.status_code == 400
     await_args = fail.await_args.args
     assert await_args == ("task-2", "boom")
+
+
+@pytest.mark.parametrize("websocket", [False, True])
+def test_http_and_websocket_persist_measured_coverage_without_changing_results(
+    monkeypatch, websocket
+):
+    results = [{"timestamp": 2, "stage": "ocr", "review_status": "incomplete"}]
+
+    async def analyze(url, interval, top_k, threshold, *, coverage):
+        coverage.add(range(10))
+        return results
+
+    complete = AsyncMock()
+    monkeypatch.setattr(routes, "_process_analyze_media", analyze)
+    monkeypatch.setattr(routes.review_task_store, "create", AsyncMock(return_value="task"))
+    monkeypatch.setattr(routes.review_task_store, "complete", complete)
+    with TestClient(create_app()) as client:
+        if websocket:
+            with client.websocket_connect("/api/v1/ws/analyze_media") as socket:
+                socket.send_json({"url": "https://example.com/test.mp4"})
+                assert socket.receive_json()["status"] == "accepted"
+                assert socket.receive_json()["results"] == results
+        else:
+            response = client.post(
+                "/api/v1/analyze_media", json={"url": "https://example.com/test.mp4"}
+            )
+            assert response.status_code == 200
+            assert response.json() == results
+    assert complete.await_args.args[1] == results
+    assert complete.await_args.args[2] == {
+        "total_samples": 10,
+        "incomplete_samples": 1,
+        "incomplete_checks": 1,
+        "incomplete_ratio": 0.1,
+    }
 
 
 def test_store_public_row_decodes_json_and_utc_timestamps():
@@ -212,9 +247,11 @@ def test_completion_persists_gaps_and_partial_status(monkeypatch, incomplete):
     monkeypatch.setattr(review_task_store, "_connect", lambda: connection)
     review_task_store._complete_sync("task-1", results)
     cursor.execute.assert_called_once()
-    status, payload, count, error, task_id = cursor.execute.call_args.args[1]
+    status, payload, count, error, summary, task_id = cursor.execute.call_args.args[1]
+    assert summary is None
     assert status == ("partial" if incomplete else "completed")
     from api.review_results import flatten_findings
+
     assert list(flatten_findings(json.loads(payload))) == results
     assert count == (2 if incomplete else 1)
     assert task_id == "task-1"

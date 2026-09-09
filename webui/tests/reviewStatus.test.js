@@ -8,6 +8,13 @@ test('partial results remain reviewable while unfinished and failed tasks do not
   for (const status of ['processing', 'failed', '', undefined]) assert.equal(reviewResultsReady(status), false);
 });
 
+test('a task that fails the coverage threshold still exposes its saved results', () => {
+  assert.equal(reviewResultsReady({ status: 'failed', has_results: true }), true);
+  assert.equal(reviewResultsReady({ status: 'failed', results: [] }), true);
+  assert.equal(reviewResultsReady({ status: 'failed', has_results: false }), false);
+  assert.equal(reviewResultsReady({ status: 'processing', has_results: true }), false);
+});
+
 test('partial results retain jumpable gaps alongside successful findings at the same timestamp', () => {
   const markers = normalizeResults({ status: 'partial', results: [
     { timestamp: '00:01:14.000', category: '人物', description: '测试人物' },
