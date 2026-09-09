@@ -68,7 +68,7 @@ async def test_all_images_are_targets_without_a_second_verification(monkeypatch,
         3 if mode == "multi_image" else 1
     )
     assert "TARGET" not in str(payload) and "CONTEXT" not in str(payload)
-    assert "必须逐张检查" in payload["messages"][0]["content"]
+    assert "综合所有图片中的可见证据" in payload["messages"][0]["content"]
 
 
 @pytest.mark.asyncio
