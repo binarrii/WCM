@@ -118,6 +118,18 @@ def test_vfr_scene_targets_keep_actual_pts_and_no_duplicate_tail(monkeypatch):
     assert [w[0].timestamp for w in windows if w.review_visual] == [0, 3.12]
 
 
+def test_cut_boundary_preserves_exact_pts_and_decoded_frame_duration(monkeypatch):
+    cut = 495 + 7 / 30
+    times = [495, 495.2, cut, cut + 1 / 30, 495.3, 496]
+    windows, _ = sample(monkeypatch, [solid(v) for v in [20, 20, 200, 20, 20, 20]], times)
+    target = next(w[0] for w in windows if w[0].timestamp == cut)
+    assert round(target.timestamp * 1000) == 495233
+    assert target.timestamp > 495.233
+    assert target.frame_index == 2
+    assert target.duration == pytest.approx(1 / 30)
+    assert windows[0][0].duration == pytest.approx(.2)  # True VFR duration, not nominal FPS.
+
+
 def test_dark_compression_noise_does_not_create_false_shots(monkeypatch):
     rng = np.random.default_rng(42)
     frames = [rng.integers(0, 5, (90, 160, 3), np.uint8) for _ in range(5)]

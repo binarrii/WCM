@@ -15,7 +15,8 @@ import {
 } from '../services/videoTimeline';
 
 import FaceOverlay from '../components/FaceOverlay.vue';
-import { facesAtTime, containedVideoRect, faceSampleTimes } from '../services/faceOverlay';
+import { facesAtTime, containedVideoRect, faceSampleTimes, faceSampleSeekTime } from '../services/faceOverlay';
+import { observeVideoFrames } from '../services/videoFrames';
 
 const overlayMode = ref('corners');
 const selectedMarker = ref('');
@@ -24,20 +25,23 @@ const seeking = ref(false);
 const videoRect = ref(null);
 const videoStageRef = ref(null);
 let videoResizeObserver;
+let frameObserver;
+const presentedTime = ref(null);
+const frameSyncSupported = ref(false);
 const sampleFaces = computed(() => paused.value && !seeking.value
-  ? facesAtTime(visibleMarkers.value, currentSeconds.value, category.value) : []);
+  ? facesAtTime(visibleMarkers.value, presentedTime.value, category.value) : []);
 const sampleTimes = computed(() => faceSampleTimes(visibleMarkers.value, category.value));
 const hasFaceLocations = computed(() => faceSampleTimes(markers.value).length > 0);
-const previousSample = computed(() => sampleTimes.value.findLast(time => time < currentSeconds.value * 1000 - 45));
-const nextSample = computed(() => sampleTimes.value.find(time => time > currentSeconds.value * 1000 + 45));
+const previousSample = computed(() => sampleTimes.value.findLast(time => time < (presentedTime.value ?? currentSeconds.value) * 1000 - .501));
+const nextSample = computed(() => sampleTimes.value.find(time => time > (presentedTime.value ?? currentSeconds.value) * 1000 + .501));
 const jumpToSample = async time => {
   if (!Number.isFinite(time)) return;
   const video = videoRef.value;
   if (!video || !video.readyState) return;
   video.pause();
   selectedMarker.value = '';
-  currentSeconds.value = time / 1000;
-  video.currentTime = currentSeconds.value;
+  const target = faceSampleSeekTime(visibleMarkers.value, time, category.value);
+  if (target != null) seekVideo(target);
 };
 const updateVideoRect = () => {
   const video = videoRef.value;
@@ -118,10 +122,12 @@ const jump = async (index) => {
   if (!marker) return;
   selectedMarker.value = marker.id;
   const samples = faceSampleTimes([marker], category.value);
-  currentSeconds.value = (samples.length ? samples[0] : marker.time_ms) / 1000;
+  const target = samples.length
+    ? faceSampleSeekTime([marker], samples[0], category.value) : marker.time_ms / 1000;
+  currentSeconds.value = target;
   if (videoRef.value) {
     videoRef.value.pause();
-    if (videoRef.value.readyState) videoRef.value.currentTime = currentSeconds.value;
+    if (videoRef.value.readyState) seekVideo(target);
     else pendingSeek.value = currentSeconds.value;
   }
   await nextTick();
@@ -214,10 +220,18 @@ const downloadResults = () => {
   if (rawResults.value == null) return;
   saveJson(rawResults.value);
 };
+const seekVideo = time => {
+  const video = videoRef.value;
+  if (!video || !Number.isFinite(time)) return;
+  currentSeconds.value = time;
+  if (video.currentTime === time && presentedTime.value != null) return;
+  frameObserver?.invalidate();
+  video.currentTime = time;
+};
 const handleMetadata = () => {
   updateVideoRect();
   if (pendingSeek.value != null) {
-    videoRef.value.currentTime = pendingSeek.value;
+    seekVideo(pendingSeek.value);
     pendingSeek.value = null;
   }
   durationMs.value = Number.isFinite(videoRef.value?.duration) ? Math.round(videoRef.value.duration * 1000) : 0;
@@ -226,7 +240,7 @@ const handleTimeUpdate = () => { currentSeconds.value = videoRef.value?.currentT
 const handleSeek = (event) => {
   selectedMarker.value = '';
   currentSeconds.value = Number(event.target.value);
-  if (videoRef.value) videoRef.value.currentTime = currentSeconds.value;
+  seekVideo(currentSeconds.value);
 };
 const updateWidth = () => { timelineWidth.value = timelineRef.value?.clientWidth || 0; };
 const observeTimeline = (element) => {
@@ -257,6 +271,9 @@ watch(category, () => {
 watch(timelineRef, observeTimeline, { flush: 'post' });
 watch(playerPanelRef, observePlayerPanel, { flush: 'post' });
 watch(videoRef, element => {
+  frameObserver?.stop();
+  frameObserver = observeVideoFrames(element, time => { presentedTime.value = time; });
+  frameSyncSupported.value = frameObserver.supported;
   videoResizeObserver?.disconnect();
   if (element) videoResizeObserver?.observe(element);
   updateVideoRect();
@@ -271,6 +288,7 @@ onMounted(() => {
   loadReviewTask();
 });
 onBeforeUnmount(() => {
+  frameObserver?.stop();
   videoResizeObserver?.disconnect();
   resizeObserver?.disconnect();
   panelResizeObserver?.disconnect();
@@ -331,8 +349,8 @@ onBeforeUnmount(() => {
           <video ref="videoRef" :src="videoUrl" controls controlslist="nofullscreen" preload="metadata"
             @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate"
             @play="paused = false; selectedMarker = ''" @pause="paused = true; handleTimeUpdate()"
-            @seeking="seeking = true" @seeked="seeking = false; handleTimeUpdate()"
-            @emptied="videoRect = null; durationMs = 0; paused = true; seeking = false"
+            @seeking="seeking = true; presentedTime = null" @seeked="seeking = false; handleTimeUpdate()"
+            @emptied="videoRect = null; durationMs = 0; paused = true; seeking = false; presentedTime = null"
             @error="error = '视频无法播放，请确认地址可访问且服务支持 Range 请求'" />
           <FaceOverlay :faces="sampleFaces" :rect="videoRect" :selected="selectedMarker" :mode="overlayMode" @select="selectFace" />
           <button class="overlay-fullscreen" type="button" @click="toggleFullscreen">切换全屏</button>
@@ -343,7 +361,8 @@ onBeforeUnmount(() => {
             <button type="button" :disabled="previousSample == null" @click="jumpToSample(previousSample)" aria-label="上一人脸采样帧"><ChevronLeft />上一采样帧</button>
             <button type="button" :disabled="nextSample == null" @click="jumpToSample(nextSample)" aria-label="下一人脸采样帧">下一采样帧<ChevronRight /></button>
           </div>
-          <span v-if="!hasFaceLocations">此结果暂无人脸位置，重新分析后可显示。</span>
+          <span v-if="hasFaceLocations && !frameSyncSupported">当前浏览器不支持精确帧定位，人脸框已隐藏。</span>
+          <span v-else-if="!hasFaceLocations">此结果暂无人脸位置，重新分析后可显示。</span>
           <span v-else-if="overlayMode === 'hidden'">已隐藏人脸标记</span>
           <span v-else-if="!paused">暂停到命中采样帧可查看人脸标记</span>
           <span v-else-if="sampleFaces.length">当前 {{ sampleFaces.length }} 张命中人脸 · 悬浮查看候选，点击联动记录</span>

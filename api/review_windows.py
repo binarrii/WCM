@@ -197,8 +197,13 @@ async def analyze_video(
                     if face.get("face_location"):
                         sample = {
                             "time_ms": round(frame.timestamp * 1000),
+                            "pts_seconds": frame.timestamp,
                             "bbox": face["face_location"],
                         }
+                        if frame.duration is not None:
+                            sample["duration_seconds"] = frame.duration
+                        if frame.frame_index is not None:
+                            sample["frame_index"] = frame.frame_index
                         if face.get("similarity") is not None:
                             sample["similarity"] = float(face["similarity"])
                         if sample not in hit.setdefault("face_samples", []):

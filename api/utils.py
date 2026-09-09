@@ -25,6 +25,8 @@ class VideoFrame:
     image: object
     sampled: bool = True
     scene_id: int = 0
+    frame_index: int | None = None
+    duration: float | None = None
 
     @cached_property
     def appearance(self):
@@ -240,7 +242,16 @@ class VideoFrameSampler:
                 next_sample_time = (
                     math.floor((timestamp + 1e-9) / self.interval) + 1
                 ) * self.interval
-            current = VideoFrame(timestamp, frame, sampled, self.scene_cuts)
+            if previous_frame is not None:
+                previous_frame.duration = timestamp - previous_frame.timestamp
+            current = VideoFrame(
+                timestamp,
+                frame,
+                sampled,
+                self.scene_cuts,
+                frame_index=index,
+                duration=1 / self.fps,
+            )
             appearance = current.appearance if self.sampling_mode == "scene" else None
             cut = (
                 self.sampling_mode == "scene"

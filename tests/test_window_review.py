@@ -176,6 +176,7 @@ async def test_changed_subtitles_and_new_people_in_later_frames_are_kept_and_reu
     person = next(row for row in rows if row["source"] == "face")
     assert [f["time_ms"] for f in person["face_samples"]] == [0, 1000, 2000, 3000, 4000, 5000]
     assert all(f["bbox"]["x"] == 0.1 for f in person["face_samples"])
+    assert [f["pts_seconds"] for f in person["face_samples"]] == [0, 1, 2, 3, 4, 5]
 
 
 @pytest.mark.asyncio
