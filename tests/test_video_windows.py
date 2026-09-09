@@ -147,6 +147,7 @@ def pixel(b64):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("count", [0, 1, 2, 3, 4, 5])
 async def test_combined_and_standalone_tasks_use_identical_windows(monkeypatch, count, tmp_path):
+    monkeypatch.setattr(handlers.settings, "nsfw_sampling_mode", "fixed")
     captures = []
 
     def capture(_):

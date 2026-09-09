@@ -14,6 +14,7 @@ from tests.test_video_windows import Capture, pixel
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed_stage", ["face", "visual", "ocr"])
 async def test_one_failed_frame_preserves_siblings_and_later_frames(monkeypatch, failed_stage):
+    monkeypatch.setattr(handlers.settings, "nsfw_sampling_mode", "fixed")
     cap = Capture(3)
     monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
     monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)

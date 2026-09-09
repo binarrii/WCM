@@ -10,6 +10,9 @@ from pathlib import Path
 
 import cv2
 import httpx
+import numpy as np
+
+from wcm_facerec.config import settings
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
 MIN_FACE_PIXELS = 32 * 32
@@ -20,6 +23,12 @@ logger = logging.getLogger(__name__)
 class VideoFrame:
     timestamp: float
     image: object
+    sampled: bool = True
+    scene_id: int = 0
+
+    @cached_property
+    def appearance(self):
+        return cv2.resize(self.image, (160, 90), interpolation=cv2.INTER_LINEAR)
 
     @cached_property
     def b64(self) -> str:
@@ -29,16 +38,64 @@ class VideoFrame:
         return base64.b64encode(buffer).decode("utf-8")
 
 
-class VideoFrameSampler:
-    """One sampling clock and stride-one, three-frame windows for every task.
+class VideoWindow(tuple):
+    """Tuple-compatible frames with independent visual and fixed-grid scheduling."""
 
-    Drain partial windows at EOF: [a,b,c], [b,c], [c]. Each sampled
-    frame heads exactly one window; context frames are shared, never padded.
+    def __new__(cls, frames, *, review_visual=True, sampled=True):
+        window = super().__new__(cls, frames)
+        window.review_visual = review_visual
+        window.sampled = sampled
+        return window
+
+
+def _scene_change_score(previous, current):
+    before = cv2.cvtColor(previous, cv2.COLOR_BGR2HSV).astype(np.float32)
+    after = cv2.cvtColor(current, cv2.COLOR_BGR2HSV).astype(np.float32)
+    delta = np.abs(after - before)
+    # Hue wraps at 180 in OpenCV; normalize its circular distance to 0..255.
+    delta[:, :, 0] = np.minimum(delta[:, :, 0], 180 - delta[:, :, 0]) * (255 / 90)
+    # Hue/saturation are unstable in near-black or achromatic pixels. Avoid
+    # turning dark-scene compression noise into dozens of artificial shots.
+    light = np.minimum(np.minimum(before[:, :, 2], after[:, :, 2]) / 32, 1)
+    delta[:, :, 0] *= np.minimum(before[:, :, 1], after[:, :, 1]) / 255 * light
+    delta[:, :, 1] *= light
+    return float(delta.mean())
+
+
+def _near_duplicate(previous, current):
+    delta = cv2.absdiff(previous, current).max(axis=2)
+    # Local tiles keep a small changing region from being diluted by a static
+    # background. Compare against the last selected target, not its predecessor.
+    tiles = delta.reshape(9, 10, 16, 10).mean(axis=(1, 3))
+    return float(delta.mean()) <= 1.5 and float(tiles.max()) <= 5.0
+
+
+class VideoFrameSampler:
+    """PTS sampling with fixed windows or scene-aware visual scheduling.
+
+    Every grid sample still heads one window for face/OCR. Scene mode also
+    retains otherwise-unsampled short shots and limits context to the shot; only
+    near-duplicate visual targets may be skipped, within a bounded interval.
     """
 
-    def __init__(self, path: Path, sample_interval: float, *, max_dimension: int | None = None):
+    def __init__(
+        self,
+        path: Path,
+        sample_interval: float,
+        *,
+        max_dimension: int | None = None,
+        sampling_mode: str = "fixed",
+        max_visual_stride: int = 3,
+        scene_cut_threshold: float = 27.0,
+    ):
         if not math.isfinite(sample_interval) or sample_interval < 0:
             raise ValueError("sample_interval must be finite and nonnegative")
+        if sampling_mode not in {"fixed", "scene"}:
+            raise ValueError("sampling_mode must be fixed or scene")
+        if not 1 <= max_visual_stride <= 10:
+            raise ValueError("max_visual_stride must be between 1 and 10")
+        if not math.isfinite(scene_cut_threshold) or not 0 < scene_cut_threshold <= 255:
+            raise ValueError("scene_cut_threshold must be finite and in (0, 255]")
         self.cap = cv2.VideoCapture(str(path))
         try:
             if not self.cap.isOpened():
@@ -52,6 +109,42 @@ class VideoFrameSampler:
         self.frames_read = 0
         self.max_dimension = max_dimension
         self.estimated_timestamps = 0
+        self.sampling_mode = sampling_mode
+        self.max_visual_gap = max(sample_interval, 1 / self.fps) * max_visual_stride
+        self.scene_cut_threshold = scene_cut_threshold
+        self.scene_cuts = 0
+        self.fixed_samples = 0
+        self.boundary_samples = 0
+        self.visual_targets = 0
+        self.visual_skipped = 0
+        self._visual_anchor = None
+
+    def _window(self, frames, *, scene_end=False):
+        head = frames[0]
+        anchor = self._visual_anchor
+        review = (
+            self.sampling_mode == "fixed"
+            or anchor is None
+            or anchor.scene_id != head.scene_id
+            or scene_end
+            or head.timestamp - anchor.timestamp + 1e-9 >= self.max_visual_gap
+            or not _near_duplicate(anchor.appearance, head.appearance)
+        )
+        if review:
+            self._visual_anchor = head
+            self.visual_targets += 1
+        else:
+            self.visual_skipped += 1
+        return VideoWindow(frames, review_visual=review, sampled=head.sampled)
+
+    def _resize(self, frame):
+        if self.max_dimension and max(frame.image.shape[:2]) > self.max_dimension:
+            height, width = frame.image.shape[:2]
+            scale = self.max_dimension / max(height, width)
+            frame.image = cv2.resize(
+                frame.image, (max(1, int(width * scale)), max(1, int(height * scale)))
+            )
+        return frame
 
     def __enter__(self):
         return self
@@ -64,6 +157,9 @@ class VideoFrameSampler:
         previous_time = None
         last_valid_time, last_valid_index = 0.0, 0
         next_sample_time = 0.0
+        previous_frame = None
+        scene_first = None
+        scene_sampled = False
         while True:
             ok, frame = self.cap.read()
             if not ok:
@@ -87,25 +183,63 @@ class VideoFrameSampler:
             else:
                 last_valid_time, last_valid_index = timestamp, index
             previous_time = timestamp
-            if self.interval > 0 and timestamp + 1e-9 < next_sample_time:
-                continue
-            if self.interval > 0:
+            sampled = self.interval == 0 or timestamp + 1e-9 >= next_sample_time
+            if sampled and self.interval > 0:
                 # Advance the absolute sampling grid, not timestamp + interval.
                 # A long frame may cross several deadlines; never duplicate it.
                 next_sample_time = (
                     math.floor((timestamp + 1e-9) / self.interval) + 1
                 ) * self.interval
-            if self.max_dimension and max(frame.shape[:2]) > self.max_dimension:
-                height, width = frame.shape[:2]
-                scale = self.max_dimension / max(height, width)
-                frame = cv2.resize(frame, (max(1, int(width * scale)), max(1, int(height * scale))))
-            window.append(VideoFrame(timestamp, frame))
+            current = VideoFrame(timestamp, frame, sampled, self.scene_cuts)
+            appearance = current.appearance if self.sampling_mode == "scene" else None
+            cut = (
+                self.sampling_mode == "scene"
+                and previous_frame is not None
+                and (
+                    _scene_change_score(previous_frame.appearance, appearance)
+                    >= self.scene_cut_threshold
+                )
+            )
+            if cut:
+                if not scene_sampled and scene_first is not None:
+                    window.append(self._resize(scene_first))
+                    self.boundary_samples += 1
+                while window:
+                    yield self._window(tuple(window), scene_end=len(window) == 1)
+                    window.popleft()
+                self.scene_cuts += 1
+                current.scene_id = self.scene_cuts
+                scene_first = current
+                scene_sampled = False
+            if scene_first is None and not scene_sampled:
+                scene_first = current
+            previous_frame = current
+            if not sampled:
+                continue
+            scene_sampled = True
+            scene_first = None
+            self.fixed_samples += 1
+            window.append(self._resize(current))
             if len(window) == 3:
-                yield tuple(window)
+                yield self._window(tuple(window))
                 window.popleft()
+        if self.sampling_mode == "scene" and not scene_sampled and scene_first is not None:
+            window.append(self._resize(scene_first))
+            self.boundary_samples += 1
         while window:
-            yield tuple(window)
+            yield self._window(tuple(window), scene_end=len(window) == 1)
             window.popleft()
+        logger.info(
+            "Video sampling complete: mode=%s decoded=%s fixed_samples=%s scene_cuts=%s "
+            "boundary_samples=%s visual_targets=%s visual_skipped=%s",
+            self.sampling_mode,
+            self.frames_read,
+            self.fixed_samples,
+            self.scene_cuts,
+            self.boundary_samples,
+            self.visual_targets,
+            self.visual_skipped,
+        )
 
 
 async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:
@@ -152,5 +286,18 @@ def _extract_video_frames_for_ocr(
 
 
 def _extract_video_windows(video_path: Path, sample_interval: float):
-    with VideoFrameSampler(video_path, sample_interval) as sampler:
-        return [tuple((frame.timestamp, frame.b64) for frame in window) for window in sampler]
+    with VideoFrameSampler(
+        video_path,
+        sample_interval,
+        sampling_mode=settings.nsfw_sampling_mode,
+        max_visual_stride=settings.nsfw_scene_max_stride,
+        scene_cut_threshold=settings.nsfw_scene_cut_threshold,
+    ) as sampler:
+        return [
+            VideoWindow(
+                ((frame.timestamp, frame.b64) for frame in window),
+                review_visual=window.review_visual,
+                sampled=window.sampled,
+            )
+            for window in sampler
+        ]

@@ -64,6 +64,7 @@ def test_empty_and_single_image_keep_legacy_point_shape():
 
 @pytest.mark.parametrize("sample_interval", [1, 0.5])
 def test_http_video_response_merges_faces_but_not_other_sources(monkeypatch, sample_interval):
+    monkeypatch.setattr(handlers.settings, "nsfw_sampling_mode", "fixed")
     class Video:
         index = 0
 

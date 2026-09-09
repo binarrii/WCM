@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # InsightFace Server is a single-model service (currently buffalo_m v0.7,
@@ -77,6 +78,9 @@ class Settings(BaseSettings):
     # Multi-image Qwen input, with contact-sheet compatibility fallback.
     nsfw_image_mode: Literal["auto", "montage"] = "auto"
     nsfw_verify_target: bool = False
+    nsfw_sampling_mode: Literal["fixed", "scene"] = "scene"
+    nsfw_scene_max_stride: int = Field(default=3, ge=1, le=10)
+    nsfw_scene_cut_threshold: float = Field(default=27.0, gt=0, le=255)
 
     # ---- Review task storage ----
     # Disabled by default so local API-only development remains lightweight.

@@ -764,23 +764,33 @@ async def _process_analyze_media(
     sample_times = []
     errors = []
 
-    async def _process_window(window):
+    async def _process_window(window, *, review_visual=True, sampled=True):
         frame, b64_img, current_frame_time = window[0]
 
         async def face_task():
-            if frame is None:
+            if frame is None or not sampled:
                 return []
             return await _face_task(engine, frame, top_k, threshold, current_frame_time)
+
+        async def visual_task():
+            if review_visual:
+                return await _review_visual(
+                    [item[1] for item in window], [item[2] for item in window]
+                )
+
+        async def text_task():
+            if sampled:
+                return await _review_text(b64_img)
 
         face_res, nsfw_res, ocr_res = await asyncio.gather(
             _review_stage("face", current_frame_time, face_task, errors, default=[]),
             _review_stage(
                 "visual",
                 current_frame_time,
-                lambda: _review_visual([item[1] for item in window], [item[2] for item in window]),
+                visual_task,
                 errors,
             ),
-            _review_stage("ocr", current_frame_time, lambda: _review_text(b64_img), errors),
+            _review_stage("ocr", current_frame_time, text_task, errors),
         )
         flags_res = None
         return face_res, nsfw_res, ocr_res, flags_res, current_frame_time
@@ -802,18 +812,28 @@ async def _process_analyze_media(
 
             async def producer(sampler):
                 for window in sampler:
-                    sample_times.append(window[0].timestamp)
+                    if window.sampled:
+                        sample_times.append(window[0].timestamp)
                     await queue.put(
-                        tuple((frame.image, frame.b64, frame.timestamp) for frame in window)
+                        (
+                            tuple((frame.image, frame.b64, frame.timestamp) for frame in window),
+                            window.review_visual,
+                            window.sampled,
+                        )
                     )
                     await asyncio.sleep(0)
 
             async def consumer():
                 while True:
-                    item = await queue.get()
+                    item, review_visual, sampled = await queue.get()
                     try:
                         res = await _review_stage(
-                            "frame", item[0][2], lambda item=item: _process_window(item), errors
+                            "frame",
+                            item[0][2],
+                            lambda item=item, review_visual=review_visual, sampled=sampled: (
+                                _process_window(item, review_visual=review_visual, sampled=sampled)
+                            ),
+                            errors,
                         )
                         if res is not None:
                             frame_results.append(res)
@@ -824,7 +844,14 @@ async def _process_analyze_media(
             consumers = [asyncio.create_task(consumer()) for _ in range(NUM_CONSUMERS)]
 
             try:
-                with VideoFrameSampler(video_path, sample_interval, max_dimension=1080) as sampler:
+                with VideoFrameSampler(
+                    video_path,
+                    sample_interval,
+                    max_dimension=1080,
+                    sampling_mode=settings.nsfw_sampling_mode,
+                    max_visual_stride=settings.nsfw_scene_max_stride,
+                    scene_cut_threshold=settings.nsfw_scene_cut_threshold,
+                ) as sampler:
                     merge_interval = sampler.interval
                     await producer(sampler)
                 await queue.join()
@@ -853,8 +880,14 @@ async def _process_analyze_media(
         res = await _process_window(((frame, b64_img, 0.0),))
         frame_results = [res]
 
+    fixed_sample_times = set(sample_times)
+    face_results = (
+        [result for result in frame_results if result[4] in fixed_sample_times]
+        if is_video
+        else frame_results
+    )
     flattened_results = _merge_person_timelines(
-        frame_results, merge_interval, sample_times if is_video else None
+        face_results, merge_interval, sample_times if is_video else None
     )
 
     for _, nsfw_res, ocr_res, flags_res, ts in frame_results:
@@ -903,15 +936,24 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     async def _analyze_frame(window):
         timestamp, b64_img = window[0]
         times = [item[0] for item in window] if timestamp is not None else None
+
+        async def visual_task():
+            if getattr(window, "review_visual", True):
+                return await _review_visual([item[1] for item in window], times)
+
+        async def text_task():
+            if getattr(window, "sampled", True):
+                return await _review_text(b64_img)
+
         async with semaphore:
             visual, text = await asyncio.gather(
                 _review_stage(
                     "visual",
                     timestamp,
-                    lambda: _review_visual([item[1] for item in window], times),
+                    visual_task,
                     errors,
                 ),
-                _review_stage("ocr", timestamp, lambda: _review_text(b64_img), errors),
+                _review_stage("ocr", timestamp, text_task, errors),
             )
         return timestamp, visual, text
 
