@@ -81,7 +81,7 @@ def install_response(monkeypatch, response):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "content,finish",
-    [("", "stop"), ("cannot answer", "stop"), (None, "stop"), ("Safety: Safe", "length")],
+    [("", "stop"), ("cannot answer", "stop"), (None, "stop"), ("Safety: Unsa", "length")],
 )
 async def test_invalid_guard_verdict_becomes_incomplete(monkeypatch, content, finish):
     install_response(
@@ -100,7 +100,6 @@ async def test_invalid_guard_verdict_becomes_incomplete(monkeypatch, content, fi
     [
         httpx.ReadTimeout("timeout"),
         {},
-        {"choices": [{"message": {"content": "text"}, "finish_reason": "length"}]},
     ],
 )
 async def test_ocr_errors_are_recorded_without_retry(monkeypatch, response):
@@ -151,12 +150,6 @@ async def test_ocr_uses_recognition_task_prompt_and_preserves_text(monkeypatch):
 @pytest.mark.parametrize(
     "response,component,code,message",
     [
-        (
-            {"choices": [{"message": {"content": "unfinished"}, "finish_reason": "length"}]},
-            "ocr",
-            "output_truncated",
-            "1024 tokens",
-        ),
         ({}, "ocr", "invalid_structure", "缺少有效结果字段"),
         (
             {"choices": [{"message": {"content": None}, "finish_reason": "stop"}]},
@@ -181,12 +174,6 @@ async def test_ocr_uses_recognition_task_prompt_and_preserves_text(monkeypatch):
             "guard",
             "empty_response",
             "返回空结果",
-        ),
-        (
-            {"choices": [{"message": {"content": "Safety: Safe"}, "finish_reason": "length"}]},
-            "guard",
-            "output_truncated",
-            "512 tokens",
         ),
     ],
 )
@@ -219,6 +206,56 @@ async def test_invalid_json_reports_format_problem_without_body_leak(monkeypatch
     result = await handlers._process_detect_sensitive("http://test/image.jpg", 1)
     assert result["errors"][0]["error_code"] == "invalid_json"
     assert "private upstream response" not in str(result) + caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["已提取的部分字幕", ""])
+async def test_truncated_ocr_continues_with_available_text(monkeypatch, caplog, text):
+    client = install_response(
+        monkeypatch, {"choices": [{"message": {"content": text}, "finish_reason": "length"}]}
+    )
+    guard = AsyncMock(return_value={"safe": False, "category": "需复核"})
+    monkeypatch.setattr(handlers, "_call_llm_guard", guard)
+    monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=b"fixture"))
+    result = await handlers._process_detect_sensitive("http://test/image.jpg", 1)
+    assert "errors" not in result
+    if text:
+        guard.assert_awaited_once_with(text)
+        assert result["unsafe_text_frames"][0]["text"] == text
+    else:
+        guard.assert_not_awaited()
+        assert result["unsafe_text_frames"] == []
+    client.post.assert_awaited_once()
+    assert "keeping partial content: component=ocr max_tokens=1024" in caplog.text
+    assert "已提取的部分字幕" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verdict,safe", [("Safe", True), ("Unsafe", False), ("Controversial", False)]
+)
+async def test_truncated_guard_preserves_available_verdict(monkeypatch, caplog, verdict, safe):
+    client = install_response(
+        monkeypatch,
+        {
+            "choices": [
+                {
+                    "message": {"content": f"Safety: {verdict}\nCategories:"},
+                    "finish_reason": "length",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value="待审核字幕"))
+    monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=b"fixture"))
+    result = await handlers._process_detect_sensitive("http://test/image.jpg", 1)
+    assert "errors" not in result
+    assert bool(result["unsafe_text_frames"]) is not safe
+    if not safe:
+        assert result["unsafe_text_frames"][0]["text"] == "待审核字幕"
+    client.post.assert_awaited_once()
+    assert "keeping partial content: component=guard max_tokens=512" in caplog.text
+    assert "Safety:" not in caplog.text
 
 
 @pytest.mark.asyncio

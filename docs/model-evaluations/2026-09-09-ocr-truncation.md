@@ -31,4 +31,12 @@
 - 只验证了获准的四个时间点，不能据此证明全部 59 项或所有 OCR 识别准确率已解决。纯白合成图仍观察到文字幻觉，因此“请求正常完成”不等于“文字完全正确”。
 - 旧任务结果保持不变；未重跑整条视频，也未将历史未完成项直接改成安全。
 
-本地验证：`pytest -q -W error::RuntimeWarning`，361 passed，7 skipped。
+首版修复验证：`pytest -q -W error::RuntimeWarning`，361 passed，7 skipped。
+
+## 后续调整：保留截断输出
+
+按用户要求，OCR、Qwen 视觉描述及 Guard 在 `finish_reason=length` 时改为记录 WARNING，并将已生成内容交给原有清理、解析及审核流程，不再仅因截断抛异常、生成未完成标记或重试。日志只记录组件和 token 上限。
+
+OCR 空文本继续跳过文字判定；Guard 已输出有效 `Safe`、`Unsafe`、`Controversial` 时照常使用，后两者仍需审核。响应结构无效或完全缺少有效判定等独立问题仍由帧级容错处理。
+
+调整后本地验证：`pytest -q -W error::RuntimeWarning`，364 passed，7 skipped。

@@ -81,7 +81,7 @@ def test_context_can_only_select_fixed_questions_not_inject_objects_or_instructi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "failure", [httpx.ReadTimeout("offline"), caption(""), caption("partial", "length")]
+    "failure", [httpx.ReadTimeout("offline"), caption("")]
 )
 async def test_target_verification_failure_never_falls_back_to_context(monkeypatch, failure):
     monkeypatch.setattr(handlers.settings, "nsfw_verify_target", True)
@@ -93,13 +93,40 @@ async def test_target_verification_failure_never_falls_back_to_context(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [caption("partial", "length"), caption(""), caption(None)])
+@pytest.mark.parametrize("failure", [caption(""), caption(None)])
 async def test_incomplete_description_fails_without_retry_or_fallback(monkeypatch, failure):
     calls = install_client(monkeypatch, [failure])
     with pytest.raises(handlers.NsfwAnalysisError):
         await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
     assert len(calls) == 1
     assert calls[0]["max_tokens"] == 1024
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,verify", [("auto", False), ("auto", True), ("montage", False)])
+async def test_truncated_caption_reaches_guard_without_retry(monkeypatch, caplog, mode, verify):
+    monkeypatch.setattr(handlers.settings, "nsfw_image_mode", mode)
+    monkeypatch.setattr(handlers.settings, "nsfw_verify_target", verify)
+    replies = [caption("目标画面的部分描述", "length")]
+    if verify or mode == "montage":
+        replies.insert(0, caption("参考画面描述"))
+    calls = install_client(monkeypatch, replies)
+    monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        handlers,
+        "_extract_video_windows",
+        lambda *a: [((0, image(60)), (1, image(130)), (2, image(220)))],
+    )
+    monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value=""))
+    guard = AsyncMock(return_value={"safe": False, "category": "需复核"})
+    monkeypatch.setattr(handlers, "_call_llm_guard", guard)
+    result = await handlers._process_detect_nsfw("https://fixture/video.mp4", 1)
+    guard.assert_awaited_once_with("目标画面的部分描述")
+    assert "errors" not in result
+    assert result["visual_analysis"][0]["description"] == "[需复核] 目标画面的部分描述"
+    assert len(calls) == len(replies)
+    assert "keeping partial content: component=visual max_tokens=1024" in caplog.text
+    assert "目标画面的部分描述" not in caplog.text
 
 
 @pytest.mark.asyncio

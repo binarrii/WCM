@@ -42,7 +42,7 @@ class ModelResponseError(ValueError):
 
 
 def _model_response_text(response, component: str, max_tokens: int, allow_empty=False) -> str:
-    label = {"ocr": "OCR 模型", "guard": "安全判定模型"}[component]
+    label = {"ocr": "OCR 模型", "guard": "安全判定模型", "visual": "视觉描述模型"}[component]
     try:
         data = response.json()
     except ValueError as exc:
@@ -58,10 +58,12 @@ def _model_response_text(response, component: str, max_tokens: int, allow_empty=
             component, "invalid_structure", f"{label}响应缺少有效结果字段"
         ) from exc
     if finish_reason == "length":
-        raise ModelResponseError(
-            component, "output_truncated", f"{label}输出达到 {max_tokens} tokens 上限，被截断"
+        _logger.warning(
+            "Model output truncated; keeping partial content: component=%s max_tokens=%s",
+            component,
+            max_tokens,
         )
-    if finish_reason not in (None, "stop"):
+    elif finish_reason not in (None, "stop"):
         raise ModelResponseError(component, "generation_incomplete", f"{label}未正常完成输出")
     if not isinstance(content, str):
         raise ModelResponseError(component, "invalid_content", f"{label}返回的内容不是文本")
@@ -469,12 +471,7 @@ async def _request_nsfw_caption(
         json=payload,
     )
     response.raise_for_status()
-    choice = response.json()["choices"][0]
-    if choice.get("finish_reason") == "length":
-        # A generous budget replaces the old truncation retry; partial output
-        # must still fail the task rather than be treated as a safe description.
-        raise ValueError("NSFW caption was truncated")
-    analysis = (choice["message"]["content"] or "").split("</think>")[-1].strip()
+    analysis = _model_response_text(response, "visual", 1024).split("</think>")[-1].strip()
     if not analysis:
         raise ValueError("NSFW caption was empty")
     return analysis
