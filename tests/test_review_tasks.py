@@ -186,7 +186,7 @@ def test_http_and_websocket_persist_measured_coverage_without_changing_results(
 ):
     results = [{"timestamp": 2, "stage": "ocr", "review_status": "incomplete"}]
 
-    async def analyze(url, interval, top_k, threshold, *, coverage):
+    async def analyze(url, interval, top_k, threshold, *, coverage, progress):
         coverage.add(range(10))
         return results
 

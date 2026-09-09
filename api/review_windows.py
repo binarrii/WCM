@@ -136,13 +136,14 @@ async def analyze_video(
     include_faces=False,
     include_visual=True,
     coverage=None,
+    progress=None,
 ):
     engine = handlers.get_face_engine() if include_faces else None
     ocr_cache, face_cache, guard_cache = AsyncMemo(), AsyncMemo(128), AsyncMemo(512)
     visual_cache = AsyncMemo(64)
     errors, completed = [], []
     path = Path(f"/tmp/window_review_{os.urandom(8).hex()}.mp4")
-    concurrency = 3
+    concurrency = 2
     queue = asyncio.Queue(maxsize=concurrency * 2)
     planner = ReviewWindowPlanner(settings.nsfw_window_max_seconds)
     selected_frames = 0
@@ -164,6 +165,10 @@ async def analyze_video(
         async def visual():
             if not include_visual:
                 return
+            if progress is not None:
+                await progress.start_stage(
+                    window.index, "visual", [frame.timestamp for frame in window.frames]
+                )
 
             async def operation():
                 images = [frame.b64 for frame in window.frames]
@@ -188,9 +193,13 @@ async def analyze_video(
             )
             if result:
                 add("visual", result["category"], result["text"])
+            if progress is not None:
+                progress.finish_stage(window.index, "visual")
 
         async def text():
             for frame in window.frames:
+                if progress is not None:
+                    await progress.start_stage(window.index, "ocr", [frame.timestamp])
 
                 async def operation(frame=frame):
                     content = await ocr_cache.get(
@@ -208,11 +217,15 @@ async def analyze_video(
                 result = await handlers._review_stage("ocr", frame.timestamp, operation, errors)
                 if result:
                     add("ocr", result["category"], result["text"])
+            if progress is not None:
+                progress.finish_stage(window.index, "ocr")
 
         async def faces():
             if not include_faces:
                 return
             for frame in window.frames:
+                if progress is not None:
+                    await progress.start_stage(window.index, "face", [frame.timestamp])
                 # Face matching receives raw pixels; do not key it by lossy JPEG.
                 key = (frame.image.shape, _digest(frame.image.tobytes()))
 
@@ -245,6 +258,8 @@ async def analyze_video(
                             sample["similarity"] = float(face["similarity"])
                         if sample not in hit.setdefault("face_samples", []):
                             hit["face_samples"].append(sample)
+            if progress is not None:
+                progress.finish_stage(window.index, "face")
 
         await asyncio.gather(visual(), text(), faces())
         completed.append(
@@ -261,6 +276,13 @@ async def analyze_video(
         while True:
             window = await queue.get()
             try:
+                if progress is not None:
+                    await progress.start_window(
+                        window.index,
+                        window.start,
+                        window.end,
+                        [frame.timestamp for frame in window.frames],
+                    )
                 await handlers._review_stage(
                     "frame",
                     window.start,
@@ -268,6 +290,8 @@ async def analyze_video(
                     errors,
                     end_timestamp=window.end,
                 )
+                if progress is not None:
+                    await progress.complete_window(window.index, window.end, len(window.frames))
             finally:
                 queue.task_done()
 
@@ -289,12 +313,16 @@ async def analyze_video(
             max_visual_stride=settings.nsfw_scene_max_stride,
             scene_cut_threshold=settings.nsfw_scene_cut_threshold,
         ) as sampler:
+            if progress is not None:
+                await progress.begin_review(getattr(sampler, "duration_seconds", None))
             for sample in sampler:
                 ready = planner.push(sample)
                 if ready is not None:
                     selected_frames += len(ready.frames)
                     if coverage is not None:
                         coverage.add(frame.timestamp for frame in ready.frames)
+                    if progress is not None:
+                        progress.enqueue(len(ready.frames))
                     await queue.put(ready)
                 await asyncio.sleep(0)
             ready = planner.flush()
@@ -302,8 +330,14 @@ async def analyze_video(
                 selected_frames += len(ready.frames)
                 if coverage is not None:
                     coverage.add(frame.timestamp for frame in ready.frames)
+                if progress is not None:
+                    progress.enqueue(len(ready.frames))
                 await queue.put(ready)
+        if progress is not None:
+            await progress.sampled()
         await queue.join()
+        if progress is not None:
+            await progress.set_phase("saving")
         logger.info(
             "Window review complete: windows=%s selected_frames=%s visual_windows=%s "
             "visual_calls=%s visual_reused=%s "

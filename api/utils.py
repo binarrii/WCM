@@ -154,6 +154,10 @@ class VideoFrameSampler:
                 raise ValueError("Could not open video file")
             fps = self.cap.get(cv2.CAP_PROP_FPS)
             self.fps = fps if math.isfinite(fps) and fps > 0 else 25.0
+            frame_count = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            self.duration_seconds = (
+                frame_count / self.fps if math.isfinite(frame_count) and frame_count > 0 else None
+            )
         except BaseException:
             self.cap.release()
             raise

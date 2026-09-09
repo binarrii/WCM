@@ -382,6 +382,14 @@ def _decode_nsfw_frame(image: str, max_width: int, max_height: int):
 
 
 def _encode_nsfw_frame(frame) -> str:
+    height, width = frame.shape[:2]
+    if max(height, width) > 960:
+        scale = 960 / max(height, width)
+        frame = cv2.resize(
+            frame,
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
     ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
     if not ok:
         raise ValueError("Could not encode NSFW frame")
@@ -395,7 +403,7 @@ def _compose_nsfw_frames(
     if review_all:
         panels = []
         for index, image in enumerate(images):
-            frame = _decode_nsfw_frame(image, 1024, 1024)
+            frame = _decode_nsfw_frame(image, 960, 960)
             panel = cv2.copyMakeBorder(frame, 36, 4, 4, 4, cv2.BORDER_CONSTANT, value=(32, 32, 32))
             label = f"FRAME {index + 1}"
             if timestamps is not None:
@@ -437,7 +445,7 @@ def _compose_nsfw_frames(
         )
     if len(images) == 1:
         return images[0], "Only one target frame is provided."
-    target = _decode_nsfw_frame(images[0], 1024, 1024)
+    target = _decode_nsfw_frame(images[0], 960, 960)
     height, width = target.shape[:2]
     vertical = width >= height
     gap, header, border = 8, 36, 4
@@ -658,7 +666,7 @@ async def _call_nsfw_analysis(
     try:
         frames = []
         for image in images:
-            frame = await asyncio.to_thread(_decode_nsfw_frame, image, 1024, 1024)
+            frame = await asyncio.to_thread(_decode_nsfw_frame, image, 960, 960)
             frames.append(await asyncio.to_thread(_encode_nsfw_frame, frame))
     except Exception as exc:
         raise NsfwAnalysisError("NSFW 窗口图片解码失败") from exc
@@ -903,12 +911,18 @@ def _merge_person_timelines(
 
 
 async def _process_analyze_media(
-    url: str, sample_interval: float, top_k: int, threshold: float, *, coverage=None
+    url: str, sample_interval: float, top_k: int, threshold: float, *, coverage=None, progress=None
 ) -> list:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     if is_video and settings.nsfw_review_mode == "window":
         return await review_windows.analyze_video(
-            url, sample_interval, top_k, threshold, include_faces=True, coverage=coverage
+            url,
+            sample_interval,
+            top_k,
+            threshold,
+            include_faces=True,
+            coverage=coverage,
+            progress=progress,
         )
     engine = get_face_engine()
     merge_interval = sample_interval
@@ -918,23 +932,41 @@ async def _process_analyze_media(
     if coverage is not None:
         coverage.add([])
 
-    async def _process_window(window, *, review_visual=True, sampled=True):
+    async def _process_window(window, *, review_visual=True, sampled=True, index=0):
         frame, b64_img, current_frame_time = window[0]
 
         async def face_task():
             if frame is None or not sampled:
                 return []
-            return await _face_task(engine, frame, top_k, threshold, current_frame_time)
+            if progress is not None:
+                await progress.start_stage(index, "face", [current_frame_time])
+            try:
+                return await _face_task(engine, frame, top_k, threshold, current_frame_time)
+            finally:
+                if progress is not None:
+                    progress.finish_stage(index, "face")
 
         async def visual_task():
             if review_visual:
-                return await _review_visual(
-                    [item[1] for item in window], [item[2] for item in window]
-                )
+                if progress is not None:
+                    await progress.start_stage(index, "visual", [current_frame_time])
+                try:
+                    return await _review_visual(
+                        [item[1] for item in window], [item[2] for item in window]
+                    )
+                finally:
+                    if progress is not None:
+                        progress.finish_stage(index, "visual")
 
         async def text_task():
             if sampled:
-                return await _review_text(b64_img)
+                if progress is not None:
+                    await progress.start_stage(index, "ocr", [current_frame_time])
+                try:
+                    return await _review_text(b64_img)
+                finally:
+                    if progress is not None:
+                        progress.finish_stage(index, "ocr")
 
         face_res, nsfw_res, ocr_res = await asyncio.gather(
             _review_stage("face", current_frame_time, face_task, errors, default=[]),
@@ -962,16 +994,20 @@ async def _process_analyze_media(
                 timeout=900.0,
             )
 
-            queue = asyncio.Queue(maxsize=16)
+            concurrency = 2
+            queue = asyncio.Queue(maxsize=concurrency * 2)
 
             async def producer(sampler):
-                for window in sampler:
+                for index, window in enumerate(sampler):
                     if coverage is not None:
                         coverage.add([window[0].timestamp])
                     if window.sampled:
                         sample_times.append(window[0].timestamp)
+                    if progress is not None:
+                        progress.enqueue(1)
                     await queue.put(
                         (
+                            index,
                             tuple((frame.image, frame.b64, frame.timestamp) for frame in window),
                             window.review_visual,
                             window.sampled,
@@ -981,23 +1017,28 @@ async def _process_analyze_media(
 
             async def consumer():
                 while True:
-                    item, review_visual, sampled = await queue.get()
+                    index, item, review_visual, sampled = await queue.get()
                     try:
+                        if progress is not None:
+                            await progress.start_window(index, item[0][2], item[0][2], [item[0][2]])
                         res = await _review_stage(
                             "frame",
                             item[0][2],
-                            lambda item=item, review_visual=review_visual, sampled=sampled: (
-                                _process_window(item, review_visual=review_visual, sampled=sampled)
+                            lambda item=item, review_visual=review_visual, sampled=sampled, index=index: (
+                                _process_window(
+                                    item, review_visual=review_visual, sampled=sampled, index=index
+                                )
                             ),
                             errors,
                         )
                         if res is not None:
                             frame_results.append(res)
+                        if progress is not None:
+                            await progress.complete_window(index, item[0][2], 1)
                     finally:
                         queue.task_done()
 
-            NUM_CONSUMERS = queue.maxsize // 2
-            consumers = [asyncio.create_task(consumer()) for _ in range(NUM_CONSUMERS)]
+            consumers = [asyncio.create_task(consumer()) for _ in range(concurrency)]
 
             try:
                 with VideoFrameSampler(
@@ -1009,7 +1050,11 @@ async def _process_analyze_media(
                     scene_cut_threshold=settings.nsfw_scene_cut_threshold,
                 ) as sampler:
                     merge_interval = sampler.interval
+                    if progress is not None:
+                        await progress.begin_review(getattr(sampler, "duration_seconds", None))
                     await producer(sampler)
+                if progress is not None:
+                    await progress.sampled()
                 await queue.join()
             finally:
                 for consumer_task in consumers:
@@ -1035,7 +1080,14 @@ async def _process_analyze_media(
 
         if coverage is not None:
             coverage.add([0.0])
+        if progress is not None:
+            await progress.begin_review()
+            progress.enqueue(1)
+            await progress.sampled()
+            await progress.start_window(0, 0, 0, [0])
         res = await _process_window(((frame, b64_img, 0.0),))
+        if progress is not None:
+            await progress.complete_window(0, 0, 1)
         frame_results = [res]
 
     fixed_sample_times = set(sample_times)

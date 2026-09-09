@@ -1,5 +1,6 @@
 """API routes for face recognition service."""
 
+import asyncio
 import contextlib
 import json
 import uuid
@@ -23,6 +24,7 @@ from .handlers import (
     _search_video_frames,
 )
 from .review_coverage import ReviewCoverage
+from .review_progress import ReviewProgress
 from .review_results import consolidate_results
 from .utils import VIDEO_EXTENSIONS, _download_url_safe
 
@@ -541,6 +543,37 @@ async def websocket_detect_nsfw(websocket: WebSocket):
             await websocket.send_json({"status": "error", "error": str(e)})
 
 
+async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
+    coverage = ReviewCoverage()
+    async with ReviewProgress(task_id) as progress:
+        try:
+            result = await _process_analyze_media(
+                url, sample_interval, top_k, threshold, coverage=coverage, progress=progress
+            )
+            result = (
+                consolidate_results(result)
+                if isinstance(result, list)
+                else {**result, "results": consolidate_results(result.get("results", []))}
+            )
+            stored_results = result.get("results", []) if isinstance(result, dict) else result
+            await progress.set_phase("saving")
+            await review_task_store.complete(
+                task_id, stored_results, coverage.summarize(stored_results)
+            )
+            await progress.set_phase("finished", persist=False)
+            return result
+        except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                await review_task_store.fail(task_id, "审核任务被中断。")
+            await progress.set_phase("failed", persist=False)
+            raise
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await review_task_store.fail(task_id, str(exc))
+            await progress.set_phase("failed", persist=False)
+            raise
+
+
 @api_bp.post("/analyze_media")
 async def analyze_media(request: Request, response: Response):
     """Analyze media for faces, sensitive text, and NSFW content.
@@ -569,27 +602,11 @@ async def analyze_media(request: Request, response: Response):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        coverage = ReviewCoverage()
-        result = await _process_analyze_media(
-            url, sample_interval, top_k, threshold, coverage=coverage
-        )
-        result = (
-            consolidate_results(result)
-            if isinstance(result, list)
-            else {**result, "results": consolidate_results(result.get("results", []))}
-        )
-    except Exception as e:
-        with contextlib.suppress(Exception):
-            await review_task_store.fail(task_id, str(e))
-        raise HTTPException(status_code=400, detail=f"Failed to process media: {str(e)}")
-
-    stored_results = result.get("results", []) if isinstance(result, dict) else result
-    try:
-        await review_task_store.complete(
-            task_id, stored_results, coverage.summarize(stored_results)
-        )
+        result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
     except review_task_store.ReviewTaskStoreUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to process media: {str(exc)}") from exc
     if task_id:
         response.headers["X-Review-Task-ID"] = task_id
     return result
@@ -634,26 +651,21 @@ async def websocket_analyze_media(websocket: WebSocket):
             await websocket.send_json({"status": "accepted", "taskId": task_id})
 
             try:
-                coverage = ReviewCoverage()
-                result = await _process_analyze_media(
-                    url, sample_interval, top_k, threshold, coverage=coverage
-                )
-                result = (
-                    consolidate_results(result)
-                    if isinstance(result, list)
-                    else {**result, "results": consolidate_results(result.get("results", []))}
-                )
-                stored_results = result.get("results", []) if isinstance(result, dict) else result
-                await review_task_store.complete(
-                    task_id, stored_results, coverage.summarize(stored_results)
-                )
+                result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+            except Exception as e:
+                with contextlib.suppress(Exception):
+                    await websocket.send_json(
+                        {"status": "error", "taskId": task_id, "error": str(e)}
+                    )
+                continue
+            # A disconnected browser cannot change an already persisted task to failed.
+            stored_results = result.get("results", []) if isinstance(result, dict) else result
+            try:
                 await websocket.send_json(
                     {"status": "completed", "taskId": task_id, "results": stored_results}
                 )
-            except Exception as e:
-                with contextlib.suppress(Exception):
-                    await review_task_store.fail(task_id, str(e))
-                await websocket.send_json({"status": "error", "taskId": task_id, "error": str(e)})
+            except Exception:
+                break
     except Exception as e:
         with contextlib.suppress(Exception):
             await websocket.send_json({"status": "error", "error": str(e)})

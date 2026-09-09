@@ -69,6 +69,7 @@ def _initialize_sync() -> None:
                 result_count INT UNSIGNED NOT NULL DEFAULT 0,
                 error TEXT NULL,
                 review_summary JSON NULL,
+                progress JSON NULL,
                 created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
                 updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
                     ON UPDATE CURRENT_TIMESTAMP(3),
@@ -78,14 +79,15 @@ def _initialize_sync() -> None:
             """
         )
 
-        cursor.execute("SHOW COLUMNS FROM review_tasks LIKE 'review_summary'")
-        if not cursor.fetchone():
-            try:
-                cursor.execute("ALTER TABLE review_tasks ADD COLUMN review_summary JSON NULL")
-            except pymysql.err.OperationalError as exc:
-                # Multiple API workers can initialize the existing table together.
-                if exc.args[0] != 1060:
-                    raise
+        for column in ("review_summary", "progress"):
+            cursor.execute("SHOW COLUMNS FROM review_tasks LIKE %s", (column,))
+            if not cursor.fetchone():
+                try:
+                    cursor.execute(f"ALTER TABLE review_tasks ADD COLUMN {column} JSON NULL")
+                except pymysql.err.OperationalError as exc:
+                    # Multiple API workers can initialize the existing table together.
+                    if exc.args[0] != 1060:
+                        raise
 
 
 async def initialize() -> None:
@@ -118,6 +120,7 @@ def _public_row(row: dict, *, include_results: bool) -> dict:
         "result_count": row["result_count"],
         "error": row["error"],
         "review_summary": _json_load(row.get("review_summary")),
+        "progress": _json_load(row.get("progress")),
         "has_results": bool(row.get("has_results", row.get("results") is not None)),
         "created_at": _iso(row["created_at"]),
         "updated_at": _iso(row["updated_at"]),
@@ -169,6 +172,7 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
             """
             UPDATE review_tasks
             SET status = %s, results = %s, result_count = %s, error = %s, review_summary = %s
+                , progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'finished', '$.percent', 100)
             WHERE id = %s
             """,
             (
@@ -191,7 +195,9 @@ def _fail_sync(task_id: str, error: str) -> None:
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(
             """
-            UPDATE review_tasks SET status = 'failed', error = %s WHERE id = %s
+            UPDATE review_tasks SET status = 'failed', error = %s,
+                progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'failed')
+            WHERE id = %s
             """,
             (error[:65535], task_id),
         )
@@ -200,6 +206,20 @@ def _fail_sync(task_id: str, error: str) -> None:
 async def fail(task_id: str | None, error: str) -> None:
     if task_id and is_enabled():
         await _run(_fail_sync, task_id, error)
+
+
+def _update_progress_sync(task_id: str, progress: dict) -> None:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE review_tasks SET progress = %s WHERE id = %s AND status = 'processing' "
+            "AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(progress, '$.sequence')) AS SIGNED), -1) < %s",
+            (_json_dump(progress), task_id, progress["sequence"]),
+        )
+
+
+async def update_progress(task_id: str | None, progress: dict) -> None:
+    if task_id and is_enabled():
+        await _run(_update_progress_sync, task_id, progress)
 
 
 def _get_sync(task_id: str) -> dict | None:
@@ -258,7 +278,7 @@ def _list_sync(query: str, status: str, page: int, page_size: int) -> dict:
         cursor.execute(f"SELECT COUNT(*) AS total FROM review_tasks{where}", values)
         total = cursor.fetchone()["total"]
         cursor.execute(
-            "SELECT id, video_url, parameters, status, result_count, error, review_summary, "
+            "SELECT id, video_url, parameters, status, result_count, error, review_summary, progress, "
             "results IS NOT NULL AS has_results, "
             f"created_at, updated_at FROM review_tasks{where} "
             "ORDER BY created_at DESC LIMIT %s OFFSET %s",

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, ExternalLink, ListVideo, RefreshCw, Search, Trash2 } from '@lucide/vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import ReviewProgress from '../components/ReviewProgress.vue';
 import { saveBlob } from '../services/downloads';
 import { navigateToReviewTask } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
@@ -23,6 +24,8 @@ const selectedIds = ref(new Set());
 const pendingDelete = ref(null);
 let searchTimer;
 let requestSequence = 0;
+let refreshTimer;
+let disposed = false;
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 const allSelected = computed(() => tasks.value.length > 0 && tasks.value.every(task => selectedIds.value.has(task.id)));
@@ -47,10 +50,10 @@ const parameterSummary = task => {
   ].filter(Boolean).join(' · ');
 };
 
-const loadTasks = async () => {
+const loadTasks = async ({ silent = false } = {}) => {
+  clearTimeout(refreshTimer);
   const sequence = ++requestSequence;
-  loading.value = true;
-  error.value = '';
+  if (!silent) { loading.value = true; error.value = ''; }
   try {
     const payload = await reviewTaskService.list({
       query: query.value.trim(), status: status.value, page: page.value, pageSize
@@ -66,7 +69,12 @@ const loadTasks = async () => {
       error.value = reason.response?.data?.detail || reason.message || '任务列表加载失败';
     }
   } finally {
-    if (sequence === requestSequence) loading.value = false;
+    if (sequence === requestSequence) {
+      loading.value = false;
+      if (!disposed && (tasks.value.some(task => task.status === 'processing') || status.value === 'processing')) {
+        refreshTimer = setTimeout(() => loadTasks({ silent: true }), 2000);
+      }
+    }
   }
 };
 const clearSelection = () => { selectedIds.value = new Set(); };
@@ -158,7 +166,7 @@ watch(query, () => {
 });
 watch(status, searchNow);
 onMounted(loadTasks);
-onBeforeUnmount(() => clearTimeout(searchTimer));
+onBeforeUnmount(() => { disposed = true; requestSequence += 1; clearTimeout(searchTimer); clearTimeout(refreshTimer); });
 </script>
 
 <template>
@@ -181,7 +189,8 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
         <table>
           <thead><tr><th class="task-select-cell"><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" :disabled="!tasks.length || deleting" aria-label="选择当前页全部任务" @change="toggleAll" /></th><th>状态</th><th>视频地址</th><th>提交参数</th><th>结果</th><th>提交时间</th><th aria-label="操作"></th></tr></thead>
           <tbody>
-            <tr v-for="task in tasks" :key="task.id" :class="{ selected: selectedIds.has(task.id) }" tabindex="0" @click="navigateToReviewTask(task.id)" @keydown.enter="navigateToReviewTask(task.id)">
+            <template v-for="task in tasks" :key="task.id">
+            <tr :class="{ selected: selectedIds.has(task.id) }" tabindex="0" @click="navigateToReviewTask(task.id)" @keydown.enter="navigateToReviewTask(task.id)">
               <td class="task-select-cell" @click.stop @keydown.enter.stop><input type="checkbox" :checked="selectedIds.has(task.id)" :disabled="deleting" :aria-label="`选择任务 ${task.id}`" @change="toggleTask(task.id)" /></td>
               <td><span :class="['task-status', task.status]" title="未完成采样占比：≤10% 已完成，≥30% 失败，其余含未审核项">{{ statusLabel(task.status) }}</span></td>
               <td class="task-video"><strong :title="task.video_url">{{ task.video_url }}</strong><small>{{ task.id }}</small><em v-if="task.error" :class="{ partial: task.status === 'partial' || task.status === 'completed' }" :title="task.error">{{ task.error }}</em></td>
@@ -190,6 +199,10 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
               <td class="task-date">{{ formatTime(task.created_at) }}</td>
               <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="reviewResultsReady(task) ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || !reviewResultsReady(task) || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><button class="delete-task" type="button" title="删除任务" :disabled="deleting || batchDownloading" @click="requestDeleteTask(task)"><Trash2 /></button></td>
             </tr>
+            <tr v-if="task.status === 'processing'" class="task-progress-row" :class="{ selected: selectedIds.has(task.id) }">
+              <td colspan="7"><ReviewProgress :task="task" /></td>
+            </tr>
+            </template>
           </tbody>
         </table>
         <div v-if="loading && !tasks.length" class="task-empty"><RefreshCw class="spinner" /><p>正在加载任务…</p></div>

@@ -6,6 +6,8 @@ import { saveJson } from '../services/downloads';
 import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
 import { reviewResultsReady } from '../services/reviewStatus';
+import ReviewProgress from '../components/ReviewProgress.vue';
+import { createTaskPoller } from '../services/reviewProgress';
 import {
   formatTimestamp,
   layoutMarkers,
@@ -67,6 +69,8 @@ const loading = ref(false);
 const error = ref('');
 const rawResults = ref(null);
 const loadedTaskId = ref('');
+const currentTask = ref(null);
+let disposed = false;
 const setupExpanded = ref(true);
 const markers = ref([]);
 const category = ref('');
@@ -146,6 +150,16 @@ const loadResults = (payload, { collapseSetup = false } = {}) => {
   currentSeconds.value = 0;
   if (collapseSetup) setupExpanded.value = false;
 };
+const taskPoller = createTaskPoller({
+  getTask: id => reviewTaskService.get(id),
+  onTask: task => {
+    currentTask.value = task;
+    if (task.status === 'processing') return;
+    loading.value = false;
+    if (reviewResultsReady(task)) loadResults(task.results || [], { collapseSetup: true });
+    else error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
+  }
+});
 const loadReviewTask = async () => {
   const taskId = reviewTaskIdFromHash(window.location.hash);
   if (!taskId) return;
@@ -154,6 +168,8 @@ const loadReviewTask = async () => {
   error.value = '';
   try {
     const task = await reviewTaskService.get(taskId);
+    if (disposed) return;
+    currentTask.value = task;
     loadedTaskId.value = task.id;
     inputUrl.value = task.video_url;
     videoUrl.value = validateVideoUrl(task.video_url);
@@ -168,15 +184,17 @@ const loadReviewTask = async () => {
     } else if (task.status === 'failed') {
       error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
     } else {
-      error.value = '该任务仍在处理中，请稍后从审核任务列表重新打开。';
+      taskPoller.start(task.id);
     }
   } catch (reason) {
     error.value = reason.response?.data?.detail || reason.message || '审核任务加载失败';
   } finally {
-    loading.value = false;
+    loading.value = currentTask.value?.status === 'processing';
   }
 };
 const analyze = async () => {
+  taskPoller.stop();
+  currentTask.value = null;
   setupExpanded.value = true;
   error.value = '';
   let url;
@@ -195,13 +213,26 @@ const analyze = async () => {
       url,
       sampleInterval: sampleInterval.value,
       topK: topK.value,
-      minSimilarity: minSimilarity.value
+      minSimilarity: minSimilarity.value,
+      onTaskAccepted: id => {
+        if (disposed) return;
+        loadedTaskId.value = id;
+        currentTask.value = { id, status: 'processing', progress: { phase: 'downloading' } };
+        taskPoller.start(id);
+      }
     });
+    if (disposed) return;
+    taskPoller.stop();
+    if (currentTask.value?.status === 'processing') {
+      currentTask.value = { ...currentTask.value, status: 'completed', progress: { ...currentTask.value.progress, phase: 'finished', percent: 100, active_windows: [] } };
+      // Resolve the persisted coverage outcome (completed / partial / failed).
+      taskPoller.start(currentTask.value.id);
+    }
     loadResults(payload, { collapseSetup: true });
   } catch (reason) {
-    error.value = reason.response?.data?.detail || reason.message || '视频分析失败';
+    if (!disposed && !reason.taskId) error.value = reason.response?.data?.detail || reason.message || '视频分析失败';
   } finally {
-    loading.value = false;
+    if (!disposed) loading.value = currentTask.value?.status === 'processing';
   }
 };
 const importResults = async (event) => {
@@ -290,6 +321,8 @@ onMounted(() => {
   loadReviewTask();
 });
 onBeforeUnmount(() => {
+  disposed = true;
+  taskPoller.stop();
   frameObserver?.stop();
   videoResizeObserver?.disconnect();
   resizeObserver?.disconnect();
@@ -343,6 +376,7 @@ onBeforeUnmount(() => {
         <strong v-else>尚未加载结果</strong>
       </div>
       <p v-if="!setupExpanded && error" class="review-error compact" role="alert"><AlertCircle />{{ error }}</p>
+      <ReviewProgress v-if="currentTask" :task="currentTask" />
     </section>
 
     <section v-if="videoUrl || rawResults != null" class="review-workspace" :style="{ '--review-player-height': playerPanelHeight ? `${playerPanelHeight}px` : 'auto' }">

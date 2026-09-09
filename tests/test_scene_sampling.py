@@ -23,6 +23,8 @@ class SceneCapture:
         return True
 
     def get(self, prop):
+        if prop == cv2.CAP_PROP_FRAME_COUNT:
+            return len(self.frames)
         return 25 if prop == cv2.CAP_PROP_FPS else self.times[self.index - 1] * 1000
 
     def read(self):
