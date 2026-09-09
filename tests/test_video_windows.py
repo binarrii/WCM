@@ -296,3 +296,9 @@ async def test_corrupt_context_frame_fails_instead_of_sending_incomplete_window(
     with pytest.raises(handlers.NsfwAnalysisError, match="解码失败"):
         await handlers._call_nsfw_analysis([encoded_frame((80, 120), 60), "broken"], [0, 1])
     client.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def legacy_target_review_mode(monkeypatch):
+    """Keep regression coverage of the configurable target-mode fallback."""
+    monkeypatch.setattr(handlers.settings, "nsfw_review_mode", "target")

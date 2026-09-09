@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     nsfw_sampling_mode: Literal["fixed", "scene"] = "scene"
     nsfw_scene_max_stride: int = Field(default=3, ge=1, le=10)
     nsfw_scene_cut_threshold: float = Field(default=27.0, gt=0, le=255)
+    nsfw_review_mode: Literal["target", "window"] = "window"
+    nsfw_window_max_seconds: float = Field(default=10.0, gt=0, le=60)
 
     # ---- Review task storage ----
     # Disabled by default so local API-only development remains lightweight.

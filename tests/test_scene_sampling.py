@@ -222,3 +222,9 @@ async def test_cancellation_in_scene_mode_closes_sampler_and_consumers(monkeypat
         await task
     assert cap.released
     assert not [t for t in asyncio.all_tasks() if t.get_coro().__qualname__.endswith(".consumer")]
+
+
+@pytest.fixture(autouse=True)
+def legacy_target_review_mode(monkeypatch):
+    """Keep regression coverage of the configurable target-mode fallback."""
+    monkeypatch.setattr(handlers.settings, "nsfw_review_mode", "target")

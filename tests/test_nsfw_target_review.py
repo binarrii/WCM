@@ -225,3 +225,9 @@ async def test_successful_multi_image_never_composes_or_reverifies(monkeypatch):
     assert result == "目标图描述"
     assert len(calls) == 1
     compose.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def legacy_target_review_mode(monkeypatch):
+    """Keep regression coverage of the configurable target-mode fallback."""
+    monkeypatch.setattr(handlers.settings, "nsfw_review_mode", "target")

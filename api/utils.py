@@ -48,6 +48,56 @@ class VideoWindow(tuple):
         return window
 
 
+@dataclass(frozen=True)
+class ReviewWindow:
+    frames: tuple[VideoFrame, ...]
+    start: float
+    end: float
+    scene_id: int
+    index: int
+
+
+class ReviewWindowPlanner:
+    """Batch every selected visual target once, with bounded same-shot spans."""
+
+    def __init__(self, max_span: float = 10.0):
+        if not math.isfinite(max_span) or max_span <= 0:
+            raise ValueError("max_span must be finite and positive")
+        self.max_span = max_span
+        self.frames = []
+        self.start = self.end = None
+        self.scene_id = None
+        self.count = 0
+
+    def flush(self):
+        if not self.frames:
+            return None
+        result = ReviewWindow(tuple(self.frames), self.start, self.end, self.scene_id, self.count)
+        self.count += 1
+        self.frames = []
+        self.start = self.end = self.scene_id = None
+        return result
+
+    def push(self, sample: VideoWindow):
+        head = sample[0]
+        selected = sample.review_visual
+        ready = None
+        if self.frames and (
+            head.scene_id != self.scene_id
+            or head.timestamp - self.start > self.max_span
+            or (selected and len(self.frames) == 3)
+        ):
+            ready = self.flush()
+        if self.start is None:
+            self.start = head.timestamp
+            self.scene_id = head.scene_id
+            selected = True
+        self.end = head.timestamp
+        if selected:
+            self.frames.append(head)
+        return ready
+
+
 def _scene_change_score(previous, current):
     before = cv2.cvtColor(previous, cv2.COLOR_BGR2HSV).astype(np.float32)
     after = cv2.cvtColor(current, cv2.COLOR_BGR2HSV).astype(np.float32)
@@ -73,9 +123,9 @@ def _near_duplicate(previous, current):
 class VideoFrameSampler:
     """PTS sampling with fixed windows or scene-aware visual scheduling.
 
-    Every grid sample still heads one window for face/OCR. Scene mode also
-    retains otherwise-unsampled short shots and limits context to the shot; only
-    near-duplicate visual targets may be skipped, within a bounded interval.
+    Every grid sample heads one candidate window. Scene mode also retains
+    otherwise-unsampled short shots and limits context to the shot. Consumers
+    can keep legacy heads or batch selected targets with ReviewWindowPlanner.
     """
 
     def __init__(

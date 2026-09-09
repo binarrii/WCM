@@ -79,3 +79,9 @@ async def test_controversial_visual_and_ocr_findings_are_not_dropped(monkeypatch
     assert result["unsafe_text_frames"] == [
         {"timestamp": 75.0, "category": "色情或性行为", "text": "待审核文本"}
     ]
+
+
+@pytest.fixture(autouse=True)
+def legacy_target_review_mode(monkeypatch):
+    """Keep regression coverage of the configurable target-mode fallback."""
+    monkeypatch.setattr(handlers.settings, "nsfw_review_mode", "target")

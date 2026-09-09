@@ -118,3 +118,9 @@ def test_http_video_response_merges_faces_but_not_other_sources(monkeypatch, sam
             "description": "review-subject",
         }
         assert results.count(item) == (3 if second == 3 else 2)
+
+
+@pytest.fixture(autouse=True)
+def legacy_target_review_mode(monkeypatch):
+    """Keep regression coverage of the configurable target-mode fallback."""
+    monkeypatch.setattr(handlers.settings, "nsfw_review_mode", "target")
