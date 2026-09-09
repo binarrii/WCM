@@ -113,14 +113,112 @@ async def test_ocr_errors_are_recorded_without_retry(monkeypatch, response):
 
 
 @pytest.mark.asyncio
-async def test_valid_empty_ocr_is_not_an_error(monkeypatch):
-    install_response(
-        monkeypatch, {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]}
+@pytest.mark.parametrize("content", ["", " \n\t ", "<|LOC_0|> <|LOC_1|>"])
+async def test_valid_empty_ocr_is_not_an_error(monkeypatch, content):
+    client = install_response(
+        monkeypatch, {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
     )
+    guard = AsyncMock()
+    monkeypatch.setattr(handlers, "_call_llm_guard", guard)
     monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=b"fixture"))
     assert await handlers._process_detect_sensitive("http://test/image.jpg", 1) == {
         "unsafe_text_frames": []
     }
+    guard.assert_not_awaited()
+    client.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ocr_uses_recognition_task_prompt_and_preserves_text(monkeypatch):
+    client = install_response(
+        monkeypatch,
+        {
+            "choices": [
+                {"message": {"content": "测试字幕\nHello World 123"}, "finish_reason": "stop"}
+            ]
+        },
+    )
+    assert await handlers._call_ocr_api("fixture-image") == "测试字幕\nHello World 123"
+    payload = client.post.await_args.kwargs["json"]
+    assert payload["max_tokens"] == 1024
+    assert payload["messages"][0]["content"] == [
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,fixture-image"}},
+        {"type": "text", "text": "OCR:"},
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response,component,code,message",
+    [
+        (
+            {"choices": [{"message": {"content": "unfinished"}, "finish_reason": "length"}]},
+            "ocr",
+            "output_truncated",
+            "1024 tokens",
+        ),
+        ({}, "ocr", "invalid_structure", "缺少有效结果字段"),
+        (
+            {"choices": [{"message": {"content": None}, "finish_reason": "stop"}]},
+            "ocr",
+            "invalid_content",
+            "不是文本",
+        ),
+        (
+            {"choices": [{"message": {"content": ""}, "finish_reason": "content_filter"}]},
+            "ocr",
+            "generation_incomplete",
+            "未正常完成",
+        ),
+        (
+            {"choices": [{"message": {"content": "uncertain"}, "finish_reason": "stop"}]},
+            "guard",
+            "missing_safety_verdict",
+            "Safety 判定",
+        ),
+        (
+            {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]},
+            "guard",
+            "empty_response",
+            "返回空结果",
+        ),
+        (
+            {"choices": [{"message": {"content": "Safety: Safe"}, "finish_reason": "length"}]},
+            "guard",
+            "output_truncated",
+            "512 tokens",
+        ),
+    ],
+)
+async def test_response_failures_explain_component_and_reason(
+    monkeypatch, response, component, code, message, caplog
+):
+    client = install_response(monkeypatch, response)
+    if component == "guard":
+        monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value="ordinary text"))
+    monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=b"fixture"))
+    result = await handlers._process_detect_sensitive("http://test/image.jpg", 1)
+    assert result["unsafe_text_frames"] == []
+    error = result["errors"][0]
+    assert error["stage"] == "ocr"
+    assert error["component"] == component
+    assert error["error_code"] == code
+    assert message in error["description"]
+    assert "帧数据无效" not in error["description"]
+    assert f"component={component} code={code}" in caplog.text
+    client.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_reports_format_problem_without_body_leak(monkeypatch, caplog):
+    client = install_response(monkeypatch, {})
+    client.post.return_value = httpx.Response(
+        200, text="private upstream response", request=httpx.Request("POST", "https://model.test")
+    )
+    monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=b"fixture"))
+    result = await handlers._process_detect_sensitive("http://test/image.jpg", 1)
+    assert result["errors"][0]["error_code"] == "invalid_json"
+    assert "private upstream response" not in str(result) + caplog.text
 
 
 @pytest.mark.asyncio

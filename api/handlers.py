@@ -31,6 +31,46 @@ class NsfwAnalysisError(RuntimeError):
     """A model failure must not be interpreted as a safe visual description."""
 
 
+class ModelResponseError(ValueError):
+    """A known response problem with a safe, actionable message for reviewers."""
+
+    def __init__(self, component: str, code: str, reason: str):
+        super().__init__(reason)
+        self.component = component
+        self.code = code
+        self.reason = reason
+
+
+def _model_response_text(response, component: str, max_tokens: int, allow_empty=False) -> str:
+    label = {"ocr": "OCR 模型", "guard": "安全判定模型"}[component]
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ModelResponseError(
+            component, "invalid_json", f"{label}返回了无法解析的 JSON"
+        ) from exc
+    try:
+        choice = data["choices"][0]
+        finish_reason = choice.get("finish_reason")
+        content = choice["message"]["content"]
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise ModelResponseError(
+            component, "invalid_structure", f"{label}响应缺少有效结果字段"
+        ) from exc
+    if finish_reason == "length":
+        raise ModelResponseError(
+            component, "output_truncated", f"{label}输出达到 {max_tokens} tokens 上限，被截断"
+        )
+    if finish_reason not in (None, "stop"):
+        raise ModelResponseError(component, "generation_incomplete", f"{label}未正常完成输出")
+    if not isinstance(content, str):
+        raise ModelResponseError(component, "invalid_content", f"{label}返回的内容不是文本")
+    content = content.strip()
+    if not content and not allow_empty:
+        raise ModelResponseError(component, "empty_response", f"{label}返回空结果")
+    return content
+
+
 async def _review_stage(stage, timestamp, operation, errors, default=None):
     """Isolate a frame's module failure without cancelling its siblings.
 
@@ -42,35 +82,40 @@ async def _review_stage(stage, timestamp, operation, errors, default=None):
         return await operation()
     except Exception as exc:
         cause = exc
-        while cause.__cause__ is not None:
+        while cause.__cause__ is not None and not isinstance(cause, ModelResponseError):
             cause = cause.__cause__
-        if isinstance(cause, (httpx.TimeoutException, TimeoutError)):
+        if isinstance(cause, ModelResponseError):
+            reason = cause.reason
+        elif isinstance(cause, (httpx.TimeoutException, TimeoutError)):
             reason = "模型请求超时"
         elif isinstance(cause, httpx.HTTPStatusError):
             reason = f"模型服务响应错误（HTTP {cause.response.status_code}）"
         elif isinstance(cause, httpx.RequestError):
             reason = "模型服务连接失败"
         elif isinstance(cause, (ValueError, KeyError, IndexError, TypeError, AttributeError)):
-            reason = "模型响应或帧数据无效"
+            reason = f"数据处理异常（{type(cause).__name__}）"
         else:
             reason = "处理失败"
         label = {"face": "人脸识别", "visual": "视觉审核", "ocr": "文字审核", "frame": "帧审核"}[
             stage
         ]
-        errors.append(
-            {
-                "timestamp": _format_timestamp(timestamp),
-                "category": "审核未完成",
-                "description": f"{label}未完成：{reason}，请人工复核此时间点。",
-                "review_status": "incomplete",
-                "stage": stage,
-            }
-        )
+        finding = {
+            "timestamp": _format_timestamp(timestamp),
+            "category": "审核未完成",
+            "description": f"{label}未完成：{reason}，请人工复核此时间点。",
+            "review_status": "incomplete",
+            "stage": stage,
+        }
+        if isinstance(cause, ModelResponseError):
+            finding.update(component=cause.component, error_code=cause.code)
+        errors.append(finding)
         _logger.warning(
-            "Frame review incomplete: stage=%s timestamp=%s error=%s",
+            "Frame review incomplete: stage=%s timestamp=%s error=%s component=%s code=%s",
             stage,
             timestamp,
             type(cause).__name__,
+            finding.get("component", stage),
+            finding.get("error_code", "unclassified"),
         )
         return default
 
@@ -179,13 +224,12 @@ async def _call_ocr_api(base64_image: str) -> str:
                 "role": "user",
                 "content": [
                     {
-                        "type": "text",
-                        "text": "提取图片中的所有文字。请只输出纯文本，绝对不要输出任何位置坐标（如<|LOC_0|>）、边界框或多余的解释。",
-                    },
-                    {
                         "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
                     },
+                    # PaddleOCR-VL uses task prompts, not chat instructions.
+                    # https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6
+                    {"type": "text", "text": "OCR:"},
                 ],
             }
         ],
@@ -195,11 +239,7 @@ async def _call_ocr_api(base64_image: str) -> str:
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
-        data = resp.json()
-        choice = data["choices"][0]
-        if choice.get("finish_reason") == "length":
-            raise ValueError("OCR response was truncated")
-        analysis = choice["message"]["content"].strip()
+        analysis = _model_response_text(resp, "ocr", 1024, allow_empty=True)
 
         # Clean up <|LOC_X|> bounding box tokens that the VLM might output
         analysis = re.sub(r"<\|LOC_\d+\|>", "", analysis)
@@ -208,7 +248,7 @@ async def _call_ocr_api(base64_image: str) -> str:
         analysis = re.sub(r"(.{1,30}?)\1{4,}", r"\1...", analysis)
         if len(analysis) > 500:
             analysis = analysis[:500] + "..."
-        return analysis
+        return analysis.strip()
 
 
 async def _call_llm_guard(text: str) -> dict:
@@ -233,11 +273,7 @@ async def _call_llm_guard(text: str) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
-        data = resp.json()
-        choice = data["choices"][0]
-        if choice.get("finish_reason") == "length":
-            raise ValueError("Guard response was truncated")
-        analysis = choice["message"]["content"].strip()
+        analysis = _model_response_text(resp, "guard", 512)
 
         if "</think>" in analysis:
             analysis = analysis.split("</think>")[-1].strip()
@@ -246,7 +282,9 @@ async def _call_llm_guard(text: str) -> dict:
             r"\bsafety\s*:\s*(safe|unsafe|controversial)\b", analysis, re.IGNORECASE
         )
         if not verdicts:
-            raise ValueError("Guard response has no valid safety verdict")
+            raise ModelResponseError(
+                "guard", "missing_safety_verdict", "安全判定模型未返回可识别的 Safety 判定"
+            )
         is_safe = all(verdict.lower() == "safe" for verdict in verdicts)
         category = ""
 
