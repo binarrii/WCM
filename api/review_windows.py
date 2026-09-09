@@ -135,7 +135,7 @@ async def analyze_video(
     visual_cache = AsyncMemo(64)
     errors, completed = [], []
     path = Path(f"/tmp/window_review_{os.urandom(8).hex()}.mp4")
-    concurrency = 4
+    concurrency = 3
     queue = asyncio.Queue(maxsize=concurrency * 2)
     planner = ReviewWindowPlanner(settings.nsfw_window_max_seconds)
     selected_frames = 0
