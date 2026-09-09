@@ -1,6 +1,7 @@
 """Frame failures preserve sibling findings, later frames and explicit review gaps."""
 
 import asyncio
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -75,6 +76,12 @@ def install_response(monkeypatch, response):
         client.post.return_value = httpx.Response(
             200, json=response, request=httpx.Request("POST", "https://model.test")
         )
+
+    @asynccontextmanager
+    async def stream(method, url, **kwargs):
+        yield await client.post(url, **kwargs)
+
+    client.stream = stream
     monkeypatch.setattr(handlers.httpx, "AsyncClient", lambda **kw: client)
     return client
 
@@ -141,7 +148,8 @@ async def test_ocr_uses_recognition_task_prompt_and_preserves_text(monkeypatch):
     assert await handlers._call_ocr_api("fixture-image") == "测试字幕\nHello World 123"
     payload = client.post.await_args.kwargs["json"]
     assert payload["max_tokens"] == 300
-    assert "500个中文字符" in payload["messages"][0]["content"]
+    assert "**输出不超过500个字符**" in payload["messages"][0]["content"]
+    assert payload["stream"] is True
     assert payload["messages"][1]["content"] == [
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,fixture-image"}},
         {"type": "text", "text": "OCR:"},

@@ -15,7 +15,7 @@ import numpy as np
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 
-from . import review_windows
+from . import ocr, review_windows
 from .utils import (
     VIDEO_EXTENSIONS,
     VideoFrameSampler,
@@ -228,6 +228,9 @@ async def _search_video_frames(
 
 
 async def _call_ocr_api(base64_image: str) -> str:
+    if await asyncio.to_thread(ocr.is_uniform_image, base64_image):
+        _logger.info("OCR skipped: exactly uniform image")
+        return ""
     url = settings.model_api_url
     headers = {"Authorization": f"Bearer {settings.model_api_key}"}
     payload = {
@@ -236,10 +239,8 @@ async def _call_ocr_api(base64_image: str) -> str:
             {
                 "role": "system",
                 "content": _prompt_text("""
-                    ## OCR 识别要求
-                    - **仅识别图片中可见的原文**，不翻译、不解释、不重复。
-                    - **输出总长度不超过500个中文字符**（其他字符同样计入），达到上限就停止。
-                    - **无文字时输出空字符串**。
+                    ## 输出要求
+                    - **输出不超过500个字符**。
                 """),
             },
             {
@@ -259,18 +260,23 @@ async def _call_ocr_api(base64_image: str) -> str:
         "temperature": 0.0,
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(url, headers=headers, json=payload)
+        resp = await ocr.request_ocr(client, url, headers, payload)
         resp.raise_for_status()
-        analysis = _model_response_text(resp, "ocr", 300, allow_empty=True)
-
-        # Clean up <|LOC_X|> bounding box tokens that the VLM might output
-        analysis = re.sub(r"<\|LOC_\d+\|>", "", analysis)
-
-        # Remove massive consecutive repetition (hallucinations like 王晓燕王晓燕...)
-        analysis = re.sub(r"(.{1,30}?)\1{4,}", r"\1...", analysis)
-        if len(analysis) > 500:
-            analysis = analysis[:500] + "..."
-        return analysis.strip()
+        _model_response_text(resp, "ocr", 300, allow_empty=True)
+        # Inspect raw whitespace before strip(), otherwise a newline loop looks
+        # exactly like a successful empty OCR response.
+        choice = resp.json()["choices"][0]
+        raw = choice["message"]["content"]
+        analysis, repeated = ocr.clean_output(raw)
+        if repeated and not analysis:
+            raise ModelResponseError(
+                "ocr", "repetition_without_text", "OCR 重复输出且未识别到有效文字"
+            )
+        if choice.get("ocr_stop_reason") and not analysis:
+            raise ModelResponseError(
+                "ocr", "generation_incomplete", "OCR 提前结束且未识别到有效文字"
+            )
+        return analysis
 
 
 async def _call_llm_guard(text: str) -> dict:
