@@ -46,8 +46,8 @@ export function normalizeResults(payload) {
   }
   const results = Array.isArray(payload) ? payload : payload?.results;
   if (!Array.isArray(results)) throw new Error('审核结果必须是数组，或包含 results 数组的对象');
-  const grouped = new Map();
-  results.forEach((item, index) => {
+  const flatten = rows => rows.flatMap(item => Array.isArray(item?.findings) ? flatten(item.findings) : [item]);
+  const entries = flatten(results).map((item, index) => {
     if (!item || typeof item !== 'object' || !Object.hasOwn(item, 'timestamp')) {
       throw new Error(`第 ${index + 1} 条结果缺少 timestamp`);
     }
@@ -57,29 +57,68 @@ export function normalizeResults(payload) {
     if (typeof category !== 'string' || typeof description !== 'string') {
       throw new Error(`第 ${index + 1} 条 category/description 必须是文本`);
     }
-    const key = [start, end, end > start ? category : '', end > start ? description : ''].join('\u0000');
-    if (!grouped.has(key)) grouped.set(key, { start, end, findings: [] });
-    const finding = { category, description };
+    const finding = { ...item, category, description, timestamp: formatTimestamp(start) + (end > start ? `~${formatTimestamp(end)}` : ''), time_ms: start, end_time_ms: end };
+    if (typeof item.source === 'string') finding.source = item.source;
+    if (Number.isInteger(item.scene_id)) finding.scene_id = item.scene_id;
+    if (Array.isArray(item.evidence)) finding.evidence = item.evidence;
     if (item.review_status === 'incomplete') {
       finding.review_status = 'incomplete';
       finding.stage = item.stage;
     }
     if (Array.isArray(item.face_samples)) finding.face_samples = normalizeFaceSamples(item.face_samples, start, end);
-    const findings = grouped.get(key).findings;
-    const existing = findings.find(value => value.category === category && value.description === description && value.review_status === finding.review_status && value.stage === finding.stage);
-    if (!existing) findings.push(finding);
-    else if (finding.face_samples) existing.face_samples = [...(existing.face_samples || []), ...finding.face_samples];
-  });
-  return [...grouped.values()]
-    .sort((a, b) => a.start - b.start || a.end - b.end)
-    .map((marker, index) => ({
-      id: `${marker.start}-${marker.end}-${index}`,
-      timestamp: formatTimestamp(marker.start) + (marker.end > marker.start ? `~${formatTimestamp(marker.end)}` : ''),
-      time_ms: marker.start,
-      end_time_ms: marker.end,
-      findings: marker.findings
-    }));
+    return { start, end, finding };
+  }).sort((a, b) => a.start - b.start || b.end - a.end);
+  const groups = [];
+  let outer;
+  for (const { start, end, finding } of entries) {
+    // Sorting wider intervals first lets all equal/contained rows share a card.
+    // Partial overlaps stay separate; never guess shot continuity from a small gap.
+    if (!outer || end > outer.end) {
+      outer = { start, end, findings: [] };
+      groups.push(outer);
+    }
+    const existing = outer.findings.find(value => value.timestamp === finding.timestamp
+      && value.category === finding.category && value.description === finding.description
+      && value.source === finding.source && value.component === finding.component && value.error_code === finding.error_code
+      && JSON.stringify(value.evidence) === JSON.stringify(finding.evidence) && value.review_status === finding.review_status && value.stage === finding.stage);
+    if (!existing) outer.findings.push(finding);
+    else if (finding.face_samples) {
+      existing.face_samples = [...(existing.face_samples || []), ...finding.face_samples];
+    }
+  }
+  return groups.map((marker, index) => ({
+    id: `${marker.start}-${marker.end}-${index}`,
+    timestamp: formatTimestamp(marker.start) + (marker.end > marker.start ? `~${formatTimestamp(marker.end)}` : ''),
+    time_ms: marker.start,
+    end_time_ms: marker.end,
+    findings: marker.findings
+  }));
 }
+
+export function filterMarkers(markers, category) {
+  if (!category) return markers;
+  // Filtering a nested finding must restore its own time span, not its parent's.
+  return normalizeResults(markers.flatMap(marker => marker.findings.filter(finding => finding.category === category)));
+}
+
+export function serializeResults(markers) {
+  return markers.map(marker => {
+    const findings = marker.findings.map(({ time_ms, end_time_ms, ...finding }) => finding);
+    if (findings.length === 1) return findings[0];
+    const categories = [...new Set(findings.map(f => f.category))];
+    const sources = [...new Set(findings.map(f => f.source || 'unknown'))];
+    const result = {
+      timestamp: marker.timestamp,
+      category: categories.length === 1 ? categories[0] : '综合审核',
+      source: sources.length === 1 ? sources[0] : 'mixed',
+      description: [...new Set(findings.map(f => `${f.category}：${f.description}`))].join('\n\n'),
+      findings
+    };
+    if (findings.some(f => f.review_status === 'incomplete')) result.review_status = 'incomplete';
+    return result;
+  });
+}
+
 
 export function layoutMarkers(markers, durationMs, width) {
   if (!Number.isFinite(durationMs) || durationMs <= 0 || width <= 0) return [];

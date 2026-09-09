@@ -214,8 +214,9 @@ def test_completion_persists_gaps_and_partial_status(monkeypatch, incomplete):
     cursor.execute.assert_called_once()
     status, payload, count, error, task_id = cursor.execute.call_args.args[1]
     assert status == ("partial" if incomplete else "completed")
-    assert json.loads(payload) == results
-    assert count == len(results)
+    from api.review_results import flatten_findings
+    assert list(flatten_findings(json.loads(payload))) == results
+    assert count == (2 if incomplete else 1)
     assert task_id == "task-1"
     if incomplete:
         assert "1 个采样时间点、2 项" in error

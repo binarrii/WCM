@@ -63,7 +63,7 @@ def test_empty_and_single_image_keep_legacy_point_shape():
 
 
 @pytest.mark.parametrize("sample_interval", [1, 0.5])
-def test_http_video_response_merges_faces_but_not_other_sources(monkeypatch, sample_interval):
+def test_http_video_groups_contained_findings_without_extending_their_scopes(monkeypatch, sample_interval):
     monkeypatch.setattr(handlers.settings, "nsfw_sampling_mode", "fixed")
     class Video:
         index = 0
@@ -107,7 +107,10 @@ def test_http_video_response_merges_faces_but_not_other_sources(monkeypatch, sam
 
     assert response.status_code == 200, response.text
     results = response.json()
-    assert len(results) == 10  # Two person appearances + eight untouched OCR/visual findings.
+    from api.review_results import flatten_findings
+    assert len(results) == 3  # 0–1 group, then separate 2 and 3 second points.
+    assert results[0]["timestamp"] == "00:00:00.000~00:00:01.000"
+    results = list(flatten_findings(results))
     assert [r["timestamp"] for r in results if "~" in r["timestamp"]] == [
         "00:00:00.000~00:00:01.000"
     ]
@@ -117,7 +120,7 @@ def test_http_video_response_merges_faces_but_not_other_sources(monkeypatch, sam
             "category": "person-a",
             "description": "review-subject",
         }
-        assert results.count(item) == (3 if second == 3 else 2)
+        assert results.count(item) == 1  # Exact legacy duplicates are removed, each point retained.
 
 
 @pytest.fixture(autouse=True)

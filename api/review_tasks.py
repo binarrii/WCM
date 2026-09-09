@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from . import review_task_store
+from .review_results import consolidate_results
 
 review_tasks_bp = APIRouter()
 _STATUSES = {"processing", "completed", "partial", "failed"}
@@ -29,7 +30,9 @@ def _task_ids(ids: list[str]) -> list[str]:
 def _result_bytes(task: dict) -> bytes:
     if task["status"] not in {"completed", "partial"} or task.get("results") is None:
         raise HTTPException(status_code=409, detail=f"审核任务 {task['id']} 的分析结果尚未就绪")
-    return json.dumps(task["results"], ensure_ascii=False, indent=2).encode("utf-8")
+    return json.dumps(consolidate_results(task["results"]), ensure_ascii=False, indent=2).encode(
+        "utf-8"
+    )
 
 
 def _safe_task_id(task_id: str) -> str:

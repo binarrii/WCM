@@ -99,7 +99,7 @@ async def test_incomplete_description_fails_without_retry_or_fallback(monkeypatc
     with pytest.raises(handlers.NsfwAnalysisError):
         await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
     assert len(calls) == 1
-    assert calls[0]["max_tokens"] == 1024
+    assert calls[0]["max_tokens"] == 300
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_truncated_caption_reaches_guard_without_retry(monkeypatch, caplog
     assert "errors" not in result
     assert result["visual_analysis"][0]["description"] == "[需复核] 目标画面的部分描述"
     assert len(calls) == len(replies)
-    assert "keeping partial content: component=visual max_tokens=1024" in caplog.text
+    assert "keeping partial content: component=visual max_tokens=300" in caplog.text
     assert "目标画面的部分描述" not in caplog.text
 
 
@@ -185,7 +185,7 @@ async def test_unsupported_multi_image_falls_back_to_montage_and_verification(mo
     calls = install_client(monkeypatch, [status_error(400, message), caption("context 暴力"), caption("目标场景")])
     assert await handlers._call_nsfw_analysis([image(60), image(130), image(220)], [0, 1, 2]) == "目标场景"
     assert [len(images_in(p)) for p in calls] == [3, 1, 1]
-    assert all(p["max_tokens"] == 1024 for p in calls)
+    assert all(p["max_tokens"] == 300 for p in calls)
     assert "large TARGET 1" in calls[1]["messages"][-1]["content"][0]["text"]
     assert "context 暴力" not in str(calls[2])
     assert "visible injuries" in str(calls[2])

@@ -6,6 +6,8 @@ import {
   layoutMarkers,
   markerIsActive,
   normalizeResults,
+  filterMarkers,
+  serializeResults,
   similarityToDistance,
   timestampMs,
   validateVideoUrl
@@ -20,15 +22,15 @@ test('timestamps round-trip points and ranges', () => {
     { timestamp: '00:00:06.000~00:00:07.000', category: '人物', description: '甲' },
     { timestamp: 6, category: '文本', description: '待复核' }
   ]);
-  assert.equal(markers.length, 2);
-  assert.equal(markers[1].timestamp, '00:00:06.000~00:00:07.000');
+  assert.equal(markers.length, 1);
+  assert.equal(markers[0].timestamp, '00:00:06.000~00:00:07.000');
   assert.throws(() => normalizeResults({ status: 'error', results: [] }));
 });
 
 test('overlapping markers get separate visual lanes', () => {
   const markers = normalizeResults([
     { timestamp: '1~4', category: 'A' },
-    { timestamp: '2~3', category: 'B' },
+    { timestamp: '3~5', category: 'B' },
     { timestamp: 8, category: 'C' }
   ]);
   const layout = layoutMarkers(markers, 10000, 1000);
@@ -52,8 +54,8 @@ test('all findings at the clicked time become active together', () => {
     { timestamp: '9~10', category: '人物', description: '丙' }
   ]);
   assert.deepEqual(
-    markers.filter(marker => markerIsActive(marker, 6)).map(marker => marker.findings[0].description),
-    ['乙', '甲']
+    markers.filter(marker => markerIsActive(marker, 6)).flatMap(marker => marker.findings.map(f => f.description)),
+    ['甲', '乙']
   );
 });
 
@@ -78,4 +80,41 @@ test('only HTTP video addresses are accepted', () => {
   assert.equal(validateVideoUrl('http://example.com/video.mp4'), 'http://example.com/video.mp4');
   assert.throws(() => validateVideoUrl('file:///tmp/video.mp4'));
   assert.throws(() => validateVideoUrl('not a URL'));
+});
+
+
+test('same and contained intervals retain distinct evidence in one card and JSON', () => {
+  const rows = [
+    { timestamp: '55~57', category: '复核', source: 'ocr', description: '字幕一' },
+    { timestamp: '55~57', category: '复核', source: 'visual', description: '画面' },
+    { timestamp: '56~57', category: '复核', source: 'ocr', description: '字幕二' },
+    { timestamp: 56, category: '审核未完成', review_status: 'incomplete', stage: 'face' }
+  ];
+  const markers = normalizeResults(rows);
+  assert.equal(markers.length, 1);
+  assert.equal(markers[0].findings.length, 4);
+  assert.equal(markers[0].findings[2].timestamp, '00:00:56.000~00:00:57.000');
+  const exported = serializeResults(markers);
+  assert.equal(exported[0].review_status, 'incomplete');
+  assert.deepEqual(normalizeResults(exported), markers);
+  const [filtered] = filterMarkers(markers, '审核未完成');
+  assert.equal(filtered.timestamp, '00:00:56.000');
+  assert.equal(filtered.findings.length, 1);
+});
+
+test('nested findings keep precise face PTS and category filtering restores their interval', () => {
+  const sample = { time_ms: 2233, pts_seconds: 2 + 7 / 30, duration_seconds: 1 / 30,
+    bbox: { x: .2, y: .1, w: .2, h: .3 } };
+  const markers = normalizeResults([{ timestamp: '1~5', findings: [
+    { timestamp: '1~5', category: '画面', description: '背景' },
+    { timestamp: '2~3', category: '人物', description: '甲', face_samples: [sample] }
+  ] }]);
+  assert.equal(markers.length, 1);
+  const filtered = filterMarkers(markers, '人物');
+  assert.equal(filtered[0].timestamp, '00:00:02.000~00:00:03.000');
+  assert.equal(filtered[0].findings[0].face_samples[0].pts_seconds, sample.pts_seconds);
+});
+
+test('legacy one-second gaps are not guessed to belong to one shot', () => {
+  assert.equal(normalizeResults([{ timestamp: '15~17' }, { timestamp: '18~19' }]).length, 2);
 });

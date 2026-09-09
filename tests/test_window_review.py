@@ -61,7 +61,8 @@ async def test_all_images_are_targets_without_a_second_verification(monkeypatch,
     assert result == "第三张图片有需要审核的细节"
     assert len(calls) == 1
     payload = calls[0]
-    assert payload["max_tokens"] == 1024
+    assert payload["max_tokens"] == 300
+    assert "500个中文字符" in payload["messages"][0]["content"]
     content = payload["messages"][-1]["content"]
     assert sum(item["type"] == "image_url" for item in content) == (
         3 if mode == "multi_image" else 1
@@ -238,6 +239,65 @@ def test_intervals_never_bridge_safe_failed_or_other_shot_windows():
     rows = review_windows.merge_window_results(list(reversed(completed)), 10)
     assert len(rows) == 4
     assert rows[-1]["timestamp"] == "00:00:15.000~00:00:17.000"
+
+
+def test_adjacent_windows_bridge_sampling_gap_despite_different_descriptions():
+    first = {
+        "index": 0,
+        "scene_id": 4,
+        "start": 15,
+        "end": 17,
+        "hits": [
+            {"source": "visual", "category": "复核", "description": "画面甲"},
+            {"source": "ocr", "category": "复核", "description": "字幕甲"},
+            {"source": "ocr", "category": "复核", "description": "字幕乙"},
+            {"source": "face", "category": "人物", "description": "甲"},
+        ],
+    }
+    second = {
+        "index": 1,
+        "scene_id": 4,
+        "start": 18,
+        "end": 19,
+        "hits": [
+            {"source": "visual", "category": "复核", "description": "画面乙"},
+            {"source": "ocr", "category": "复核", "description": "字幕丙"},
+            {"source": "face", "category": "人物", "description": "乙"},
+        ],
+    }
+    rows = review_windows.merge_window_results([second, first], 1.1)
+    continuous = [r for r in rows if r["source"] != "face"]
+    assert len(continuous) == 2
+    assert all(r["timestamp"] == "00:00:15.000~00:00:19.000" for r in continuous)
+    ocr = next(r for r in continuous if r["source"] == "ocr")
+    assert ocr["description"] == "字幕甲\n\n字幕乙\n\n字幕丙"
+    assert [e["timestamp"] for e in ocr["evidence"]] == [
+        "00:00:15.000~00:00:17.000",
+        "00:00:15.000~00:00:17.000",
+        "00:00:18.000~00:00:19.000",
+    ]
+    assert len([r for r in rows if r["source"] == "face"]) == 2
+    for change in ({"scene_id": 5}, {"index": 2}, {"start": 19}):
+        assert len(review_windows.merge_window_results([first, {**second, **change}], 1.1)) == 6
+
+
+def test_other_categories_or_sources_cannot_bridge_a_safe_category_window():
+    completed = [
+        {
+            "index": i,
+            "scene_id": 0,
+            "start": i * 3,
+            "end": i * 3 + 2,
+            "hits": [{"source": source, "category": category, "description": str(i)}],
+        }
+        for i, source, category in [
+            (0, "ocr", "甲"),
+            (1, "visual", "甲"),
+            (2, "ocr", "甲"),
+            (3, "ocr", "乙"),
+        ]
+    ]
+    assert len(review_windows.merge_window_results(completed, 1.1)) == 4
 
 
 @pytest.mark.asyncio

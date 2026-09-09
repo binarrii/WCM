@@ -22,6 +22,7 @@ from .handlers import (
     _process_detect_sensitive,
     _search_video_frames,
 )
+from .review_results import consolidate_results
 from .utils import VIDEO_EXTENSIONS, _download_url_safe
 
 api_bp = APIRouter()
@@ -543,8 +544,8 @@ async def websocket_detect_nsfw(websocket: WebSocket):
 async def analyze_media(request: Request, response: Response):
     """Analyze media for faces, sensitive text, and NSFW content.
 
-    Consecutive video face hits with the same category/name use a timestamp
-    range (HH:MM:SS.mmm~HH:MM:SS.mmm). Other findings remain individual points.
+    Same-shot continuous hits use timestamp ranges. Equal/contained intervals
+    share a record whose findings retain their own timestamps and evidence.
     """
     try:
         body = await request.json()
@@ -559,9 +560,7 @@ async def analyze_media(request: Request, response: Response):
     top_k = int(body.get("top_k", 10))
     threshold = float(body.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
     parameters = {key: value for key, value in body.items() if key != "url"}
-    parameters.update(
-        {"sample_interval": sample_interval, "top_k": top_k, "threshold": threshold}
-    )
+    parameters.update({"sample_interval": sample_interval, "top_k": top_k, "threshold": threshold})
 
     try:
         task_id = await review_task_store.create(url, parameters)
@@ -570,6 +569,11 @@ async def analyze_media(request: Request, response: Response):
 
     try:
         result = await _process_analyze_media(url, sample_interval, top_k, threshold)
+        result = (
+            consolidate_results(result)
+            if isinstance(result, list)
+            else {**result, "results": consolidate_results(result.get("results", []))}
+        )
     except Exception as e:
         with contextlib.suppress(Exception):
             await review_task_store.fail(task_id, str(e))
@@ -625,6 +629,11 @@ async def websocket_analyze_media(websocket: WebSocket):
 
             try:
                 result = await _process_analyze_media(url, sample_interval, top_k, threshold)
+                result = (
+                    consolidate_results(result)
+                    if isinstance(result, list)
+                    else {**result, "results": consolidate_results(result.get("results", []))}
+                )
                 stored_results = result.get("results", []) if isinstance(result, dict) else result
                 await review_task_store.complete(task_id, stored_results)
                 await websocket.send_json(

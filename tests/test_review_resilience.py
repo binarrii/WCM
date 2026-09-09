@@ -140,8 +140,9 @@ async def test_ocr_uses_recognition_task_prompt_and_preserves_text(monkeypatch):
     )
     assert await handlers._call_ocr_api("fixture-image") == "测试字幕\nHello World 123"
     payload = client.post.await_args.kwargs["json"]
-    assert payload["max_tokens"] == 1024
-    assert payload["messages"][0]["content"] == [
+    assert payload["max_tokens"] == 300
+    assert "500个中文字符" in payload["messages"][0]["content"]
+    assert payload["messages"][1]["content"] == [
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,fixture-image"}},
         {"type": "text", "text": "OCR:"},
     ]
@@ -227,7 +228,7 @@ async def test_truncated_ocr_continues_with_available_text(monkeypatch, caplog, 
         guard.assert_not_awaited()
         assert result["unsafe_text_frames"] == []
     client.post.assert_awaited_once()
-    assert "keeping partial content: component=ocr max_tokens=1024" in caplog.text
+    assert "keeping partial content: component=ocr max_tokens=300" in caplog.text
     assert "已提取的部分字幕" not in caplog.text
 
 

@@ -63,30 +63,58 @@ def _digest(value):
 
 
 def merge_window_results(completed, max_gap):
-    """Only identical findings in adjacent same-shot windows may extend a span."""
-    rows = []
-    previous = {}
+    """Join adjacent same-shot category hits; keep person identity and all evidence."""
+    rows, previous = [], {}
     for result in sorted(completed, key=lambda item: item["index"]):
-        current = {}
+        current, grouped = {}, {}
         for hit in result["hits"]:
-            key = (hit["source"], hit["category"], hit["description"])
+            # OCR wording and visual descriptions may change within one shot.
+            # Different people must never inherit each other's continuous span.
+            key = (
+                hit["source"],
+                hit["category"],
+                hit["description"] if hit["source"] == "face" else None,
+            )
+            grouped.setdefault(key, []).append(hit)
+        for key, hits in grouped.items():
             prior = previous.get(key)
             if (
                 prior is not None
                 and prior["index"] + 1 == result["index"]
                 and prior["scene_id"] == result["scene_id"]
-                and 0 <= result["start"] - prior["end"] <= max_gap
+                and 0 <= result["start"] - prior["end"] <= max_gap + 1e-9
             ):
-                row = prior["row"]
-                start = prior["start"]
-                row["timestamp"] = handlers._format_interval(start, result["end"])
+                row, start = prior["row"], prior["start"]
+                if "evidence" not in row:
+                    row["evidence"] = [{k: v for k, v in row.items() if k != "face_samples"}]
+            else:
+                start = result["start"]
+                row = {
+                    **hits[0],
+                    "timestamp": handlers._format_interval(start, result["end"]),
+                    "scene_id": result["scene_id"],
+                }
+                if "face_samples" in row:
+                    row["face_samples"] = list(row["face_samples"])
+                if len(hits) > 1:
+                    row["evidence"] = []
+                rows.append(row)
+            if "evidence" in row:
+                for hit in hits:
+                    evidence = {k: v for k, v in hit.items() if k != "face_samples"}
+                    evidence["timestamp"] = handlers._format_interval(
+                        result["start"], result["end"]
+                    )
+                    if evidence not in row["evidence"]:
+                        row["evidence"].append(evidence)
+                row["description"] = "\n\n".join(
+                    dict.fromkeys(e["description"] for e in row["evidence"])
+                )
+            row["timestamp"] = handlers._format_interval(start, result["end"])
+            for hit in hits:
                 for sample in hit.get("face_samples", []):
                     if sample not in row.setdefault("face_samples", []):
                         row["face_samples"].append(sample)
-            else:
-                start = result["start"]
-                row = {**hit, "timestamp": handlers._format_interval(start, result["end"])}
-                rows.append(row)
             current[key] = {
                 "index": result["index"],
                 "scene_id": result["scene_id"],
@@ -94,7 +122,7 @@ def merge_window_results(completed, max_gap):
                 "end": result["end"],
                 "row": row,
             }
-        # A safe/missing window breaks continuity, including if another stage hit.
+        # A safe/missing category, failed window, or cut breaks continuity.
         previous = current
     return sorted(rows, key=lambda row: row["timestamp"].split("~", 1)[0])
 

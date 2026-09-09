@@ -13,6 +13,8 @@ from pymysql.cursors import DictCursor
 
 from wcm_facerec.config import settings
 
+from .review_results import consolidate_results, flatten_findings
+
 
 class ReviewTaskStoreUnavailable(RuntimeError):
     """Raised when review task persistence is disabled or unreachable."""
@@ -108,7 +110,10 @@ def _public_row(row: dict, *, include_results: bool) -> dict:
         "updated_at": _iso(row["updated_at"]),
     }
     if include_results:
-        item["results"] = _json_load(row.get("results"))
+        results = _json_load(row.get("results"))
+        item["results"] = consolidate_results(results) if isinstance(results, list) else results
+        if isinstance(item["results"], list):
+            item["result_count"] = len(item["results"])
     return item
 
 
@@ -132,7 +137,10 @@ async def create(video_url: str, parameters: dict, task_id: str | None = None) -
 
 
 def _complete_sync(task_id: str, results: list[dict]) -> None:
-    incomplete = [item for item in results if item.get("review_status") == "incomplete"]
+    incomplete = [
+        item for item in flatten_findings(results) if item.get("review_status") == "incomplete"
+    ]
+    results = consolidate_results(results)
     status = "partial" if incomplete else "completed"
     error = None
     if incomplete:

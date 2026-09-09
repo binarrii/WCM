@@ -11,6 +11,8 @@ import {
   layoutMarkers,
   markerIsActive,
   normalizeResults,
+  filterMarkers,
+  serializeResults,
   validateVideoUrl
 } from '../services/videoTimeline';
 
@@ -84,7 +86,7 @@ let panelResizeObserver;
 const playerPanelHeight = ref(0);
 
 const categories = computed(() => [...new Set(markers.value.flatMap(marker => marker.findings.map(finding => finding.category)))]);
-const visibleMarkers = computed(() => markers.value.filter(marker => !category.value || marker.findings.some(finding => finding.category === category.value)));
+const visibleMarkers = computed(() => filterMarkers(markers.value, category.value));
 const markerLayout = computed(() => layoutMarkers(visibleMarkers.value, durationMs.value, timelineWidth.value));
 const laneCount = computed(() => Math.max(1, ...markerLayout.value.map(item => item.lane + 1)));
 const clock = computed(() => formatTimestamp(currentSeconds.value * 1000));
@@ -97,7 +99,7 @@ const previousIndex = computed(() => {
 });
 const nextIndex = computed(() => visibleMarkers.value.findIndex(marker => marker.time_ms / 1000 > currentSeconds.value + 0.05));
 
-const details = marker => marker.findings.map(finding => `${finding.category}：${finding.description}`).join('\n');
+const details = marker => marker.findings.map(finding => `${finding.category}${finding.timestamp !== marker.timestamp ? `（${finding.timestamp}）` : ''}：${finding.description}`).join('\n');
 const markerActive = marker => markerIsActive(marker, currentSeconds.value);
 const markerStyle = index => {
   const item = markerLayout.value[index];
@@ -218,7 +220,7 @@ const importResults = async (event) => {
 };
 const downloadResults = () => {
   if (rawResults.value == null) return;
-  saveJson(rawResults.value);
+  saveJson(serializeResults(markers.value));
 };
 const seekVideo = time => {
   const video = videoRef.value;

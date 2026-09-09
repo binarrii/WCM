@@ -221,7 +221,7 @@ async def test_nsfw_request_sends_independent_images_in_order(monkeypatch, count
     assert await handlers._call_nsfw_analysis(images, [i / 2 for i in range(count)]) == "普通场景"
     assert len(captured) == 1
     payload = captured[0]
-    assert payload["max_tokens"] == 1024
+    assert payload["max_tokens"] == 300
     content = payload["messages"][-1]["content"]
     pictures = [x["image_url"]["url"].split(",", 1)[1] for x in content if x["type"] == "image_url"]
     assert len(pictures) == count
