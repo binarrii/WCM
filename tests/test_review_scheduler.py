@@ -103,7 +103,7 @@ async def test_review_entry_queues_and_releases_slots_after_failure_and_cancella
 
 def test_concurrency_configuration(monkeypatch):
     for field in ("review_task_concurrency", "review_window_concurrency"):
-        assert Settings.model_fields[field].default == (4 if field == "review_task_concurrency" else 2)
+        assert Settings.model_fields[field].default == (4 if field == "review_task_concurrency" else 3)
         with pytest.raises(ValidationError):
             Settings(_env_file=None, **{field: 0})
         monkeypatch.setenv(f"WCM_{field.upper()}", "3")
