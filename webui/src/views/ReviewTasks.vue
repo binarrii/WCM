@@ -6,7 +6,7 @@ import ReviewProgress from '../components/ReviewProgress.vue';
 import { saveBlob } from '../services/downloads';
 import { navigateToReviewTask } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
-import { reviewResultsReady } from '../services/reviewStatus';
+import { reviewResultsReady, showReviewTaskWarning } from '../services/reviewStatus';
 import { mergeReviewTask } from '../services/reviewStream';
 
 const query = ref('');
@@ -204,7 +204,7 @@ onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStr
             <tr :class="{ selected: selectedIds.has(task.id) }" tabindex="0" @click="navigateToReviewTask(task.id)" @keydown.enter="navigateToReviewTask(task.id)">
               <td class="task-select-cell" @click.stop @keydown.enter.stop><input type="checkbox" :checked="selectedIds.has(task.id)" :disabled="deleting" :aria-label="`选择任务 ${task.id}`" @change="toggleTask(task.id)" /></td>
               <td><span :class="['task-status', task.status]" title="未完成采样占比：≤10% 已完成，≥30% 失败，其余含未审核项">{{ statusLabel(task.status) }}</span></td>
-              <td class="task-video"><strong :title="task.video_url">{{ task.video_url }}</strong><small>{{ task.id }}</small><em v-if="task.error" :class="{ partial: task.status === 'partial' || task.status === 'completed' }" :title="task.error">{{ task.error }}</em></td>
+              <td class="task-video"><strong :title="task.video_url">{{ task.video_url }}</strong><small>{{ task.id }}</small><em v-if="showReviewTaskWarning(task)" :class="{ partial: task.status === 'partial' || task.status === 'completed' }" :title="task.error">{{ task.error }}</em></td>
               <td class="task-parameters">{{ parameterSummary(task) }}</td>
               <td>{{ task.result_count }} 条</td>
               <td class="task-date">{{ formatTime(task.created_at) }}</td>
