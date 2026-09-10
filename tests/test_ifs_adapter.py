@@ -11,7 +11,7 @@ import json
 import httpx
 import pytest
 
-from wcm_facerec.ifs_adapter import InsightFaceAdapter
+from wcm_facerec.ifs_adapter import InsightFaceAdapter, _padded_square_crop
 from wcm_facerec.vendor.insightface_server import Client
 
 from .conftest import FakeTransport
@@ -137,6 +137,51 @@ def test_detect_sorts_by_area_desc(adapter, fake_transport, sample_image_bytes):
     )
     faces = adapter.detect(sample_image_bytes)
     assert [f["area"] for f in faces] == [40000, 10000]
+
+
+def test_detect_preserves_quality_landmarks_and_estimates_yaw(
+    adapter, fake_transport, sample_image_bytes
+):
+    landmarks = [[10, 10], [30, 10], [25, 20], [14, 30], [28, 30]]
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "landmarks": landmarks,
+                    "detection_score": 0.9,
+                    "quality": {"score": 0.7, "sharpness": 0.3, "pose": 0.4},
+                }
+            ]
+        },
+    )
+
+    face = adapter.detect(sample_image_bytes)[0]
+    assert face["landmarks"] == landmarks
+    assert face["quality"] == {"score": 0.7, "sharpness": 0.3, "pose": 0.4}
+    assert face["estimated_yaw"] == pytest.approx(22.5)
+
+
+def test_padded_crop_is_square_and_edge_safe():
+    import numpy as np
+
+    image = np.zeros((20, 30, 3), dtype=np.uint8)
+    crop = _padded_square_crop(image, 0, 0, 10, 6, padding=0.5)
+
+    assert crop is not None
+    assert crop.shape == (20, 20, 3)
+
+
+def test_zero_padding_preserves_legacy_tight_crop():
+    import numpy as np
+
+    image = np.zeros((20, 30, 3), dtype=np.uint8)
+    crop = _padded_square_crop(image, 3, 4, 10, 6, padding=0.0)
+
+    assert crop is not None
+    assert crop.shape == (6, 10, 3)
 
 
 def test_detect_with_include_embeddings_calls_embeddings_endpoint(
@@ -427,6 +472,44 @@ def test_search_multi_face_returns_one_block_per_face(adapter, fake_transport, s
     # all_results concatenates every face's matches in encounter order
     assert len(result["all_results"]) == 3
     assert all(r["face_index"] in (0, 1, 2) for r in result["all_results"])
+
+
+def test_search_multi_face_preserves_query_quality(adapter, fake_transport, sample_image_bytes):
+    landmarks = [[10, 10], [30, 10], [25, 20], [14, 30], [28, 30]]
+    fake_transport.register(
+        "POST",
+        "/v1/detect",
+        {
+            "faces": [
+                {
+                    "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                    "landmarks": landmarks,
+                    "detection_score": 0.9,
+                    "quality": {"score": 0.7, "sharpness": 0.3, "pose": 0.4},
+                }
+            ]
+        },
+    )
+    fake_transport.register(
+        "POST",
+        "/v1/collections/all-persons/search",
+        {
+            "matches": [
+                {
+                    "person": {"id": "p1", "name": "A", "metadata": {}},
+                    "matched_face_id": "f1",
+                    "similarity": 0.7,
+                }
+            ]
+        },
+    )
+
+    result = adapter.search_multi_face(sample_image_bytes, min_face_pixels=80)
+
+    assert result["faces"][0]["quality"]["pose"] == 0.4
+    assert result["faces"][0]["landmarks"] == landmarks
+    assert result["all_results"][0]["query_quality"]["sharpness"] == 0.3
+    assert result["all_results"][0]["query_estimated_yaw"] == pytest.approx(22.5)
 
 
 def test_search_multi_face_drops_tiny_faces(adapter, fake_transport, sample_image_bytes):
@@ -1063,10 +1146,16 @@ def test_face_search_service_errors_are_not_silently_treated_as_empty(
 
     error = InsightFaceServerError("fixture", code=code)
     adapter._client = SimpleNamespace(
-        detect=Mock(return_value=SimpleNamespace(faces=[{
-            "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
-            "detection_score": 0.9,
-        }])),
+        detect=Mock(
+            return_value=SimpleNamespace(
+                faces=[
+                    {
+                        "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+                        "detection_score": 0.9,
+                    }
+                ]
+            )
+        ),
         search=Mock(side_effect=error),
     )
     if code == "face_not_found":

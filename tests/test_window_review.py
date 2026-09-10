@@ -209,7 +209,8 @@ async def test_failed_module_keeps_other_findings_and_later_windows(monkeypatch,
     )
     coverage = ReviewCoverage()
     rows = await asyncio.wait_for(
-        handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5, coverage=coverage), 2
+        handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5, coverage=coverage),
+        2,
     )
     summary = coverage.summarize(rows)
     assert summary["total_samples"] == 6
@@ -344,6 +345,83 @@ async def test_only_third_frame_has_subtitle_and_person_both_cover_the_window(mo
     rows = await handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5)
     assert {row["description"] for row in rows} == {"变化后的字幕", "新入镜人物"}
     assert all(row["timestamp"] == "00:00:00.000~00:00:02.000" for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_difficult_face_adds_only_budgeted_neighbor_frame(monkeypatch):
+    install_video(monkeypatch, [sample(i, i * 30) for i in range(3)])
+    monkeypatch.setattr(handlers.settings, "face_profile_optimization", True)
+    monkeypatch.setattr(handlers.settings, "face_max_extra_call_ratio", 0.30)
+    monkeypatch.setattr(handlers.settings, "face_max_extra_frames_per_window", 3)
+    monkeypatch.setattr(handlers.settings, "face_neighbor_offsets_s", (-0.4, -0.2, 0.2, 0.4))
+    requested = []
+
+    def neighbors(path, timestamps, **kwargs):
+        requested.extend(timestamps)
+        return [
+            (
+                timestamps[0],
+                VideoFrame(
+                    0.8,
+                    np.full((64, 96, 3), 99, np.uint8),
+                    sampled=False,
+                    frame_index=24,
+                ),
+            )
+        ]
+
+    monkeypatch.setattr(review_windows, "read_video_frames_near", neighbors)
+    calls = []
+
+    async def face(
+        engine,
+        image,
+        top_k,
+        threshold,
+        time,
+        *,
+        profile_optimization=False,
+        auxiliary=False,
+    ):
+        calls.append((time, profile_optimization, auxiliary))
+        if time not in {0.8, 1}:
+            return handlers.FaceFrameResult([], observations=[])
+        pose = 0.8 if auxiliary else 0.3
+        similarity = 0.72 if auxiliary else 0.68
+        bbox = {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2}
+        record = {
+            "person_id": "p1",
+            "name": "侧脸人物",
+            "category": "人物",
+            "similarity": similarity,
+            "face_index": 0,
+            "query_face_bbox": {"x": 10, "y": 10, "w": 50, "h": 50},
+            "query_quality": {"score": 0.8, "sharpness": 0.7, "pose": pose},
+            "face_location": bbox,
+        }
+        observation = {
+            "frame_time": time,
+            "face_index": 0,
+            "query_quality": record["query_quality"],
+            "face_location": bbox,
+        }
+        return handlers.FaceFrameResult([record], observations=[observation])
+
+    monkeypatch.setattr(handlers, "_face_task", face)
+    monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value=""))
+    monkeypatch.setattr(handlers, "_call_nsfw_analysis", AsyncMock(return_value="普通画面"))
+    monkeypatch.setattr(handlers, "_call_llm_guard", AsyncMock(return_value={"safe": True}))
+
+    rows = await handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5)
+
+    # Three primary samples allow ceil(3 * 0.30) == one auxiliary call.
+    assert requested == [0.8]
+    assert len(calls) == 4
+    assert calls[-1] == (0.8, True, True)
+    person = next(row for row in rows if row.get("source") == "face")
+    assert person["recognition_status"] == "confirmed"
+    assert person["evidence_count"] == 2
+    assert any(sample.get("auxiliary") for sample in person["face_samples"])
 
 
 @pytest.mark.asyncio

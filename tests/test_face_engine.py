@@ -405,6 +405,35 @@ def test_engine_search_multi_face_returns_grouped_shape(engine, fake_transport, 
             assert "query_face_bbox" in m
 
 
+@pytest.mark.asyncio
+async def test_engine_can_skip_enrolled_bbox_round_trips(engine, monkeypatch):
+    grouped = {
+        "face_count": 1,
+        "faces": [
+            {
+                "face_index": 0,
+                "matches": [
+                    {
+                        "person_id": "p1",
+                        "matched_face_id": "f1",
+                        "name": "A",
+                        "distance": 0.2,
+                    }
+                ],
+            }
+        ],
+        "all_results": [],
+    }
+    monkeypatch.setattr(engine._adapter, "search_multi_face", lambda *_args, **_kwargs: grouped)
+    calls = []
+    monkeypatch.setattr(engine._adapter, "get_face_bbox", lambda *_args: calls.append(_args))
+
+    result = await engine.search_multi_face(b"query", include_source_bbox=False)
+
+    assert result["all_results"][0]["name"] == "A"
+    assert calls == []
+
+
 def test_engine_search_returns_flat_for_backcompat(engine, fake_transport, sample_image_bytes):
     """The legacy `engine.search` still returns a single flat list of dicts."""
     fake_transport.register(

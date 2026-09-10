@@ -30,6 +30,7 @@ class Quality(TypedDict, total=False):
     score: float
     sharpness: float
     brightness: float
+    pose: float
 
 
 class FaceObservation(TypedDict, total=False):

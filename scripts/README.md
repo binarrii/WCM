@@ -2,6 +2,21 @@
 
 Run the commands below from the project root, not from the `scripts/` directory.
 
+## Face gallery coverage audit
+
+Audit how many enrolled samples each person has. This is read-only and does not
+download stored face crops:
+
+```bash
+uv run python scripts/audit_face_gallery.py
+```
+
+Add `--inspect-quality` to identify people without a sample whose InsightFace
+pose-quality score is below the configured profile threshold. This makes one or
+more additional metadata requests per person, so use it as an offline audit.
+Add `--include-persons` only when a concrete remediation list containing person
+IDs and names is needed. `--output report.json` writes the JSON report to disk.
+
 ## Video review timeline
 
 `scripts/mark_video_timeline.py` calls `/api/v1/analyze_media` and exports a

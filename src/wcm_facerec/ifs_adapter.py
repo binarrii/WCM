@@ -113,6 +113,7 @@ class InsightFaceAdapter:
                 embedding = np.asarray(embedding_list, dtype=np.float32)
             elif i < len(embeddings_by_index):
                 embedding = embeddings_by_index[i]
+            landmarks, quality, estimated_yaw = _face_observation_metadata(f)
             face_crop = _crop_or_none(np_img, x, y, w, h)
             out.append(
                 {
@@ -121,6 +122,9 @@ class InsightFaceAdapter:
                     "facial_area": {"x": x, "y": y, "w": w, "h": h},
                     "area": w * h,
                     "embedding": embedding,
+                    "landmarks": landmarks,
+                    "quality": quality,
+                    "estimated_yaw": estimated_yaw,
                 }
             )
         out.sort(key=lambda d: d["area"], reverse=True)
@@ -249,6 +253,7 @@ class InsightFaceAdapter:
         quality_weight: float | None = None,
         norm_reference: float | None = None,
         adaptive_threshold_step: float | None = None,
+        crop_padding: float | None = None,
     ) -> dict:
         """Detect every face in an image and search the collection for each one.
 
@@ -303,6 +308,9 @@ class InsightFaceAdapter:
             norm_reference = settings.insightface_norm_reference
         if adaptive_threshold_step is None:
             adaptive_threshold_step = settings.insightface_adaptive_threshold_step
+        if crop_padding is None:
+            # Preserve the legacy tight crop unless an optimized caller opts in.
+            crop_padding = 0.0
 
         detected = self._client.detect(image=image_bytes, max_faces=max_faces)
         faces_raw = detected.faces or []
@@ -341,9 +349,14 @@ class InsightFaceAdapter:
             if min(w, h) < min_face_pixels:
                 continue
             confidence = float(f.get("detection_score") or 0.0)
+            landmarks, quality, estimated_yaw = _face_observation_metadata(f)
             # Crop the face and JPEG-encode it; the server expects JPEG/PNG
             # bytes, not raw ndarray.
-            crop_bytes = _encode_crop(np_img, x, y, w, h) if np_img is not None else None
+            crop_bytes = (
+                _encode_crop(np_img, x, y, w, h, padding=crop_padding)
+                if np_img is not None
+                else None
+            )
             if crop_bytes is None:
                 # Decoder failed (unusual): fall back to the whole image,
                 # which still produces one round of matches.
@@ -370,6 +383,9 @@ class InsightFaceAdapter:
                 "face_index": idx,
                 "bbox": {"x": x, "y": y, "w": w, "h": h},
                 "detection_score": confidence,
+                "landmarks": landmarks,
+                "quality": quality,
+                "estimated_yaw": estimated_yaw,
                 "matches": [],
             }
             for m in result.matches or []:
@@ -399,6 +415,9 @@ class InsightFaceAdapter:
                     "face_count": person.get("face_count"),
                     "face_index": idx,
                     "query_face_bbox": {"x": x, "y": y, "w": w, "h": h},
+                    "query_landmarks": landmarks,
+                    "query_quality": quality,
+                    "query_estimated_yaw": estimated_yaw,
                 }
                 # Apply scoring enhancements in-place.
                 _apply_match_scoring(
@@ -639,9 +658,88 @@ def _crop_or_none(img: np.ndarray | None, x: int, y: int, w: int, h: int) -> np.
     return img[y0:y1, x0:x1]
 
 
-def _encode_crop(img: np.ndarray | None, x: int, y: int, w: int, h: int) -> bytes | None:
-    """Crop a region of the decoded image and return JPEG bytes."""
-    crop = _crop_or_none(img, x, y, w, h)
+def _face_observation_metadata(
+    face: dict[str, Any],
+) -> tuple[list[list[float]], dict, float | None]:
+    """Return JSON-safe IFS landmarks/quality and a documented yaw proxy."""
+    raw_landmarks = face.get("landmarks") or []
+    landmarks: list[list[float]] = []
+    try:
+        points = np.asarray(raw_landmarks, dtype=np.float64)
+        if points.shape == (5, 2) and np.isfinite(points).all():
+            landmarks = points.tolist()
+        else:
+            points = np.empty((0, 2), dtype=np.float64)
+    except (TypeError, ValueError):
+        points = np.empty((0, 2), dtype=np.float64)
+
+    raw_quality = face.get("quality") or {}
+    quality = {}
+    if isinstance(raw_quality, dict):
+        for key in ("score", "sharpness", "brightness", "pose"):
+            try:
+                value = float(raw_quality[key])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if np.isfinite(value):
+                quality[key] = float(np.clip(value, 0.0, 1.0))
+
+    estimated_yaw = None
+    if points.shape == (5, 2):
+        # Match IFS 0.2.0's documented five-point heuristic. It is useful
+        # for routing, not a calibrated head-pose measurement.
+        eyes_midpoint = (points[0] + points[1]) / 2.0
+        eye_distance = max(float(np.linalg.norm(points[1] - points[0])), 1e-6)
+        estimated_yaw = float((points[2, 0] - eyes_midpoint[0]) / eye_distance * 90.0)
+    return landmarks, quality, estimated_yaw
+
+
+def _padded_square_crop(
+    img: np.ndarray | None,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    *,
+    padding: float,
+) -> np.ndarray | None:
+    if img is None or w <= 0 or h <= 0:
+        return None
+    if padding <= 0:
+        return _crop_or_none(img, x, y, w, h)
+    side = max(1, int(round(max(w, h) * (1.0 + 2.0 * max(0.0, padding)))))
+    center_x, center_y = x + w / 2.0, y + h / 2.0
+    left = int(round(center_x - side / 2.0))
+    top = int(round(center_y - side / 2.0))
+    right, bottom = left + side, top + side
+    source_left, source_top = max(0, left), max(0, top)
+    source_right, source_bottom = min(img.shape[1], right), min(img.shape[0], bottom)
+    if source_right <= source_left or source_bottom <= source_top:
+        return None
+    crop = img[source_top:source_bottom, source_left:source_right]
+    pad_left, pad_top = source_left - left, source_top - top
+    pad_right, pad_bottom = right - source_right, bottom - source_bottom
+    if any((pad_left, pad_top, pad_right, pad_bottom)):
+        crop = np.pad(
+            crop,
+            ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
+            mode="edge",
+        )
+    return crop
+
+
+def _encode_crop(
+    img: np.ndarray | None,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    *,
+    padding: float | None = None,
+) -> bytes | None:
+    """Return a square padded face crop encoded as a high-quality JPEG."""
+    resolved_padding = 0.0 if padding is None else padding
+    crop = _padded_square_crop(img, x, y, w, h, padding=resolved_padding)
     if crop is None:
         return None
     pil = Image.fromarray(crop)

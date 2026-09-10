@@ -307,6 +307,85 @@ class VideoFrameSampler:
         )
 
 
+def read_video_frames_near(
+    path: Path,
+    timestamps,
+    *,
+    max_dimension: int | None = 1080,
+) -> list[tuple[float, VideoFrame]]:
+    """Read the nearest presented frame for each sparse auxiliary timestamp.
+
+    This is intentionally separate from ``VideoFrameSampler``: primary review
+    coverage and window semantics stay unchanged, while difficult face tracks
+    can request a small, bounded second pass. Returned timestamps are the
+    decoder's actual PTS, never the requested seek position.
+    """
+    targets = sorted(
+        {
+            round(float(value), 6)
+            for value in timestamps
+            if isinstance(value, (int, float)) and math.isfinite(value) and value >= 0
+        }
+    )
+    if not targets:
+        return []
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        cap.release()
+        raise ValueError("Could not open video file for face neighbour sampling")
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = fps if math.isfinite(fps) and fps > 0 else 25.0
+        radius = max(0.3, 3.0 / fps)
+        max_reads = max(12, int(math.ceil(fps * (radius * 2 + 0.2))))
+        output = []
+        used_pts = set()
+        for target in targets:
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, target - radius) * 1000.0)
+            best = None
+            for _ in range(max_reads):
+                ok, image = cap.read()
+                if not ok:
+                    break
+                pts = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+                if not math.isfinite(pts) or pts < 0:
+                    frame_index = cap.get(cv2.CAP_PROP_POS_FRAMES) - 1
+                    pts = max(0.0, frame_index / fps)
+                delta = abs(pts - target)
+                if best is None or delta < best[0]:
+                    best = (delta, pts, image, int(max(0, cap.get(cv2.CAP_PROP_POS_FRAMES) - 1)))
+                if pts > target and delta > (best[0] if best else radius):
+                    break
+                if pts >= target + radius:
+                    break
+            if best is None:
+                continue
+            _, pts, image, frame_index = best
+            pts_key = round(pts, 6)
+            if pts_key in used_pts:
+                continue
+            used_pts.add(pts_key)
+            if max_dimension and max(image.shape[:2]) > max_dimension:
+                height, width = image.shape[:2]
+                scale = max_dimension / max(height, width)
+                image = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))))
+            output.append(
+                (
+                    target,
+                    VideoFrame(
+                        timestamp=pts,
+                        image=image,
+                        sampled=False,
+                        frame_index=frame_index,
+                        duration=1.0 / fps,
+                    ),
+                )
+            )
+        return output
+    finally:
+        cap.release()
+
+
 async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:
     """Download a URL safely, enforcing a maximum file size in bytes to prevent OOM."""
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:

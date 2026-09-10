@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import inspect
 import logging
 import os
 import re
@@ -43,6 +44,14 @@ def _prompt_text(*parts: str) -> str:
 
 class NsfwAnalysisError(RuntimeError):
     """A model failure must not be interpreted as a safe visual description."""
+
+
+class FaceFrameResult(list):
+    """List-compatible matches plus detection-only observations for one frame."""
+
+    def __init__(self, matches=(), *, observations=()):
+        super().__init__(matches)
+        self.observations = list(observations)
 
 
 class ModelResponseError(ValueError):
@@ -854,16 +863,77 @@ def _format_interval(start, end=None):
 
 
 @model_call("face")
-async def _face_task(engine, frame, top_k, threshold, current_frame_time):
+async def _face_task(
+    engine,
+    frame,
+    top_k,
+    threshold,
+    current_frame_time,
+    *,
+    profile_optimization=False,
+    auxiliary=False,
+):
     all_results = []
+    confirm_similarity = 0.0 if threshold <= 0 else max(0.0, 1.0 - float(threshold))
+    search_threshold = threshold
+    search_top_k = top_k
+    search_kwargs = {}
+    if profile_optimization:
+        candidate_similarity = min(confirm_similarity, settings.face_candidate_similarity)
+        search_threshold = 0.0 if candidate_similarity <= 0 else 1.0 - candidate_similarity
+        search_top_k = max(2, top_k)
+        search_kwargs = {
+            "include_source_bbox": False,
+            "crop_padding": settings.face_crop_padding,
+        }
     # Apply the same minimum during detection so the engine's default
     # 80px floor does not discard 48–79px query faces before this step.
     grouped = await engine.search_multi_face(
         img_source=frame,
-        top_k=top_k,
-        threshold=threshold,
+        top_k=search_top_k,
+        threshold=search_threshold,
         min_face_pixels=_ANALYZE_MIN_FACE_PIXELS,
+        **search_kwargs,
     )
+    observations = []
+    height, width = frame.shape[:2]
+    for face in grouped.get("faces", []):
+        bbox = face.get("bbox") or {}
+        x, y, w, h = (bbox.get(key) for key in ("x", "y", "w", "h"))
+        observation = {
+            "frame_time": current_frame_time,
+            "timestamp": _format_timestamp(current_frame_time),
+            "face_index": face.get("face_index"),
+            "query_face_bbox": bbox,
+            "query_quality": face.get("quality") or {},
+            "query_landmarks": face.get("landmarks") or [],
+            "query_estimated_yaw": face.get("estimated_yaw"),
+            "detection_score": face.get("detection_score"),
+            "auxiliary": bool(auxiliary),
+        }
+        if all(value is not None for value in (x, y, w, h)) and width and height:
+            observation["face_location"] = {
+                "x": max(0, x) / width,
+                "y": max(0, y) / height,
+                "w": max(0, min(width, x + w) - max(0, x)) / width,
+                "h": max(0, min(height, y + h) - max(0, y)) / height,
+            }
+        observations.append(observation)
+
+    matches_by_face = {
+        face.get("face_index"): sorted(
+            face.get("matches") or [], key=lambda item: item.get("similarity", -1), reverse=True
+        )
+        for face in grouped.get("faces", [])
+    }
+    for matches in matches_by_face.values():
+        runner_up = float(matches[1].get("similarity") or 0.0) if len(matches) > 1 else 0.0
+        for rank, match in enumerate(matches, 1):
+            match["candidate_rank"] = rank
+            match["runner_up_similarity"] = runner_up
+            if rank == 1:
+                match["candidate_margin"] = float(match.get("similarity") or 0.0) - runner_up
+
     for r in grouped["all_results"]:
         # source_* describes the enrolled database sample. Only the
         # query bbox belongs to the uploaded image/frame we are filtering
@@ -877,6 +947,7 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
 
         r["timestamp"] = _format_timestamp(current_frame_time)
         r["frame_time"] = current_frame_time
+        r["auxiliary"] = bool(auxiliary)
         if x is not None and y is not None and w is not None and h is not None:
             y1, y2 = max(0, y), min(frame.shape[0], y + h)
             x1, x2 = max(0, x), min(frame.shape[1], x + w)
@@ -892,7 +963,32 @@ async def _face_task(engine, frame, top_k, threshold, current_frame_time):
                 if ok:
                     r["face_image_b64"] = base64.b64encode(buf).decode("utf-8")
         all_results.append(r)
-    return all_results
+    return FaceFrameResult(all_results, observations=observations)
+
+
+async def _video_face_task(
+    engine,
+    frame,
+    top_k,
+    threshold,
+    current_frame_time,
+    *,
+    auxiliary=False,
+):
+    """Call the optimized task while accepting legacy injected callables."""
+    task = _face_task
+    try:
+        parameters = tuple(inspect.signature(task).parameters.values())
+    except (TypeError, ValueError):
+        parameters = ()
+    accepts_keywords = any(item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters)
+    names = {item.name for item in parameters}
+    kwargs = {}
+    if accepts_keywords or "profile_optimization" in names:
+        kwargs["profile_optimization"] = settings.face_profile_optimization
+    if accepts_keywords or "auxiliary" in names:
+        kwargs["auxiliary"] = auxiliary
+    return await task(engine, frame, top_k, threshold, current_frame_time, **kwargs)
 
 
 def _merge_person_timelines(

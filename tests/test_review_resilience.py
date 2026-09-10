@@ -98,7 +98,9 @@ async def test_one_failed_frame_preserves_siblings_and_later_frames(monkeypatch,
     expected = {f"{prefix}-{i}" for prefix in ("person", "visual", "ocr") for i in range(3)}
     expected.remove(f"{'person' if failed_stage == 'face' else failed_stage}-1")
     assert descriptions == expected
-    assert seen["face"] == ([0, 1, 1, 2] if failed_stage == "face" else [0, 1, 2])
+    # Window workers are concurrent, so a later frame may complete before the
+    # failed frame's retry. Validate coverage and retry count, not scheduling order.
+    assert sorted(seen["face"]) == ([0, 1, 1, 2] if failed_stage == "face" else [0, 1, 2])
     assert sorted(seen["visual"]) == sorted(seen["ocr"]) == [0, 1, 2]
     assert cap.released
 

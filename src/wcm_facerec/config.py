@@ -58,6 +58,32 @@ class Settings(BaseSettings):
     # auto-disables this path if probe_norm comes back ≈ 1.0.
     insightface_norm_reference: float = 0.0
 
+    # ---- Profile / low-quality video face optimization ----
+    # The rollout is guarded so the complete decision path can be disabled
+    # without changing the public request contract.
+    face_profile_optimization: bool = True
+    # Expand detector boxes before the crop is sent back through ArcFace. A
+    # square padded crop retains forehead/chin/nose context on profile faces.
+    face_crop_padding: float = Field(default=0.25, ge=0.0, le=0.5)
+    # Video review may retrieve weaker candidates internally, but only the
+    # caller's confirmation threshold is allowed to produce a final finding.
+    face_candidate_similarity: float = Field(default=0.35, ge=0.0, le=1.0)
+    face_high_similarity: float = Field(default=0.65, ge=0.0, le=1.0)
+    face_min_candidate_margin: float = Field(default=0.05, ge=0.0, le=1.0)
+    face_min_confirming_frames: int = Field(default=2, ge=1, le=10)
+    # IFS exposes a 0..1 pose quality signal (1 is frontal), rather than raw
+    # yaw/pitch/roll. Values below this floor take the difficult-face path.
+    face_profile_pose_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+    face_low_sharpness_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    face_track_max_gap_s: float = Field(default=2.5, gt=0.0, le=30.0)
+    # Targeted neighbour review stays bounded on the CPU-only IFS deployment.
+    face_neighbor_offsets_s: tuple[float, ...] = (-0.4, -0.2, 0.2, 0.4)
+    face_max_extra_frames_per_window: int = Field(default=3, ge=0, le=12)
+    face_max_extra_call_ratio: float = Field(default=0.30, ge=0.0, le=2.0)
+    face_neighbor_concurrency: int = Field(default=2, ge=1, le=8)
+    # P4 gallery audit target; the IFS collection itself permits up to 20.
+    face_gallery_target_samples: int = Field(default=5, ge=1, le=20)
+
     # Map a WCM Person category (Chinese strings) to the per-category
     # InsightFace collection. Each register writes twice: once into
     # `insightface_collection_id` (aggregated) and once into the mapped

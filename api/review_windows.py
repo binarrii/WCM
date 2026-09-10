@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+import math
 import os
 from collections import OrderedDict
 from pathlib import Path
@@ -10,8 +11,9 @@ from pathlib import Path
 from wcm_facerec.config import settings
 
 from . import handlers
+from .face_optimization import aggregate_face_candidates, observation_is_difficult
 from .model_health import gather_stages, protect_video_review
-from .utils import ReviewWindowPlanner, VideoFrameSampler
+from .utils import ReviewWindowPlanner, VideoFrameSampler, read_video_frames_near
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +151,7 @@ async def analyze_video(
     queue = asyncio.Queue(maxsize=concurrency * 2)
     planner = ReviewWindowPlanner(settings.nsfw_window_max_seconds)
     selected_frames = 0
+    confirm_similarity = 0.0 if threshold <= 0 else max(0.0, 1.0 - float(threshold))
     if coverage is not None:
         coverage.add([])
 
@@ -157,6 +160,8 @@ async def analyze_video(
 
     async def process_window(window):
         hits = {}
+        face_records = []
+        face_observations = []
 
         def add(source, category, description):
             key = (source, category, description)
@@ -234,8 +239,12 @@ async def analyze_video(
                 async def operation(frame=frame, key=key):
                     return await face_cache.get(
                         key,
-                        lambda: handlers._face_task(
-                            engine, frame.image, top_k, threshold, frame.timestamp
+                        lambda: handlers._video_face_task(
+                            engine,
+                            frame.image,
+                            top_k,
+                            threshold,
+                            frame.timestamp,
                         ),
                     )
 
@@ -243,9 +252,8 @@ async def analyze_video(
                     "face", frame.timestamp, operation, errors, default=[]
                 )
                 for face in records:
-                    hit = add(
-                        "face", face.get("category") or "敏感人物", face.get("name", "敏感人物")
-                    )
+                    face = dict(face)
+                    face["frame_time"] = frame.timestamp
                     if face.get("face_location"):
                         sample = {
                             "time_ms": round(frame.timestamp * 1000),
@@ -258,8 +266,25 @@ async def analyze_video(
                             sample["frame_index"] = frame.frame_index
                         if face.get("similarity") is not None:
                             sample["similarity"] = float(face["similarity"])
-                        if sample not in hit.setdefault("face_samples", []):
-                            hit["face_samples"].append(sample)
+                        quality = face.get("query_quality") or {}
+                        for source, target in (
+                            ("score", "quality_score"),
+                            ("sharpness", "sharpness"),
+                            ("pose", "pose_score"),
+                        ):
+                            if quality.get(source) is not None:
+                                sample[target] = float(quality[source])
+                        if face.get("query_estimated_yaw") is not None:
+                            sample["estimated_yaw"] = float(face["query_estimated_yaw"])
+                        if face.get("candidate_rank") is not None:
+                            sample["candidate_rank"] = int(face["candidate_rank"])
+                        if face.get("candidate_margin") is not None:
+                            sample["candidate_margin"] = float(face["candidate_margin"])
+                        if face.get("auxiliary"):
+                            sample["auxiliary"] = True
+                        face["_face_sample"] = sample
+                    face_records.append(face)
+                face_observations.extend(getattr(records, "observations", ()))
             if progress is not None:
                 progress.finish_stage(window.index, "face")
 
@@ -271,8 +296,166 @@ async def analyze_video(
                 "start": window.start,
                 "end": window.end,
                 "hits": list(hits.values()),
+                "face_records": face_records,
+                "face_observations": face_observations,
             }
         )
+
+    def rebuild_face_hits(result):
+        non_face = [hit for hit in result["hits"] if hit.get("source") != "face"]
+        if not settings.face_profile_optimization:
+            legacy = {}
+            for record in result.get("face_records", ()):
+                key = (
+                    record.get("category") or "敏感人物",
+                    record.get("name", "敏感人物"),
+                )
+                hit = legacy.setdefault(
+                    key,
+                    {"source": "face", "category": key[0], "description": key[1]},
+                )
+                sample = record.get("_face_sample")
+                if sample and sample not in hit.setdefault("face_samples", []):
+                    hit["face_samples"].append(sample)
+            result["face_diagnostics"] = {
+                "tracks": 0,
+                "confirmed": len(legacy),
+                "probable": 0,
+                "trigger_times": [],
+            }
+            result["hits"] = [*non_face, *legacy.values()]
+            return
+        face_hits, diagnostics = aggregate_face_candidates(
+            result.get("face_records", ()),
+            confirm_similarity,
+            max_gap=max(settings.face_track_max_gap_s, sample_interval + 0.001),
+        )
+        difficult_times = {
+            float(observation["frame_time"])
+            for observation in result.get("face_observations", ())
+            if observation.get("frame_time") is not None and observation_is_difficult(observation)
+        }
+        diagnostics["trigger_times"] = sorted(
+            set(diagnostics.get("trigger_times", ())) | difficult_times
+        )
+        result["face_diagnostics"] = diagnostics
+        result["hits"] = [*non_face, *face_hits]
+
+    async def resample_difficult_faces():
+        for result in completed:
+            rebuild_face_hits(result)
+        if not include_faces or not settings.face_profile_optimization or not selected_frames:
+            return 0
+        budget = min(
+            sum(settings.face_max_extra_frames_per_window for _ in completed),
+            int(math.ceil(selected_frames * settings.face_max_extra_call_ratio)),
+        )
+        if budget <= 0:
+            return 0
+
+        requests = []
+        used_targets = set()
+        offsets = sorted(settings.face_neighbor_offsets_s, key=lambda value: abs(float(value)))
+        for result in sorted(completed, key=lambda item: item["index"]):
+            existing = {
+                round(float(record.get("frame_time")), 6)
+                for record in result.get("face_records", ())
+                if record.get("frame_time") is not None
+            }
+            count = 0
+            for trigger in result.get("face_diagnostics", {}).get("trigger_times", ()):
+                for offset in offsets:
+                    target = round(float(trigger) + float(offset), 6)
+                    if target < result["start"] - 1e-6 or target > result["end"] + 1e-6:
+                        continue
+                    if any(abs(target - value) < 0.05 for value in existing):
+                        continue
+                    key = round(target, 3)
+                    if key in used_targets:
+                        continue
+                    used_targets.add(key)
+                    requests.append((target, result))
+                    count += 1
+                    if (
+                        count >= settings.face_max_extra_frames_per_window
+                        or len(requests) >= budget
+                    ):
+                        break
+                if count >= settings.face_max_extra_frames_per_window or len(requests) >= budget:
+                    break
+            if len(requests) >= budget:
+                break
+        if not requests:
+            return 0
+
+        try:
+            frames = await asyncio.to_thread(
+                read_video_frames_near,
+                path,
+                [target for target, _ in requests],
+                max_dimension=1080,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Optional face neighbour sampling failed: %s", exc)
+            return 0
+        by_target = {round(target, 6): frame for target, frame in frames}
+        limit = asyncio.Semaphore(settings.face_neighbor_concurrency)
+
+        async def review(target, result):
+            frame = by_target.get(round(target, 6))
+            if frame is None:
+                return
+            primary_times = {
+                round(float(record.get("frame_time")), 6)
+                for record in result.get("face_records", ())
+                if record.get("frame_time") is not None
+            }
+            if any(abs(frame.timestamp - value) < 0.05 for value in primary_times):
+                return
+            key = (frame.image.shape, _digest(frame.image.tobytes()))
+
+            async def operation():
+                async with limit:
+                    return await face_cache.get(
+                        key,
+                        lambda: handlers._video_face_task(
+                            engine,
+                            frame.image,
+                            top_k,
+                            threshold,
+                            frame.timestamp,
+                            auxiliary=True,
+                        ),
+                    )
+
+            records = await handlers._review_stage(
+                "face", frame.timestamp, operation, errors, default=[]
+            )
+            for face in records:
+                face = dict(face)
+                face["frame_time"] = frame.timestamp
+                location = face.get("face_location")
+                if location:
+                    sample = {
+                        "time_ms": round(frame.timestamp * 1000),
+                        "pts_seconds": frame.timestamp,
+                        "bbox": location,
+                        "auxiliary": True,
+                    }
+                    if frame.duration is not None:
+                        sample["duration_seconds"] = frame.duration
+                    if frame.frame_index is not None:
+                        sample["frame_index"] = frame.frame_index
+                    if face.get("similarity") is not None:
+                        sample["similarity"] = float(face["similarity"])
+                    face["_face_sample"] = sample
+                result["face_records"].append(face)
+            result["face_observations"].extend(getattr(records, "observations", ()))
+
+        await asyncio.gather(*(review(target, result) for target, result in requests))
+        for result in completed:
+            rebuild_face_hits(result)
+        return len(frames)
 
     async def consumer():
         while True:
@@ -338,12 +521,15 @@ async def analyze_video(
         if progress is not None:
             await progress.sampled()
         await queue.join()
+        extra_face_frames = await resample_difficult_faces()
         if progress is not None:
             await progress.set_phase("saving")
         logger.info(
             "Window review complete: windows=%s selected_frames=%s visual_windows=%s "
             "visual_calls=%s visual_reused=%s "
-            "ocr_calls=%s ocr_reused=%s face_calls=%s face_reused=%s guard_calls=%s guard_reused=%s",
+            "ocr_calls=%s ocr_reused=%s face_calls=%s face_reused=%s "
+            "extra_face_frames=%s confirmed_faces=%s probable_faces=%s "
+            "guard_calls=%s guard_reused=%s",
             planner.count,
             selected_frames,
             planner.count if include_visual else 0,
@@ -353,6 +539,9 @@ async def analyze_video(
             ocr_cache.hits,
             face_cache.misses,
             face_cache.hits,
+            extra_face_frames,
+            sum(item.get("face_diagnostics", {}).get("confirmed", 0) for item in completed),
+            sum(item.get("face_diagnostics", {}).get("probable", 0) for item in completed),
             guard_cache.misses,
             guard_cache.hits,
         )

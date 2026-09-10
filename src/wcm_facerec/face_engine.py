@@ -212,6 +212,8 @@ class FaceEngine:
         quality_weight: float | None = None,
         norm_reference: float | None = None,
         adaptive_threshold_step: float | None = None,
+        include_source_bbox: bool = True,
+        crop_padding: float | None = None,
     ) -> dict:
         """Search the default collection for similar faces, every face in
         the query image at once.
@@ -259,6 +261,7 @@ class FaceEngine:
             quality_weight=quality_weight,
             norm_reference=norm_reference,
             adaptive_threshold_step=adaptive_threshold_step,
+            crop_padding=crop_padding,
         )
 
         # For each per-face match, fetch the matched face's bbox in IFS
@@ -269,16 +272,17 @@ class FaceEngine:
                 if name and m.get("name") != name:
                     m["_filtered"] = True
                     continue
-                bbox = await self._run(
-                    self._adapter.get_face_bbox,
-                    m["person_id"],
-                    m["matched_face_id"],
-                )
-                if bbox:
-                    m["source_x"] = bbox["x"]
-                    m["source_y"] = bbox["y"]
-                    m["source_w"] = bbox["w"]
-                    m["source_h"] = bbox["h"]
+                if include_source_bbox:
+                    bbox = await self._run(
+                        self._adapter.get_face_bbox,
+                        m["person_id"],
+                        m["matched_face_id"],
+                    )
+                    if bbox:
+                        m["source_x"] = bbox["x"]
+                        m["source_y"] = bbox["y"]
+                        m["source_w"] = bbox["w"]
+                        m["source_h"] = bbox["h"]
                 if not m.get("category") and m.get("file_path"):
                     parts = m["file_path"].split("/", 4)
                     if len(parts) > 3:

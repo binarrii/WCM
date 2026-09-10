@@ -99,6 +99,58 @@ def test_face_intervals_follow_actual_sample_adjacency():
     assert len(result) == 2
 
 
+def test_sparse_neighbor_reader_returns_actual_nearest_pts_and_releases(monkeypatch):
+    class SeekCapture:
+        def __init__(self):
+            self.times = [index / 10 for index in range(11)]
+            self.index = 0
+            self.current = 0.0
+            self.released = False
+
+        def isOpened(self):
+            return True
+
+        def set(self, prop, value):
+            assert prop == cv2.CAP_PROP_POS_MSEC
+            target = value / 1000
+            self.index = next(
+                (index for index, timestamp in enumerate(self.times) if timestamp >= target),
+                len(self.times),
+            )
+            return True
+
+        def read(self):
+            if self.index >= len(self.times):
+                return False, None
+            self.current = self.times[self.index]
+            self.index += 1
+            return True, np.zeros((8, 8, 3), np.uint8)
+
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FPS:
+                return 10
+            if prop == cv2.CAP_PROP_POS_MSEC:
+                return self.current * 1000
+            if prop == cv2.CAP_PROP_POS_FRAMES:
+                return self.index
+            return 0
+
+        def release(self):
+            self.released = True
+
+    cap = SeekCapture()
+    monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
+
+    frames = utils.read_video_frames_near(
+        Path("unused"), [float("nan"), -1, 0.34, 0.86], max_dimension=None
+    )
+
+    assert [target for target, _ in frames] == [0.34, 0.86]
+    assert [frame.timestamp for _, frame in frames] == pytest.approx([0.3, 0.9])
+    assert all(frame.sampled is False for _, frame in frames)
+    assert cap.released is True
+
+
 @pytest.mark.skipif(
     not shutil.which("ffmpeg") or not shutil.which("ffprobe"),
     reason="requires FFmpeg for real PTS reference",
