@@ -1,6 +1,7 @@
-"""Per-video fail-fast protection for model calls."""
+"""Bounded model retries and per-video fail-fast protection."""
 
 import asyncio
+import logging
 from collections import deque
 from contextvars import ContextVar
 from functools import wraps
@@ -10,6 +11,8 @@ import httpx
 from wcm_facerec.config import settings
 
 from .utils import VIDEO_EXTENSIONS
+
+logger = logging.getLogger(__name__)
 
 
 class ModelServiceUnavailable(RuntimeError):
@@ -29,10 +32,14 @@ class ModelHealth:
         outcomes.append(failed)
         failures = sum(outcomes)
         if failures >= 5:
+            logger.warning(
+                "Model failure protection tripped: model=%s completed_calls=%d failures=%d retry_limit=1",
+                model,
+                len(outcomes),
+                failures,
+            )
             self.error = ModelServiceUnavailable(
-                f"{MODEL_LABELS[model]}模型服务异常：最近 {len(outcomes)} 次调用中 "
-                f"{failures} 次超时或错误，达到最近 10 次内失败 5 次的终止阈值，"
-                "已提前终止该视频的整个审核任务。"
+                f"{MODEL_LABELS[model]}模型调用频繁错误或超时，已提前终止该审核任务。"
             )
             self.stopped.set()
             raise self.error
@@ -56,29 +63,38 @@ TIMEOUT_SETTINGS = {
 
 
 async def call_model(model, operation):
-    """Apply a total deadline and count one uncached model operation.
+    """Retry once with a fresh deadline, then count one final outcome.
 
     Successful compatibility fallbacks count once. Cancellations and another
     model's open circuit never count as service failures for this model.
     """
     timeout = getattr(settings, TIMEOUT_SETTINGS[model])
     health = _current_health.get()
-    if health is not None and health.error is not None:
-        raise health.error
-    try:
+    for attempt in range(2):
+        if health is not None and health.error is not None:
+            raise health.error
         try:
-            result = await asyncio.wait_for(operation(), timeout=timeout)
-        except asyncio.TimeoutError as exc:
-            raise httpx.ReadTimeout(f"{model} model exceeded {timeout:g}s deadline") from exc
-    except ModelServiceUnavailable:
-        raise
-    except Exception:
+            try:
+                result = await asyncio.wait_for(operation(), timeout=timeout)
+            except asyncio.TimeoutError as exc:
+                raise httpx.ReadTimeout(f"{model} model exceeded {timeout:g}s deadline") from exc
+        except ModelServiceUnavailable:
+            raise
+        except Exception as exc:
+            if attempt == 0:
+                logger.warning(
+                    "Model call failed; retrying once: model=%s error=%s timeout_s=%g",
+                    model,
+                    type(exc).__name__,
+                    timeout,
+                )
+                continue
+            if health is not None:
+                health.record(model, True)
+            raise
         if health is not None:
-            health.record(model, True)
-        raise
-    if health is not None:
-        health.record(model, False)
-    return result
+            health.record(model, False)
+        return result
 
 
 def model_call(model):

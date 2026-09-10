@@ -53,7 +53,7 @@ async def request_ocr(client, url: str, headers: dict, payload: dict) -> httpx.R
     """One request only. Closing the context cancels consumption on early stop.
 
     JSON responses remain compatible with gateways which ignore stream=True.
-    Partial text survives a dropped connection; empty broken streams stay errors.
+    Broken streams propagate so the shared model wrapper can retry once.
     """
     async with client.stream(
         "POST", url, headers=headers, json={**payload, "stream": True}
@@ -77,44 +77,34 @@ async def request_ocr(client, url: str, headers: dict, payload: dict) -> httpx.R
             if event_lines:
                 yield "\n".join(event_lines)
 
-        try:
-            async for event in events():
-                if event == "[DONE]":
-                    break
-                data = json.loads(event)
-                if data.get("error"):
-                    raise ValueError("OCR stream reported an upstream error")
-                choices = data.get("choices")
-                if choices == []:  # Optional final usage event.
-                    continue
-                if not isinstance(choices, list) or not choices:
-                    raise ValueError("OCR stream has no choices")
-                choice = choices[0]
-                delta = choice.get("delta", {}).get("content")
-                if delta is not None:
-                    if not isinstance(delta, str):
-                        raise ValueError("OCR stream content is not text")
-                    text += delta
-                finish = choice.get("finish_reason") or finish
-                if repetition_cut(text) is not None:
-                    stopped = "repetition"
-                    break
-                if len(text) >= MAX_CHARACTERS:
-                    stopped = "character_limit"
-                    break
-                if finish is not None:
-                    break
-        except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
-            if not text.strip():
-                raise
-            stopped = "stream_interrupted"
-            logger.warning(
-                "OCR stream interrupted; keeping partial content: error=%s", type(exc).__name__
-            )
+        async for event in events():
+            if event == "[DONE]":
+                break
+            data = json.loads(event)
+            if data.get("error"):
+                raise ValueError("OCR stream reported an upstream error")
+            choices = data.get("choices")
+            if choices == []:  # Optional final usage event.
+                continue
+            if not isinstance(choices, list) or not choices:
+                raise ValueError("OCR stream has no choices")
+            choice = choices[0]
+            delta = choice.get("delta", {}).get("content")
+            if delta is not None:
+                if not isinstance(delta, str):
+                    raise ValueError("OCR stream content is not text")
+                text += delta
+            finish = choice.get("finish_reason") or finish
+            if repetition_cut(text) is not None:
+                stopped = "repetition"
+                break
+            if len(text) >= MAX_CHARACTERS:
+                stopped = "character_limit"
+                break
+            if finish is not None:
+                break
         if finish is None and stopped is None:
-            if not text.strip():
-                raise ValueError("OCR stream ended without completion")
-            stopped = "stream_interrupted"
+            raise ValueError("OCR stream ended without completion")
         if stopped:
             logger.warning(
                 "OCR stream stopped; keeping partial content: reason=%s received_chars=%s",

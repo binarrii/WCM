@@ -108,18 +108,47 @@ async def test_normal_empty_stream_remains_valid():
 
 
 @pytest.mark.asyncio
-async def test_partial_stream_network_failure_keeps_text_without_retry(caplog):
+async def test_partial_stream_network_failure_propagates_for_retry():
     stream = Stream([chunk("private subtitle")], httpx.ReadTimeout("private service detail"))
-    response = await request(stream)
-    assert handlers._model_response_text(response, "ocr", 300) == "private subtitle"
+    with pytest.raises(httpx.ReadTimeout):
+        await request(stream)
     assert stream.closed
-    assert "stream_interrupted" in caplog.text
-    assert "private" not in caplog.text
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("events", [[], [b"data: [DONE]\n\n"], [chunk("\n")]])
-async def test_unfinished_empty_stream_is_not_successful_no_text(events):
+@pytest.mark.parametrize("recover", [True, False])
+async def test_handler_retries_broken_stream_once(monkeypatch, recover):
+    client_class = httpx.AsyncClient
+    streams = [
+        Stream([chunk("private partial")], httpx.ReadTimeout("private upstream")),
+        Stream([chunk("complete text"), chunk(finish="stop")])
+        if recover
+        else Stream([chunk("private partial")], httpx.ReadTimeout("private upstream")),
+    ]
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=streams[len(calls) - 1]
+        )
+
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr(
+        handlers.httpx, "AsyncClient", lambda **kwargs: client_class(transport=transport)
+    )
+    if recover:
+        assert await handlers._call_ocr_api("fixture") == "complete text"
+    else:
+        with pytest.raises(httpx.ReadTimeout):
+            await handlers._call_ocr_api("fixture")
+    assert len(calls) == 2
+    assert all(stream.closed for stream in streams)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("events", [[], [b"data: [DONE]\n\n"], [chunk("\n")], [chunk("partial")]])
+async def test_unfinished_stream_is_not_successful(events):
     with pytest.raises(ValueError):
         await request(Stream(events))
 

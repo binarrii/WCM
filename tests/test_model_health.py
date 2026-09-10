@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from api import handlers, review_windows, routes
+from api import handlers, model_health, review_windows, routes
 from api.model_health import (
     ModelHealth,
     ModelServiceUnavailable,
@@ -19,14 +19,129 @@ from api.review_scheduler import review_task_slot
 from tests.test_window_review import install_video, sample
 
 
-def test_rolling_ten_calls_and_early_five_failures():
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["visual", "ocr", "guard", "face"])
+@pytest.mark.parametrize("error_type", [httpx.ReadTimeout, httpx.ConnectError, ValueError])
+@pytest.mark.parametrize("recover", [True, False])
+async def test_only_final_retry_outcome_counts(model, error_type, recover, caplog):
+    health = ModelHealth()
+    token = model_health._current_health.set(health)
+    attempts = 0
+
+    async def invoke():
+        nonlocal attempts
+        attempts += 1
+        assert not health.outcomes  # The first failed attempt is not recorded.
+        if recover and attempts == 2:
+            return "result"
+        raise error_type(f"private attempt {attempts}")
+
+    try:
+        if recover:
+            assert await call_model(model, invoke) == "result"
+        else:
+            with pytest.raises(error_type, match="attempt 2"):
+                await call_model(model, invoke)
+        assert attempts == 2
+        assert list(health.outcomes[model]) == [not recover]
+        assert not health.stopped.is_set()
+        assert "retrying once" in caplog.text
+        assert "private" not in caplog.text
+    finally:
+        model_health._current_health.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_recovered_errors_do_not_trip_but_five_final_failures_do():
+    @protect_video_review
+    async def review(url):
+        recovered = AsyncMock(side_effect=[httpx.ReadTimeout("first"), "ok"] * 10)
+        for _ in range(10):
+            assert await call_model("visual", recovered) == "ok"
+        failure = AsyncMock(side_effect=httpx.ReadTimeout("offline"))
+        for _ in range(4):
+            with pytest.raises(httpx.ReadTimeout):
+                await call_model("visual", failure)
+        with pytest.raises(ModelServiceUnavailable, match="调用频繁错误或超时"):
+            await call_model("visual", failure)
+        assert failure.await_count == 10
+        # An open circuit never makes another upstream request.
+        with pytest.raises(ModelServiceUnavailable):
+            await call_model("visual", failure)
+        assert failure.await_count == 10
+
+    with pytest.raises(ModelServiceUnavailable):
+        await review("fixture.mp4")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_on", [1, 2])
+async def test_cancellation_never_retries_or_records_failure(cancel_on):
+    health = ModelHealth()
+    token = model_health._current_health.set(health)
+    operation = AsyncMock(
+        side_effect=([httpx.ReadTimeout("first")] if cancel_on == 2 else [])
+        + [asyncio.CancelledError()]
+    )
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await call_model("visual", operation)
+        assert operation.await_count == cancel_on
+        assert not health.outcomes
+    finally:
+        model_health._current_health.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_other_model_opening_circuit_prevents_retry():
+    health = ModelHealth()
+    token = model_health._current_health.set(health)
+
+    async def invoke():
+        health.error = ModelServiceUnavailable("guard stopped video")
+        health.stopped.set()
+        raise httpx.ReadTimeout("visual first attempt")
+
+    operation = AsyncMock(side_effect=invoke)
+    try:
+        with pytest.raises(ModelServiceUnavailable, match="guard stopped"):
+            await call_model("visual", operation)
+        operation.assert_awaited_once()
+        assert not health.outcomes
+    finally:
+        model_health._current_health.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_timeout_retry_has_a_fresh_deadline(monkeypatch):
+    monkeypatch.setattr(handlers.settings, "visual_timeout_s", 0.03)
+    attempts = 0
+    closed = []
+
+    async def operation():
+        nonlocal attempts
+        attempts += 1
+        try:
+            if attempts == 1:
+                await asyncio.Event().wait()
+            await asyncio.sleep(0.005)
+            return "recovered"
+        finally:
+            closed.append(attempts)
+
+    assert await call_model("visual", operation) == "recovered"
+    assert attempts == 2 and closed == [1, 2]
+
+
+def test_rolling_ten_calls_and_early_five_failures(caplog):
     health = ModelHealth()
     for failed in [True, False] * 4:
         health.record("visual", failed)
     health.record("visual", False)
-    with pytest.raises(ModelServiceUnavailable, match="最近 10 次调用中 5 次"):
+    with pytest.raises(ModelServiceUnavailable, match="调用频繁错误或超时"):
         health.record("visual", True)
     assert health.stopped.is_set()
+    assert "completed_calls=10 failures=5" in caplog.text
 
     # Old failures expire; four failures in each disjoint batch can still trip
     # when they overlap within a rolling ten-call window.
@@ -40,7 +155,7 @@ def test_rolling_ten_calls_and_early_five_failures():
     health = ModelHealth()
     for _ in range(4):
         health.record("visual", True)
-    with pytest.raises(ModelServiceUnavailable, match="最近 5 次调用中 5 次"):
+    with pytest.raises(ModelServiceUnavailable, match="调用频繁错误或超时"):
         health.record("visual", True)
 
 
@@ -94,7 +209,7 @@ async def test_coalesced_failed_requests_count_once():
                 assert all(isinstance(result, httpx.ReadTimeout) for result in results)
         finally:
             await cache.close()
-        assert calls == 4  # Twelve waiters, but only four model calls.
+        assert calls == 8  # Twelve waiters, four operations with two attempts each.
 
     await review("fixture.mp4")
 
@@ -168,7 +283,7 @@ async def test_breaker_stops_producer_models_and_persists_failure(
             calls += 1
             await asyncio.sleep(0.005)
             raise httpx.ReadTimeout("private upstream details")
-        if calls >= 5:
+        if calls >= 9:  # Let four operations exhaust both attempts before blocking siblings.
             blocked_stages.add(name)
             try:
                 await asyncio.Event().wait()
@@ -190,9 +305,11 @@ async def test_breaker_stops_producer_models_and_persists_failure(
     before = asyncio.all_tasks()
     with pytest.raises(ModelServiceUnavailable, match="已提前终止"):
         await asyncio.wait_for(routes._run_review_task("broken", "fixture.mp4", 1, 10, 0.5), 1)
-    assert 5 <= calls <= 8  # Other windows may already have a model request in flight.
+    assert 10 <= calls <= 16  # Five final failures plus other windows already in flight.
     failed.assert_awaited_once()
-    assert "5 次超时或错误" in failed.await_args.args[1]
+    assert failed.await_args.args[1] == (
+        f"{model_health.MODEL_LABELS[failed_model]}模型调用频繁错误或超时，已提前终止该审核任务。"
+    )
     assert failed_model in failed.await_args.args[1].lower()
     assert "private" not in failed.await_args.args[1]
     complete.assert_not_awaited()
@@ -219,13 +336,16 @@ async def test_each_real_model_entry_enforces_its_total_deadline(monkeypatch, mo
     from tests.test_nsfw_target_review import image
 
     monkeypatch.setattr(handlers.settings, TIMEOUT_SETTINGS[model], 0.01)
-    cancelled = asyncio.Event()
+    attempts = 0
+    cancellations = 0
 
     async def slow(*args, **kwargs):
+        nonlocal attempts, cancellations
+        attempts += 1
         try:
             await asyncio.Event().wait()
         finally:
-            cancelled.set()
+            cancellations += 1
 
     client = AsyncMock()
     client.__aenter__.return_value = client
@@ -244,7 +364,7 @@ async def test_each_real_model_entry_enforces_its_total_deadline(monkeypatch, mo
     }
     with pytest.raises(httpx.ReadTimeout, match="deadline"):
         await asyncio.wait_for(operations[model](), 0.5)
-    assert cancelled.is_set()
+    assert attempts == cancellations == 2
 
 
 def test_failure_counters_are_separate_for_each_model():

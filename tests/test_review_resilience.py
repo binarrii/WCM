@@ -98,7 +98,8 @@ async def test_one_failed_frame_preserves_siblings_and_later_frames(monkeypatch,
     expected = {f"{prefix}-{i}" for prefix in ("person", "visual", "ocr") for i in range(3)}
     expected.remove(f"{'person' if failed_stage == 'face' else failed_stage}-1")
     assert descriptions == expected
-    assert all(sorted(indices) == [0, 1, 2] for indices in seen.values())
+    assert seen["face"] == ([0, 1, 1, 2] if failed_stage == "face" else [0, 1, 2])
+    assert sorted(seen["visual"]) == sorted(seen["ocr"]) == [0, 1, 2]
     assert cap.released
 
 
@@ -145,13 +146,31 @@ async def test_invalid_guard_verdict_becomes_incomplete(monkeypatch, content, fi
         {},
     ],
 )
-async def test_ocr_errors_are_recorded_without_retry(monkeypatch, response):
+async def test_ocr_errors_are_recorded_after_one_retry(monkeypatch, response):
     client = install_response(monkeypatch, response)
     monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=b"fixture"))
     result = await handlers._process_detect_sensitive("http://test/image.jpg", 1)
     assert result["unsafe_text_frames"] == []
     assert result["errors"][0]["stage"] == "ocr"
-    client.post.assert_awaited_once()
+    assert client.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_guard_retry_does_not_repeat_successful_visual_call(monkeypatch):
+    client = install_response(monkeypatch, {})
+    client.post.side_effect = [
+        httpx.ReadTimeout("first attempt"),
+        httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://model.test"),
+            json={"choices": [{"message": {"content": "Safety: Safe"}, "finish_reason": "stop"}]},
+        ),
+    ]
+    visual = AsyncMock(return_value="caption")
+    monkeypatch.setattr(handlers, "_call_nsfw_analysis", visual)
+    assert await handlers._review_visual(["frame"], [0]) is None
+    visual.assert_awaited_once()
+    assert client.post.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -239,7 +258,7 @@ async def test_response_failures_explain_component_and_reason(
     assert message in error["description"]
     assert "帧数据无效" not in error["description"]
     assert f"component={component} code={code}" in caplog.text
-    client.post.assert_awaited_once()
+    assert client.post.await_count == 2
 
 
 @pytest.mark.asyncio

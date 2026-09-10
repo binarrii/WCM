@@ -162,7 +162,7 @@ const refreshCurrentTask = id => {
     taskStream.stop();
     loading.value = false;
     if (reviewResultsReady(task)) loadResults(task.results || [], { collapseSetup: true });
-    else error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
+    else error.value = `任务执行失败：${task.error || '未记录失败原因'}`;
   }).catch(reason => {
     if (!disposed && currentTask.value?.id === id) error.value = reason.response?.data?.detail || reason.message;
   }).finally(() => { if (refreshingTask?.promise === promise) refreshingTask = null; });
@@ -214,7 +214,7 @@ const loadReviewTask = async () => {
     if (reviewResultsReady(task)) {
       loadResults(task.results || [], { collapseSetup: true });
     } else if (task.status === 'failed') {
-      error.value = `该任务执行失败：${task.error || '未记录失败原因'}`;
+      error.value = `任务执行失败：${task.error || '未记录失败原因'}`;
     } else {
       taskStream.start([task.id]);
     }

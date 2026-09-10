@@ -85,21 +85,31 @@ def test_context_can_only_select_fixed_questions_not_inject_objects_or_instructi
 )
 async def test_target_verification_failure_never_falls_back_to_context(monkeypatch, failure):
     monkeypatch.setattr(handlers.settings, "nsfw_verify_target", True)
-    replies = [caption("context must not be returned"), failure]
+    replies = [caption("context must not be returned"), failure] * 2
     calls = install_client(monkeypatch, replies)
     with pytest.raises(handlers.NsfwAnalysisError, match="目标帧复核失败"):
         await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
-    assert len(calls) == 2
+    assert len(calls) == 4
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [caption(""), caption(None)])
-async def test_incomplete_description_fails_without_retry_or_fallback(monkeypatch, failure):
-    calls = install_client(monkeypatch, [failure])
+async def test_incomplete_description_retries_once_without_fallback(monkeypatch, failure):
+    calls = install_client(monkeypatch, [failure, failure])
     with pytest.raises(handlers.NsfwAnalysisError):
         await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert calls[0]["max_tokens"] == 300
+
+
+@pytest.mark.asyncio
+async def test_visual_recovers_on_retry_before_guard(monkeypatch):
+    calls = install_client(monkeypatch, [httpx.ReadTimeout("offline"), caption("街景")])
+    guard = AsyncMock(return_value={"safe": True})
+    monkeypatch.setattr(handlers, "_call_llm_guard", guard)
+    assert await handlers._review_visual([image(60)], [0]) is None
+    assert len(calls) == 2 and calls[0] == calls[1]
+    guard.assert_awaited_once_with("街景")
 
 
 @pytest.mark.asyncio
@@ -131,10 +141,10 @@ async def test_truncated_caption_reaches_guard_without_retry(monkeypatch, caplog
 
 @pytest.mark.asyncio
 async def test_context_failure_aborts_review(monkeypatch):
-    calls = install_client(monkeypatch, [httpx.ReadTimeout("offline")])
+    calls = install_client(monkeypatch, [httpx.ReadTimeout("offline")] * 2)
     with pytest.raises(handlers.NsfwAnalysisError):
         await handlers._call_nsfw_analysis([image(60), image(220)], [0, 1])
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio
@@ -193,11 +203,11 @@ async def test_unsupported_multi_image_falls_back_to_montage_and_verification(mo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status,message", [(401, "unauthorized"), (429, "limit exceeded"), (500, "unknown renderer qwen3.8"), (400, "invalid image data"), (422, "max_tokens exceeds context length")])
-async def test_unrelated_http_errors_do_not_trigger_more_requests(monkeypatch, status, message):
-    calls = install_client(monkeypatch, [status_error(status, message)])
+async def test_unrelated_http_errors_retry_once_without_montage(monkeypatch, status, message):
+    calls = install_client(monkeypatch, [status_error(status, message)] * 2)
     with pytest.raises(handlers.NsfwAnalysisError):
         await handlers._call_nsfw_analysis([image(60), image(220)])
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio
@@ -210,10 +220,10 @@ async def test_explicit_montage_skips_multi_image_probe(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fallback_failure_is_not_a_safe_caption(monkeypatch):
-    calls = install_client(monkeypatch, [status_error(422, "Only one image allowed"), httpx.ReadTimeout("offline")])
+    calls = install_client(monkeypatch, [status_error(422, "Only one image allowed"), httpx.ReadTimeout("offline")] * 2)
     with pytest.raises(handlers.NsfwAnalysisError):
         await handlers._call_nsfw_analysis([image(60), image(220)])
-    assert len(calls) == 2
+    assert len(calls) == 4
 
 
 @pytest.mark.asyncio
