@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     insightface_base_url: str = "http://10.252.25.251:18097"
     insightface_model_name: str = "buffalo_m"
     insightface_collection_id: str = "all-persons"
-    insightface_timeout_s: float = 60.0
+    insightface_timeout_s: float = Field(default=10.0, gt=0)
     # InsightFace's /compare returns similarity in [0,1] (higher = better).
     # The legacy verify_distance_threshold was on a cosine-distance scale
     # (lower = better). Both now default to 0.5; explicit configuration
@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     max_file_size_mb: int = 100
+    review_task_concurrency: int = Field(default=4, ge=1)
+    review_window_concurrency: int = Field(default=2, ge=1)
+    visual_timeout_s: float = Field(default=30.0, gt=0)
+    ocr_timeout_s: float = Field(default=10.0, gt=0)
+    guard_timeout_s: float = Field(default=10.0, gt=0)
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = "sk-o8EGlzXqMQi8Ba06E2B1BcF8217c45B6Bb70Ce5765B70c42"
 

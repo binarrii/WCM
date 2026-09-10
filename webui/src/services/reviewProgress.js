@@ -20,7 +20,7 @@ export const taskProgress = task => {
   );
   const phase = finished ? 'finished' : task?.status === 'failed' ? 'failed' : progress.phase;
   const percent = finished ? 100 : finite(progress.percent) ? Math.max(0, Math.min(99, progress.percent)) : null;
-  const label = { downloading: '下载中', reviewing: '审核中', saving: '保存结果', finished: '处理结束', failed: '已停止' }[phase] || '等待进度';
+  const label = { queued: '排队中', downloading: '下载中', reviewing: '审核中', saving: '保存结果', finished: '处理结束', failed: '已停止' }[phase] || '等待进度';
   const details = [];
   if (finite(progress.completed_windows)) details.push(`窗口 ${progress.completed_windows}${finite(progress.total_windows) ? ` / ${progress.total_windows}` : ''}`);
   if (finite(progress.completed_samples)) details.push(`采样 ${progress.completed_samples}${finite(progress.total_samples) ? ` / ${progress.total_samples}` : ''}`);

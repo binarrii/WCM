@@ -16,6 +16,12 @@ from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 
 from . import ocr, review_windows
+from .model_health import (
+    ModelServiceUnavailable,
+    gather_stages,
+    model_call,
+    protect_video_review,
+)
 from .utils import (
     VIDEO_EXTENSIONS,
     VideoFrameSampler,
@@ -89,9 +95,15 @@ async def _review_stage(stage, timestamp, operation, errors, default=None, *, en
     """
     try:
         return await operation()
+    except ModelServiceUnavailable:
+        raise
     except Exception as exc:
         cause = exc
-        while cause.__cause__ is not None and not isinstance(cause, ModelResponseError):
+        # Keep HTTPX's public exception: its lower-level httpcore cause is not
+        # an httpx.TimeoutException/RequestError and would lose the useful label.
+        while cause.__cause__ is not None and not isinstance(
+            cause, (ModelResponseError, httpx.HTTPError, TimeoutError)
+        ):
             cause = cause.__cause__
         if isinstance(cause, ModelResponseError):
             reason = cause.reason
@@ -231,6 +243,11 @@ async def _call_ocr_api(base64_image: str) -> str:
     if await asyncio.to_thread(ocr.is_uniform_image, base64_image):
         _logger.info("OCR skipped: exactly uniform image")
         return ""
+    return await _request_ocr(base64_image)
+
+
+@model_call("ocr")
+async def _request_ocr(base64_image):
     url = settings.model_api_url
     headers = {"Authorization": f"Bearer {settings.model_api_key}"}
     payload = {
@@ -253,7 +270,7 @@ async def _call_ocr_api(base64_image: str) -> str:
         "max_tokens": 300,
         "temperature": 0.0,
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=settings.ocr_timeout_s) as client:
         resp = await ocr.request_ocr(client, url, headers, payload)
         resp.raise_for_status()
         _model_response_text(resp, "ocr", 300, allow_empty=True)
@@ -277,6 +294,11 @@ async def _call_llm_guard(text: str) -> dict:
     if not text.strip():
         return {"safe": True, "category": ""}
 
+    return await _request_guard(text)
+
+
+@model_call("guard")
+async def _request_guard(text):
     url = settings.model_api_url
     headers = {"Authorization": f"Bearer {settings.model_api_key}"}
     payload = {
@@ -307,7 +329,7 @@ async def _call_llm_guard(text: str) -> dict:
         "temperature": 0.1,
     }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=settings.guard_timeout_s) as client:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         analysis = _model_response_text(resp, "guard", 512)
@@ -655,6 +677,7 @@ def _nsfw_focus_questions(context: str) -> str:
     """
 
 
+@model_call("visual")
 async def _call_nsfw_analysis(
     b64_images: str | list[str], timestamps: list[float] | None = None, *, review_all=False
 ) -> str:
@@ -673,7 +696,7 @@ async def _call_nsfw_analysis(
     stage = "images"
     prompt = _NSFW_WINDOW_PROMPT if review_all else _NSFW_TARGET_PROMPT
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=settings.visual_timeout_s) as client:
             montage = len(frames) > 1 and settings.nsfw_image_mode == "montage"
             if not montage:
                 try:
@@ -711,6 +734,7 @@ async def _call_nsfw_analysis(
         raise NsfwAnalysisError("NSFW 模型请求或目标帧复核失败，请检查模型服务") from exc
 
 
+@protect_video_review
 async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     if is_video and settings.nsfw_review_mode == "window":
@@ -739,7 +763,7 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
             )
 
             tasks = [_analyze_text(ts, b64) for ts, b64 in frames_data]
-            results = await asyncio.gather(*tasks)
+            results = await gather_stages(*tasks)
             for res in results:
                 if res:
                     unsafe_text_frames.append(res)
@@ -819,6 +843,7 @@ def _format_interval(start, end=None):
     return f"{point}~{_format_timestamp(end)}" if end is not None and end > start else point
 
 
+@model_call("face")
 async def _face_task(engine, frame, top_k, threshold, current_frame_time):
     all_results = []
     # Apply the same minimum during detection so the engine's default
@@ -910,6 +935,7 @@ def _merge_person_timelines(
     return results
 
 
+@protect_video_review
 async def _process_analyze_media(
     url: str, sample_interval: float, top_k: int, threshold: float, *, coverage=None, progress=None
 ) -> list:
@@ -968,7 +994,7 @@ async def _process_analyze_media(
                     if progress is not None:
                         progress.finish_stage(index, "ocr")
 
-        face_res, nsfw_res, ocr_res = await asyncio.gather(
+        face_res, nsfw_res, ocr_res = await gather_stages(
             _review_stage("face", current_frame_time, face_task, errors, default=[]),
             _review_stage(
                 "visual",
@@ -994,7 +1020,7 @@ async def _process_analyze_media(
                 timeout=900.0,
             )
 
-            concurrency = 2
+            concurrency = settings.review_window_concurrency
             queue = asyncio.Queue(maxsize=concurrency * 2)
 
             async def producer(sampler):
@@ -1138,6 +1164,7 @@ async def _process_analyze_media(
     return flattened_results
 
 
+@protect_video_review
 async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
     if is_video and settings.nsfw_review_mode == "window":
@@ -1160,7 +1187,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
                 return await _review_text(b64_img)
 
         async with semaphore:
-            visual, text = await asyncio.gather(
+            visual, text = await gather_stages(
                 _review_stage(
                     "visual",
                     timestamp,
@@ -1183,7 +1210,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
             frames_data = await asyncio.to_thread(
                 _extract_video_windows, video_path, sample_interval
             )
-            frame_results = await asyncio.gather(
+            frame_results = await gather_stages(
                 *(_analyze_frame(window) for window in frames_data)
             )
         finally:

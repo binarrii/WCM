@@ -71,8 +71,10 @@ async def test_database_failure_does_not_abort_progress_or_audit(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_window_workers_limit_concurrency_and_report_stage_positions(monkeypatch):
-    install_video(monkeypatch, [sample(i, i * 20) for i in range(9)])
+@pytest.mark.parametrize("limit", [1, 2, 4])
+async def test_window_workers_limit_concurrency_and_report_stage_positions(monkeypatch, limit):
+    monkeypatch.setattr(handlers.settings, "review_window_concurrency", limit)
+    install_video(monkeypatch, [sample(i, i * 10) for i in range(18)])
     snapshots = []
 
     async def write(task_id, data):
@@ -97,10 +99,10 @@ async def test_window_workers_limit_concurrency_and_report_stage_positions(monke
     monkeypatch.setattr(handlers, "_call_llm_guard", AsyncMock(return_value={"safe": True}))
     progress = ReviewProgress("task", interval=0)
     await handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5, progress=progress)
-    assert maximum == 2
-    assert progress.snapshot()["completed_windows"] == 3
-    assert progress.snapshot()["completed_samples"] == 9
-    assert any(len(snapshot["active_windows"]) == 2 for snapshot in snapshots)
+    assert maximum == limit
+    assert progress.snapshot()["completed_windows"] == 6
+    assert progress.snapshot()["completed_samples"] == 18
+    assert any(len(snapshot["active_windows"]) == limit for snapshot in snapshots)
     assert any(
         window["stages"].get("visual") == [0, 1, 2]
         for snapshot in snapshots
@@ -158,4 +160,4 @@ async def test_result_persistence_precedes_finished_progress(monkeypatch):
     monkeypatch.setattr(review_progress.review_task_store, "update_progress", write)
     monkeypatch.setattr(routes.review_task_store, "complete", complete)
     await routes._run_review_task("task", "https://fixture/video.mp4", 1, 10, 0.5)
-    assert events == ["downloading", "saving", "persisted"]
+    assert events == ["queued", "downloading", "saving", "persisted"]

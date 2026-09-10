@@ -5,11 +5,46 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpcore
 import httpx
 import pytest
 
 from api import handlers, utils
 from tests.test_video_windows import Capture, pixel
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("public_error", "underlying_error", "label"),
+    [
+        (httpx.ReadTimeout, httpcore.ReadTimeout, "模型请求超时"),
+        (httpx.ConnectTimeout, httpcore.ConnectTimeout, "模型请求超时"),
+        (httpx.ConnectError, httpcore.ConnectError, "模型服务连接失败"),
+    ],
+)
+async def test_wrapped_httpx_errors_keep_their_public_classification(
+    public_error, underlying_error, label
+):
+    async def operation():
+        try:
+            try:
+                raise underlying_error("private transport details")
+            except underlying_error as exc:
+                raise public_error("private request details") from exc
+        except public_error as exc:
+            raise handlers.NsfwAnalysisError("private model details") from exc
+
+    errors = []
+    await handlers._review_stage("visual", 4, operation, errors, end_timestamp=6)
+    assert errors == [
+        {
+            "timestamp": "00:00:04.000~00:00:06.000",
+            "category": "审核未完成",
+            "description": f"视觉审核未完成：{label}，请人工复核此时间段。",
+            "review_status": "incomplete",
+            "stage": "visual",
+        }
+    ]
 
 
 @pytest.mark.asyncio

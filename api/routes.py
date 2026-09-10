@@ -26,6 +26,7 @@ from .handlers import (
 from .review_coverage import ReviewCoverage
 from .review_progress import ReviewProgress
 from .review_results import consolidate_results
+from .review_scheduler import review_task_slot
 from .review_stream import push_review_progress, stream_review_tasks
 from .utils import VIDEO_EXTENSIONS, _download_url_safe
 
@@ -546,23 +547,27 @@ async def websocket_detect_nsfw(websocket: WebSocket):
 
 async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
     coverage = ReviewCoverage()
-    async with ReviewProgress(task_id) as progress:
+    progress = ReviewProgress(task_id)
+    progress.phase = "queued"
+    async with progress:
         try:
-            result = await _process_analyze_media(
-                url, sample_interval, top_k, threshold, coverage=coverage, progress=progress
-            )
-            result = (
-                consolidate_results(result)
-                if isinstance(result, list)
-                else {**result, "results": consolidate_results(result.get("results", []))}
-            )
-            stored_results = result.get("results", []) if isinstance(result, dict) else result
-            await progress.set_phase("saving")
-            await review_task_store.complete(
-                task_id, stored_results, coverage.summarize(stored_results)
-            )
-            await progress.set_phase("finished", persist=False)
-            return result
+            async with review_task_slot():
+                await progress.set_phase("downloading")
+                result = await _process_analyze_media(
+                    url, sample_interval, top_k, threshold, coverage=coverage, progress=progress
+                )
+                result = (
+                    consolidate_results(result)
+                    if isinstance(result, list)
+                    else {**result, "results": consolidate_results(result.get("results", []))}
+                )
+                stored_results = result.get("results", []) if isinstance(result, dict) else result
+                await progress.set_phase("saving")
+                await review_task_store.complete(
+                    task_id, stored_results, coverage.summarize(stored_results)
+                )
+                await progress.set_phase("finished", persist=False)
+                return result
         except asyncio.CancelledError:
             with contextlib.suppress(Exception):
                 await review_task_store.fail(task_id, "审核任务被中断。")

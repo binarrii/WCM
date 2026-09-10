@@ -10,6 +10,7 @@ from pathlib import Path
 from wcm_facerec.config import settings
 
 from . import handlers
+from .model_health import gather_stages, protect_video_review
 from .utils import ReviewWindowPlanner, VideoFrameSampler
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ def merge_window_results(completed, max_gap):
     return sorted(rows, key=lambda row: row["timestamp"].split("~", 1)[0])
 
 
+@protect_video_review
 async def analyze_video(
     url,
     sample_interval,
@@ -143,7 +145,7 @@ async def analyze_video(
     visual_cache = AsyncMemo(64)
     errors, completed = [], []
     path = Path(f"/tmp/window_review_{os.urandom(8).hex()}.mp4")
-    concurrency = 2
+    concurrency = settings.review_window_concurrency
     queue = asyncio.Queue(maxsize=concurrency * 2)
     planner = ReviewWindowPlanner(settings.nsfw_window_max_seconds)
     selected_frames = 0
@@ -261,7 +263,7 @@ async def analyze_video(
             if progress is not None:
                 progress.finish_stage(window.index, "face")
 
-        await asyncio.gather(visual(), text(), faces())
+        await gather_stages(visual(), text(), faces())
         completed.append(
             {
                 "index": window.index,

@@ -1050,3 +1050,27 @@ def test_collection_stats_missing_collection_returns_zero(adapter, fake_transpor
     stats = adapter.collection_stats("unknown")
     assert stats["person_count"] == 0
     assert stats["face_count"] == 0
+
+
+@pytest.mark.parametrize("code", ["service_unavailable", "face_not_found"])
+def test_face_search_service_errors_are_not_silently_treated_as_empty(
+    adapter, sample_image_bytes, code
+):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from wcm_facerec.vendor.insightface_server.exceptions import InsightFaceServerError
+
+    error = InsightFaceServerError("fixture", code=code)
+    adapter._client = SimpleNamespace(
+        detect=Mock(return_value=SimpleNamespace(faces=[{
+            "bbox": {"pixels": {"x": 0, "y": 0, "width": 100, "height": 100}},
+            "detection_score": 0.9,
+        }])),
+        search=Mock(side_effect=error),
+    )
+    if code == "face_not_found":
+        assert adapter.search_multi_face(sample_image_bytes)["all_results"] == []
+    else:
+        with pytest.raises(InsightFaceServerError, match="service_unavailable"):
+            adapter.search_multi_face(sample_image_bytes)

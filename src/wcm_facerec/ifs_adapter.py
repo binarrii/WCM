@@ -358,9 +358,13 @@ class InsightFaceAdapter:
                     limit=server_limit,
                     threshold=min_similarity,
                 )
-            except Exception as exc:  # noqa: BLE001 — surface a per-face error
-                logger.warning("IFS search failed for face %s: %s", idx, exc)
-                continue
+            except Exception as exc:
+                if getattr(exc, "code", None) == "face_not_found":
+                    logger.warning("IFS search found no usable crop for face %s", idx)
+                    continue
+                # A model/transport failure is not a successful empty search.
+                # Let the review caller count it toward the task's face budget.
+                raise
 
             face_view = {
                 "face_index": idx,
