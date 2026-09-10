@@ -140,10 +140,10 @@ async def test_every_visual_request_image_including_montage_is_bounded(monkeypat
                     ),
                     cv2.IMREAD_COLOR,
                 )
-                assert max(pixels.shape[:2]) <= 960
+                assert max(pixels.shape[:2]) <= 896
                 shapes.append(pixels.shape[:2])
     if mode == "multi_image":
-        assert shapes == [(960, 720), (540, 960), (480, 640)]
+        assert shapes == [(896, 672), (504, 896), (480, 640)]
 
 
 @pytest.mark.asyncio

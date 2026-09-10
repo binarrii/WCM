@@ -32,6 +32,7 @@ from .utils import (
 )
 
 _ANALYZE_MIN_FACE_PIXELS = 48
+_NSFW_MODEL_IMAGE_MAX_DIMENSION = 896
 _logger = logging.getLogger(__name__)
 
 
@@ -405,8 +406,8 @@ def _decode_nsfw_frame(image: str, max_width: int, max_height: int):
 
 def _encode_nsfw_frame(frame) -> str:
     height, width = frame.shape[:2]
-    if max(height, width) > 960:
-        scale = 960 / max(height, width)
+    if max(height, width) > _NSFW_MODEL_IMAGE_MAX_DIMENSION:
+        scale = _NSFW_MODEL_IMAGE_MAX_DIMENSION / max(height, width)
         frame = cv2.resize(
             frame,
             (max(1, round(width * scale)), max(1, round(height * scale))),
@@ -425,7 +426,9 @@ def _compose_nsfw_frames(
     if review_all:
         panels = []
         for index, image in enumerate(images):
-            frame = _decode_nsfw_frame(image, 960, 960)
+            frame = _decode_nsfw_frame(
+                image, _NSFW_MODEL_IMAGE_MAX_DIMENSION, _NSFW_MODEL_IMAGE_MAX_DIMENSION
+            )
             panel = cv2.copyMakeBorder(frame, 36, 4, 4, 4, cv2.BORDER_CONSTANT, value=(32, 32, 32))
             label = f"FRAME {index + 1}"
             if timestamps is not None:
@@ -467,7 +470,9 @@ def _compose_nsfw_frames(
         )
     if len(images) == 1:
         return images[0], "Only one target frame is provided."
-    target = _decode_nsfw_frame(images[0], 960, 960)
+    target = _decode_nsfw_frame(
+        images[0], _NSFW_MODEL_IMAGE_MAX_DIMENSION, _NSFW_MODEL_IMAGE_MAX_DIMENSION
+    )
     height, width = target.shape[:2]
     vertical = width >= height
     gap, header, border = 8, 36, 4
@@ -689,7 +694,12 @@ async def _call_nsfw_analysis(
     try:
         frames = []
         for image in images:
-            frame = await asyncio.to_thread(_decode_nsfw_frame, image, 960, 960)
+            frame = await asyncio.to_thread(
+                _decode_nsfw_frame,
+                image,
+                _NSFW_MODEL_IMAGE_MAX_DIMENSION,
+                _NSFW_MODEL_IMAGE_MAX_DIMENSION,
+            )
             frames.append(await asyncio.to_thread(_encode_nsfw_frame, frame))
     except Exception as exc:
         raise NsfwAnalysisError("NSFW 窗口图片解码失败") from exc
