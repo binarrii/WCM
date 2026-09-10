@@ -85,6 +85,10 @@ const eventsRef = ref(null);
 const jsonInputRef = ref(null);
 const timelineWidth = ref(0);
 const eventRows = new Map();
+const eventDescriptions = new Map();
+const expandedDescriptions = ref(new Set());
+const longDescriptions = ref(new Set());
+let descriptionResizeObserver;
 let resizeObserver;
 let panelResizeObserver;
 const playerPanelHeight = ref(0);
@@ -112,6 +116,35 @@ const markerStyle = index => {
 const setEventRow = (id, element) => {
   if (element) eventRows.set(id, element);
   else eventRows.delete(id);
+};
+const measureDescription = (id, element) => {
+  if (!element.isConnected) return;
+  const style = getComputedStyle(element);
+  const maxHeight = parseFloat(style.lineHeight) * parseInt(style.getPropertyValue('--description-lines'), 10);
+  if (element.scrollHeight > maxHeight + 1) longDescriptions.value.add(id);
+  else {
+    longDescriptions.value.delete(id);
+    expandedDescriptions.value.delete(id);
+  }
+};
+const setEventDescription = (id, element) => {
+  const previous = eventDescriptions.get(id);
+  if (previous !== element) {
+    if (previous) descriptionResizeObserver?.unobserve(previous);
+    if (element) {
+      eventDescriptions.set(id, element);
+      descriptionResizeObserver?.observe(element);
+    } else eventDescriptions.delete(id);
+  }
+  if (element) nextTick(() => measureDescription(id, element));
+};
+const selectEvent = index => {
+  const id = visibleMarkers.value[index]?.id;
+  if (longDescriptions.value.has(id)) {
+    if (expandedDescriptions.value.has(id)) expandedDescriptions.value.delete(id);
+    else expandedDescriptions.value.add(id);
+  }
+  return jump(index);
 };
 const revealEvent = (id) => {
   const row = eventRows.get(id);
@@ -143,6 +176,8 @@ const jump = async (index) => {
 const loadResults = (payload, { collapseSetup = false } = {}) => {
   const normalized = normalizeResults(payload);
   selectedMarker.value = '';
+  expandedDescriptions.value.clear();
+  longDescriptions.value.clear();
   pendingSeek.value = null;
   rawResults.value = payload;
   markers.value = normalized;
@@ -333,7 +368,12 @@ const observePlayerPanel = (element) => {
 watch(category, () => {
   eventRows.clear();
   selectedMarker.value = '';
-  nextTick(updateWidth);
+  expandedDescriptions.value.clear();
+  longDescriptions.value.clear();
+  nextTick(() => {
+    for (const [id, element] of eventDescriptions) measureDescription(id, element);
+    updateWidth();
+  });
 });
 watch(timelineRef, observeTimeline, { flush: 'post' });
 watch(playerPanelRef, observePlayerPanel, { flush: 'post' });
@@ -346,6 +386,10 @@ watch(videoRef, element => {
   updateVideoRect();
 }, { flush: 'post' });
 onMounted(() => {
+  descriptionResizeObserver = new ResizeObserver(entries => {
+    for (const { target } of entries) measureDescription(target.dataset.markerId, target);
+  });
+  for (const element of eventDescriptions.values()) descriptionResizeObserver.observe(element);
   videoResizeObserver = new ResizeObserver(updateVideoRect);
   if (videoRef.value) videoResizeObserver.observe(videoRef.value);
   resizeObserver = new ResizeObserver(updateWidth);
@@ -362,6 +406,7 @@ onBeforeUnmount(() => {
   videoResizeObserver?.disconnect();
   resizeObserver?.disconnect();
   panelResizeObserver?.disconnect();
+  descriptionResizeObserver?.disconnect();
 });
 </script>
 
@@ -457,7 +502,11 @@ onBeforeUnmount(() => {
       <aside class="review-events-panel">
         <div class="events-header"><h2>{{ visibleMarkers.length }} 条标记 <small>· 共 {{ markers.length }} 条</small></h2><label><span>类别</span><select v-model="category"><option value="">全部类别</option><option v-for="value in categories" :key="value" :value="value">{{ value }}</option></select></label></div>
         <div ref="eventsRef" class="review-events">
-          <button v-for="(marker, index) in visibleMarkers" :key="marker.id" :ref="element => setEventRow(marker.id, element)" type="button" :class="['review-event', { active: markerActive(marker), selected: selectedMarker === marker.id }]" :aria-pressed="selectedMarker === marker.id" @click="jump(index)"><strong>{{ marker.timestamp }}</strong><span>{{ details(marker) }}</span></button>
+          <button v-for="(marker, index) in visibleMarkers" :key="marker.id" :ref="element => setEventRow(marker.id, element)" type="button" :class="['review-event', { active: markerActive(marker), selected: selectedMarker === marker.id }]" :aria-pressed="selectedMarker === marker.id" :aria-expanded="longDescriptions.has(marker.id) ? expandedDescriptions.has(marker.id) : undefined" @click="selectEvent(index)">
+            <strong>{{ marker.timestamp }}</strong>
+            <span :ref="element => setEventDescription(marker.id, element)" :data-marker-id="marker.id" :class="['review-event-description', { expanded: expandedDescriptions.has(marker.id) }]">{{ details(marker) }}</span>
+            <span v-if="longDescriptions.has(marker.id)" class="review-event-toggle">{{ expandedDescriptions.has(marker.id) ? '收起全文 ▴' : '展开全文 ▾' }}</span>
+          </button>
           <div v-if="rawResults != null && !visibleMarkers.length" class="empty-review"><Video /><p>没有审核标记</p><small>无标记不代表内容安全，请结合人工复核。</small></div>
         </div>
       </aside>

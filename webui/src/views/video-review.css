@@ -74,7 +74,9 @@
 .review-event:hover { border-color: var(--border-hover); }
 .review-event.active { background: var(--status-yellow-bg); border-color: var(--status-yellow); }
 .review-event strong { display: block; margin-bottom: 5px; color: var(--status-yellow); font-size: .78rem; font-variant-numeric: tabular-nums; }
-.review-event span { display: block; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font-size: .74rem; line-height: 1.55; }
+.review-event-description { --description-lines: 15; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--description-lines); line-clamp: var(--description-lines); overflow: hidden; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font-size: .74rem; line-height: 1.55; }
+.review-event-description.expanded { display: block; -webkit-line-clamp: unset; line-clamp: unset; overflow: visible; }
+.review-event-toggle { display: block; margin-top: 8px; color: var(--color-primary); font-size: .7rem; }
 .review-empty-state { min-height: 380px; display: grid; place-content: center; justify-items: center; padding: 30px; text-align: center; }
 .review-empty-state > svg { width: 46px; height: 46px; margin-bottom: 14px; color: var(--color-primary); }
 .review-empty-state h2 { font: 700 1.05rem var(--font-display); }
