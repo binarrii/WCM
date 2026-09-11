@@ -20,7 +20,7 @@ export const taskProgress = task => {
   );
   const phase = finished ? 'finished' : task?.status === 'failed' ? 'failed' : progress.phase;
   const percent = finished ? 100 : finite(progress.percent) ? Math.max(0, Math.min(99, progress.percent)) : null;
-  const label = { queued: '排队中', downloading: '下载中', reviewing: '审核中', saving: '保存结果', finished: '处理结束', failed: '已停止' }[phase] || '等待进度';
+  const label = { queued: '排队中', downloading: '下载中', reviewing: '审核中', resampling: '审核收尾', saving: '保存结果', finished: '处理结束', failed: '已停止' }[phase] || '等待进度';
   const details = [];
   if (finite(progress.completed_windows)) details.push(`窗口 ${progress.completed_windows}${finite(progress.total_windows) ? ` / ${progress.total_windows}` : ''}`);
   if (finite(progress.completed_samples)) details.push(`采样 ${progress.completed_samples}${finite(progress.total_samples) ? ` / ${progress.total_samples}` : ''}`);
@@ -31,5 +31,18 @@ export const taskProgress = task => {
     samples: `采样点 ${window.sample_timestamps.map(sampleTime).join('、')}`,
     stages: Object.entries(window.stages || {}).map(([stage, samples]) => `${stageLabels[stage] || stage}：${samples.map(sampleTime).join('、')}`).join('；')
   }));
-  return { label, percent, details: details.join(' · '), windows, active: task?.status === 'processing' };
+  const rawSubProgress = progress.sub_progress;
+  const subProgress = task?.status === 'processing' && phase === 'resampling'
+    && rawSubProgress?.stage === 'face_resampling' && finite(rawSubProgress.total) && rawSubProgress.total > 0
+    ? (() => {
+        const completed = finite(rawSubProgress.completed)
+          ? Math.max(0, Math.min(rawSubProgress.total, rawSubProgress.completed)) : 0;
+        return {
+          label: '困难人脸补采',
+          percent: completed / rawSubProgress.total * 100,
+          details: `${completed} / ${rawSubProgress.total} 帧`
+        };
+      })()
+    : null;
+  return { label, percent, details: details.join(' · '), windows, subProgress, active: task?.status === 'processing' };
 };

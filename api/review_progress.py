@@ -33,6 +33,7 @@ class ReviewProgress:
         self.finished = {}
         self.active_windows = {}
         self.last_completed_window = None
+        self.sub_progress = None
         self.percent = None
         self.lock = asyncio.Lock()
         self.sequence = 0
@@ -104,11 +105,34 @@ class ReviewProgress:
         self.sampling_complete = True
         await self.report(force=True)
 
+    async def begin_face_resampling(self, total):
+        self.phase = "resampling"
+        self.sub_progress = {
+            "stage": "face_resampling",
+            "completed": 0,
+            "total": max(0, int(total)),
+        }
+        await self.report(force=True)
+
+    async def advance_face_resampling(self):
+        if self.sub_progress is None:
+            return
+        self.sub_progress["completed"] = min(
+            self.sub_progress["total"], self.sub_progress["completed"] + 1
+        )
+        await self.report()
+
+    async def finish_face_resampling(self):
+        if self.sub_progress is None:
+            return
+        self.sub_progress["completed"] = self.sub_progress["total"]
+        await self.report(force=True)
+
     def snapshot(self):
         percent = None
         if self.phase == "finished":
             percent = 100.0
-        elif self.phase == "saving":
+        elif self.phase in {"resampling", "saving"}:
             percent = 99.0
         elif self.phase == "reviewing":
             if self.duration:
@@ -117,6 +141,14 @@ class ReviewProgress:
                 percent = min(99.0, self.completed_windows / self.queued_windows * 100)
         if percent is not None:
             self.percent = max(self.percent or 0, percent)
+        sub_progress = None
+        if self.sub_progress is not None:
+            total = self.sub_progress["total"]
+            completed = self.sub_progress["completed"]
+            sub_progress = {
+                **self.sub_progress,
+                "percent": round(completed / total * 100, 1) if total else 100.0,
+            }
         return {
             "phase": self.phase,
             "percent": round(self.percent, 1) if self.percent is not None else None,
@@ -131,6 +163,7 @@ class ReviewProgress:
                 for _, window in sorted(self.active_windows.items())
             ],
             "last_completed_window": self.last_completed_window,
+            "sub_progress": sub_progress,
             "elapsed_seconds": round(time.monotonic() - self.started, 1),
         }
 
@@ -150,7 +183,7 @@ class ReviewProgress:
             percent = f"{data['percent']:.1f}%" if data["percent"] is not None else "unknown"
             logger.info(
                 "Review progress: task=%s phase=%s progress=%s windows=%s/%s samples=%s/%s "
-                "video_seconds=%.3f/%s elapsed_seconds=%.1f active_windows=%s",
+                "video_seconds=%.3f/%s elapsed_seconds=%.1f active_windows=%s sub_progress=%s",
                 self.task_id or "standalone",
                 self.phase,
                 percent,
@@ -162,6 +195,7 @@ class ReviewProgress:
                 self.duration,
                 data["elapsed_seconds"],
                 json.dumps(data["active_windows"], ensure_ascii=False),
+                json.dumps(data["sub_progress"], ensure_ascii=False),
             )
             if persist:
                 try:

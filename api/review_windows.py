@@ -388,6 +388,9 @@ async def analyze_video(
         if not requests:
             return 0
 
+        if progress is not None:
+            await progress.begin_face_resampling(len(requests))
+
         try:
             frames = await asyncio.to_thread(
                 read_video_frames_near,
@@ -402,57 +405,63 @@ async def analyze_video(
         limit = asyncio.Semaphore(settings.face_neighbor_concurrency)
 
         async def review(target, result):
-            frame = by_target.get(round(target, 6))
-            if frame is None:
-                return
-            primary_times = {
-                round(float(record.get("frame_time")), 6)
-                for record in result.get("face_records", ())
-                if record.get("frame_time") is not None
-            }
-            if any(abs(frame.timestamp - value) < 0.05 for value in primary_times):
-                return
-            key = (frame.image.shape, _digest(frame.image.tobytes()))
+            try:
+                frame = by_target.get(round(target, 6))
+                if frame is None:
+                    return
+                primary_times = {
+                    round(float(record.get("frame_time")), 6)
+                    for record in result.get("face_records", ())
+                    if record.get("frame_time") is not None
+                }
+                if any(abs(frame.timestamp - value) < 0.05 for value in primary_times):
+                    return
+                key = (frame.image.shape, _digest(frame.image.tobytes()))
 
-            async def operation():
-                async with limit:
-                    return await face_cache.get(
-                        key,
-                        lambda: handlers._video_face_task(
-                            engine,
-                            frame.image,
-                            top_k,
-                            threshold,
-                            frame.timestamp,
-                            auxiliary=True,
-                        ),
-                    )
+                async def operation():
+                    async with limit:
+                        return await face_cache.get(
+                            key,
+                            lambda: handlers._video_face_task(
+                                engine,
+                                frame.image,
+                                top_k,
+                                threshold,
+                                frame.timestamp,
+                                auxiliary=True,
+                            ),
+                        )
 
-            records = await handlers._review_stage(
-                "face", frame.timestamp, operation, errors, default=[]
-            )
-            for face in records:
-                face = dict(face)
-                face["frame_time"] = frame.timestamp
-                location = face.get("face_location")
-                if location:
-                    sample = {
-                        "time_ms": round(frame.timestamp * 1000),
-                        "pts_seconds": frame.timestamp,
-                        "bbox": location,
-                        "auxiliary": True,
-                    }
-                    if frame.duration is not None:
-                        sample["duration_seconds"] = frame.duration
-                    if frame.frame_index is not None:
-                        sample["frame_index"] = frame.frame_index
-                    if face.get("similarity") is not None:
-                        sample["similarity"] = float(face["similarity"])
-                    face["_face_sample"] = sample
-                result["face_records"].append(face)
-            result["face_observations"].extend(getattr(records, "observations", ()))
+                records = await handlers._review_stage(
+                    "face", frame.timestamp, operation, errors, default=[]
+                )
+                for face in records:
+                    face = dict(face)
+                    face["frame_time"] = frame.timestamp
+                    location = face.get("face_location")
+                    if location:
+                        sample = {
+                            "time_ms": round(frame.timestamp * 1000),
+                            "pts_seconds": frame.timestamp,
+                            "bbox": location,
+                            "auxiliary": True,
+                        }
+                        if frame.duration is not None:
+                            sample["duration_seconds"] = frame.duration
+                        if frame.frame_index is not None:
+                            sample["frame_index"] = frame.frame_index
+                        if face.get("similarity") is not None:
+                            sample["similarity"] = float(face["similarity"])
+                        face["_face_sample"] = sample
+                    result["face_records"].append(face)
+                result["face_observations"].extend(getattr(records, "observations", ()))
+            finally:
+                if progress is not None:
+                    await progress.advance_face_resampling()
 
         await asyncio.gather(*(review(target, result) for target, result in requests))
+        if progress is not None:
+            await progress.finish_face_resampling()
         for result in completed:
             rebuild_face_hits(result)
         return len(frames)

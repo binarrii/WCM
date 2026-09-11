@@ -17,6 +17,16 @@ const expanded = ref(false);
     <div class="progress-track" role="progressbar" aria-label="审核任务处理进度" :aria-valuenow="state.percent ?? undefined" aria-valuemin="0" aria-valuemax="100" :aria-valuetext="`${state.label} ${state.percent ?? ''} ${state.details}`" title="审核中按已处理视频位置估算；处理结束不代表内容安全" :class="{ indeterminate: state.percent == null && state.active }">
       <span :style="{ width: `${state.percent ?? 0}%` }"></span>
     </div>
+    <div v-if="state.subProgress" class="sub-progress">
+      <div class="sub-progress-heading">
+        <span>{{ state.subProgress.label }}</span>
+        <small>{{ state.subProgress.details }}</small>
+        <strong>{{ state.subProgress.percent.toFixed(1) }}%</strong>
+      </div>
+      <div class="progress-track sub-progress-track" role="progressbar" :aria-label="`${state.subProgress.label}进度`" :aria-valuenow="state.subProgress.percent" aria-valuemin="0" aria-valuemax="100" :aria-valuetext="`${state.subProgress.label} ${state.subProgress.details}`">
+        <span :style="{ width: `${state.subProgress.percent}%` }"></span>
+      </div>
+    </div>
     <small v-if="!collapsible && state.details" :title="state.details">{{ state.details }}</small>
     <div v-if="state.windows.length && (!collapsible || expanded)" :id="`review-progress-${task.id}`" class="active-windows">
     <div v-for="window in state.windows" :key="window.title" class="active-window">
@@ -38,6 +48,11 @@ const expanded = ref(false);
 .progress-toggle:focus-visible { outline: 2px solid var(--progress-color); outline-offset: 2px; }
 .progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--bg-secondary, #e2e8f0); }
 .progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--progress-color); transition: width .3s ease; }
+.sub-progress { margin-top: 9px; padding-left: 12px; border-left: 2px solid color-mix(in srgb, var(--progress-color) 35%, transparent); }
+.sub-progress-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; }
+.sub-progress-heading small { display: inline; margin: 0; color: inherit; }
+.sub-progress-heading strong { margin-left: auto; color: var(--progress-color); font-variant-numeric: tabular-nums; }
+.sub-progress-track { height: 4px; opacity: .85; }
 .indeterminate span { width: 35% !important; animation: review-progress-pulse 1.5s ease-in-out infinite; }
 .completed { --progress-color: var(--status-green, #10b981); }
 .partial { --progress-color: var(--status-yellow, #f59e0b); }

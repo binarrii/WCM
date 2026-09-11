@@ -7,7 +7,7 @@ import httpx
 import numpy as np
 import pytest
 
-from api import handlers, review_windows
+from api import handlers, review_progress, review_windows
 from api.review_coverage import ReviewCoverage
 from api.utils import ReviewWindowPlanner, VideoFrame, VideoWindow
 from tests.test_nsfw_target_review import caption, image, install_client
@@ -411,8 +411,17 @@ async def test_difficult_face_adds_only_budgeted_neighbor_frame(monkeypatch):
     monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value=""))
     monkeypatch.setattr(handlers, "_call_nsfw_analysis", AsyncMock(return_value="普通画面"))
     monkeypatch.setattr(handlers, "_call_llm_guard", AsyncMock(return_value={"safe": True}))
+    snapshots = []
 
-    rows = await handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5)
+    async def update_progress(task_id, data):
+        snapshots.append(data)
+
+    monkeypatch.setattr(review_progress.review_task_store, "update_progress", update_progress)
+    progress = review_progress.ReviewProgress("task", interval=0)
+
+    rows = await handlers._process_analyze_media(
+        "https://fixture/video.mp4", 1, 5, 0.5, progress=progress
+    )
 
     # Three primary samples allow ceil(3 * 0.30) == one auxiliary call.
     assert requested == [0.8]
@@ -422,6 +431,14 @@ async def test_difficult_face_adds_only_budgeted_neighbor_frame(monkeypatch):
     assert person["recognition_status"] == "confirmed"
     assert person["evidence_count"] == 2
     assert any(sample.get("auxiliary") for sample in person["face_samples"])
+    resampling = [item for item in snapshots if item["phase"] == "resampling"]
+    assert resampling[0]["sub_progress"]["completed"] == 0
+    assert resampling[-1]["sub_progress"] == {
+        "stage": "face_resampling",
+        "completed": 1,
+        "total": 1,
+        "percent": 100.0,
+    }
 
 
 @pytest.mark.asyncio

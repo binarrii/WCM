@@ -22,6 +22,16 @@ test('each concurrent window exposes its selected samples and current module', (
   assert.equal(sampleTime(8.9999),'00:00:09.000');
 });
 
+test('difficult face resampling exposes a dedicated bounded sub-progress', () => {
+  const view=taskProgress({status:'processing',progress:{phase:'resampling',percent:99,sub_progress:{
+    stage:'face_resampling',completed:7,total:10,percent:70
+  }}});
+  assert.equal(view.label,'审核收尾');
+  assert.equal(view.percent,99);
+  assert.deepEqual(view.subProgress,{label:'困难人脸补采',percent:70,details:'7 / 10 帧'});
+  assert.equal(taskProgress({status:'completed',progress:{phase:'finished',sub_progress:{stage:'face_resampling',completed:10,total:10}}}).subProgress,null);
+});
+
 test('submission returns the task id before results and never resubmits on disconnect', async () => {
   let socket={send:()=>{},close:()=>{}};let id;
   const response=submitReview('ws://test',{},value=>id=value,()=>socket);

@@ -41,6 +41,29 @@ async def test_out_of_order_completion_keeps_active_samples_and_contiguous_posit
 
 
 @pytest.mark.asyncio
+async def test_face_resampling_reports_a_bounded_sub_progress(monkeypatch):
+    writes = AsyncMock()
+    monkeypatch.setattr(review_progress.review_task_store, "update_progress", writes)
+    progress = ReviewProgress("task", interval=0)
+
+    await progress.begin_face_resampling(3)
+    assert progress.snapshot()["phase"] == "resampling"
+    assert progress.snapshot()["percent"] == 99
+    assert progress.snapshot()["sub_progress"] == {
+        "stage": "face_resampling",
+        "completed": 0,
+        "total": 3,
+        "percent": 0.0,
+    }
+
+    await progress.advance_face_resampling()
+    await progress.finish_face_resampling()
+    assert progress.snapshot()["sub_progress"]["completed"] == 3
+    assert progress.snapshot()["sub_progress"]["percent"] == 100.0
+    assert writes.await_args.args[1]["sub_progress"]["percent"] == 100.0
+
+
+@pytest.mark.asyncio
 async def test_progress_is_throttled_isolated_and_cleans_up_heartbeat(monkeypatch):
     writes = AsyncMock()
     monkeypatch.setattr(review_progress.review_task_store, "update_progress", writes)
