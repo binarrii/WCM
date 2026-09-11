@@ -34,7 +34,9 @@ class VideoFrame:
 
     @cached_property
     def b64(self) -> str:
-        ok, buffer = cv2.imencode(".jpg", self.image, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        ok, buffer = cv2.imencode(
+            ".jpg", self.image, [cv2.IMWRITE_JPEG_QUALITY, settings.jpeg_quality]
+        )
         if not ok:
             raise ValueError("Could not encode sampled video frame")
         return base64.b64encode(buffer).decode("utf-8")

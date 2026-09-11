@@ -73,6 +73,8 @@
 | `WCM_NSFW_SCENE_CUT_THRESHOLD` | `27` | 颜色/亮度切镜阈值，更低会分出更多边界 |
 | `WCM_NSFW_IMAGE_MODE` | `auto` | 优先独立图片，仅在明确不支持多图时回退拼图；可强制 `multi_image` 或 `montage` |
 | `WCM_NSFW_VERIFY_TARGET` | `false` | 仅旧 `target` 模式适用，整窗模式始终不追加单目标复核 |
+| `WCM_REVIEW_WINDOW_CONCURRENCY` | `4` | 每个视频任务同时处理的采样窗口数 |
+| `WCM_JPEG_QUALITY` | `95` | 采样帧、视觉模型输入和人脸查询裁剪的 JPEG 质量 |
 
 Qwen 模型为 `WasuAI/Qwen3.8-27B-Abliterated`。整窗拼图保留各面板完整画面、相同分辨率上限和 `FRAME` 标识，仍审核全部面板。无关超时、鉴权或限流不会触发拼图请求。
 

@@ -103,8 +103,17 @@ async def test_review_entry_queues_and_releases_slots_after_failure_and_cancella
 
 def test_concurrency_configuration(monkeypatch):
     for field in ("review_task_concurrency", "review_window_concurrency"):
-        assert Settings.model_fields[field].default == (4 if field == "review_task_concurrency" else 3)
+        assert Settings.model_fields[field].default == 4
         with pytest.raises(ValidationError):
             Settings(_env_file=None, **{field: 0})
         monkeypatch.setenv(f"WCM_{field.upper()}", "3")
         assert getattr(Settings(_env_file=None), field) == 3
+
+
+def test_jpeg_quality_configuration(monkeypatch):
+    assert Settings.model_fields["jpeg_quality"].default == 95
+    for value in (0, 101):
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, jpeg_quality=value)
+    monkeypatch.setenv("WCM_JPEG_QUALITY", "94")
+    assert Settings(_env_file=None).jpeg_quality == 94

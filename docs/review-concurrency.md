@@ -6,15 +6,16 @@
 
 ```dotenv
 WCM_REVIEW_TASK_CONCURRENCY=4
-WCM_REVIEW_WINDOW_CONCURRENCY=3
+WCM_REVIEW_WINDOW_CONCURRENCY=4
+WCM_JPEG_QUALITY=95
 ```
 
-两项均为正整数，任务并发默认 4，窗口并发默认 3。
+任务并发和窗口并发默认均为 4。JPEG 压缩质量默认 95，有效范围为 1～100。
 
 - 任务上限覆盖 `/analyze_media` 的 HTTP 与 WebSocket 入口，从下载到结果保存占用一个名额。超出上限的任务显示“排队中”，等待空闲名额后开始下载。
 - 同一个 API 容器的 Gunicorn 进程共享任务名额，不随 worker 数量倍增。使用容器临时目录的文件锁，任务结束、异常、取消或进程退出都会释放名额；不要删除正在使用的锁文件。
 - 窗口上限按每个视频任务计算，`window` 和 `target` 两种综合审核模式都使用此配置。每个窗口内仍并发执行 face、OCR → guard、visual → guard。
-- 默认最多同时审核 4 个任务、12 个窗口。模型服务自身容量仍会影响实际吞吐。
+- 默认最多同时审核 4 个任务、16 个窗口。模型服务自身容量仍会影响实际吞吐。
 
 任务等待采用轮询竞争空闲名额，不保证严格 FIFO。等待任务依附当前 API 进程，不是重启后自动续跑的持久队列。单项 `/detect_sensitive`、`/detect_nsfw` 和人脸搜索接口不占综合审核任务名额。多容器副本各自有独立上限；当前部署为单 API 容器。
 

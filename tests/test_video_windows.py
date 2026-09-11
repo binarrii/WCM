@@ -38,6 +38,21 @@ class Capture:
         self.released = True
 
 
+def test_sampled_frame_uses_configured_jpeg_quality(monkeypatch):
+    original = cv2.imencode
+    parameters = []
+
+    def encode(extension, image, params=None):
+        parameters.append(params)
+        return original(extension, image, params)
+
+    monkeypatch.setattr(utils.settings, "jpeg_quality", 95)
+    monkeypatch.setattr(utils.cv2, "imencode", encode)
+
+    assert utils.VideoFrame(0, np.zeros((8, 8, 3), np.uint8)).b64
+    assert parameters == [[cv2.IMWRITE_JPEG_QUALITY, 95]]
+
+
 @pytest.mark.asyncio
 async def test_model_failure_records_every_unaudited_frame_and_releases_capture(monkeypatch):
     cap = Capture(2)

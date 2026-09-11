@@ -744,7 +744,7 @@ def _encode_crop(
         return None
     pil = Image.fromarray(crop)
     buf = io.BytesIO()
-    pil.save(buf, format="JPEG", quality=92)
+    pil.save(buf, format="JPEG", quality=settings.jpeg_quality)
     return buf.getvalue()
 
 

@@ -46,6 +46,7 @@ InsightFace Server 0.2.0 对外提供的是 0～1 的姿态质量分，不是校
 | `WCM_FACE_MAX_EXTRA_CALL_RATIO` | `0.30` | 全视频补帧/主选中帧目标上限 |
 | `WCM_FACE_NEIGHBOR_CONCURRENCY` | `2` | 补帧人脸请求并发 |
 | `WCM_FACE_GALLERY_TARGET_SAMPLES` | `5` | 图库每人的目标样本数 |
+| `WCM_JPEG_QUALITY` | `95` | 包括侧脸查询裁剪在内的 JPEG 编码质量 |
 
 紧急回滚只需把 `WCM_FACE_PROFILE_OPTIMIZATION=false` 后重建 API 容器，不需要迁移数据库或改写历史结果。
 

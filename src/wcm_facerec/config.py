@@ -99,7 +99,8 @@ class Settings(BaseSettings):
     api_port: int = 8000
     max_file_size_mb: int = 100
     review_task_concurrency: int = Field(default=4, ge=1)
-    review_window_concurrency: int = Field(default=3, ge=1)
+    review_window_concurrency: int = Field(default=4, ge=1)
+    jpeg_quality: int = Field(default=95, ge=1, le=100)
     visual_timeout_s: float = Field(default=50.0, gt=0)
     ocr_timeout_s: float = Field(default=10.0, gt=0)
     guard_timeout_s: float = Field(default=10.0, gt=0)

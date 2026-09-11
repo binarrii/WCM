@@ -422,7 +422,7 @@ def _encode_nsfw_frame(frame) -> str:
             (max(1, round(width * scale)), max(1, round(height * scale))),
             interpolation=cv2.INTER_AREA,
         )
-    ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.jpeg_quality])
     if not ok:
         raise ValueError("Could not encode NSFW frame")
     return base64.b64encode(encoded).decode("ascii")
@@ -1207,7 +1207,9 @@ async def _process_analyze_media(
         else:
             small_frame = frame
 
-        _, buffer = cv2.imencode(".jpg", small_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        _, buffer = cv2.imencode(
+            ".jpg", small_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.jpeg_quality]
+        )
         b64_img = base64.b64encode(buffer).decode("utf-8")
 
         if coverage is not None:
