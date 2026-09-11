@@ -505,7 +505,7 @@ onBeforeUnmount(() => {
           <button v-for="(marker, index) in visibleMarkers" :key="marker.id" :ref="element => setEventRow(marker.id, element)" type="button" :class="['review-event', { active: markerActive(marker), selected: selectedMarker === marker.id }]" :aria-pressed="selectedMarker === marker.id" :aria-expanded="longDescriptions.has(marker.id) ? expandedDescriptions.has(marker.id) : undefined" @click="selectEvent(index)">
             <strong>{{ marker.timestamp }}</strong>
             <span :ref="element => setEventDescription(marker.id, element)" :data-marker-id="marker.id" :class="['review-event-description', { expanded: expandedDescriptions.has(marker.id) }]">{{ details(marker) }}</span>
-            <span v-if="longDescriptions.has(marker.id)" class="review-event-toggle">{{ expandedDescriptions.has(marker.id) ? '收起全文 ▴' : '展开全文 ▾' }}</span>
+            <span v-if="longDescriptions.has(marker.id)" class="review-event-toggle">{{ expandedDescriptions.has(marker.id) ? '收起 ▴' : '展开 ▾' }}</span>
           </button>
           <div v-if="rawResults != null && !visibleMarkers.length" class="empty-review"><Video /><p>没有审核标记</p><small>无标记不代表内容安全，请结合人工复核。</small></div>
         </div>
