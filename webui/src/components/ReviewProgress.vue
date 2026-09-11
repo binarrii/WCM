@@ -60,8 +60,8 @@ const expanded = ref(false);
 small { display: block; margin-top: 7px; font-size: 11px; line-height: 1.5; }
 .active-windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 8px 24px; }
 .active-window { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border-color, #e2e8f0); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.active-window small { margin-top: 3px; }
-.running-stage { color: var(--progress-color); }
+.active-window small { margin-top: 3px; font-size: 10px; }
+.running-stage { min-height: 3em; color: var(--progress-color); line-height: 1.5; }
 @keyframes review-progress-pulse { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
 @media (prefers-reduced-motion: reduce) { .indeterminate span { animation: none; } .progress-track span { transition: none; } }
 </style>

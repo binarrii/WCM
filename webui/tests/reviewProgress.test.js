@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { taskProgress, sampleTime } from '../src/services/reviewProgress.js';
 import { reviewSocketUrl, submitReview } from '../src/services/reviewSubmission.js';
+
+const progressComponent = readFileSync(new URL('../src/components/ReviewProgress.vue', import.meta.url), 'utf8');
 
 test('unknown progress is indeterminate; only finished work displays 100%', () => {
   assert.equal(taskProgress({status:'processing'}).percent, null);
@@ -20,6 +23,11 @@ test('each concurrent window exposes its selected samples and current module', (
   assert.match(view.windows[0].stages,/文字：00:00:22.000/);
   assert.match(view.windows[1].stages,/人脸：00:00:24.000/);
   assert.equal(sampleTime(8.9999),'00:00:09.000');
+});
+
+test('window details use the smaller type size and reserve two running-stage lines', () => {
+  assert.match(progressComponent, /\.active-window small\s*\{[^}]*font-size:\s*10px[^}]*\}/);
+  assert.match(progressComponent, /\.running-stage\s*\{[^}]*min-height:\s*3em[^}]*line-height:\s*1\.5[^}]*\}/);
 });
 
 test('difficult face resampling exposes a dedicated bounded sub-progress', () => {

@@ -20,3 +20,8 @@ test('parameter panel can collapse and completed results collapse it automatical
   assert.match(css, /\.setup-body-shell\.collapsed\s*\{[^}]*grid-template-rows:\s*0fr[^}]*\}/);
   assert.match(css, /\.setup-summary\s*\{[^}]*display:\s*flex[^}]*\}/);
 });
+
+test('Guard verdict metadata is not rendered as a result-card badge', () => {
+  assert.doesNotMatch(component, /hasControversialVerdict|review-event-badge|Guard 模型判定：Controversial/);
+  assert.doesNotMatch(css, /review-event-badge|controversial-badge/);
+});

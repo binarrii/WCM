@@ -113,6 +113,10 @@ def merge_window_results(completed, max_gap):
                 row["description"] = "\n\n".join(
                     dict.fromkeys(e["description"] for e in row["evidence"])
                 )
+            if row.get("guard_verdict") == "controversial" or any(
+                hit.get("guard_verdict") == "controversial" for hit in hits
+            ):
+                row["guard_verdict"] = "controversial"
             row["timestamp"] = handlers._format_interval(start, result["end"])
             for hit in hits:
                 for sample in hit.get("face_samples", []):
@@ -163,11 +167,14 @@ async def analyze_video(
         face_records = []
         face_observations = []
 
-        def add(source, category, description):
+        def add(source, category, description, *, guard_verdict=None):
             key = (source, category, description)
-            return hits.setdefault(
+            hit = hits.setdefault(
                 key, {"source": source, "category": category, "description": description}
             )
+            if guard_verdict:
+                hit["guard_verdict"] = guard_verdict
+            return hit
 
         async def visual():
             if not include_visual:
@@ -199,7 +206,12 @@ async def analyze_video(
                 end_timestamp=window.end,
             )
             if result:
-                add("visual", result["category"], result["text"])
+                add(
+                    "visual",
+                    result["category"],
+                    result["text"],
+                    guard_verdict=result.get("guard_verdict"),
+                )
             if progress is not None:
                 progress.finish_stage(window.index, "visual")
 
@@ -215,15 +227,23 @@ async def analyze_video(
                     if content:
                         verdict = await guard(content)
                         if not verdict["safe"]:
-                            return {
+                            finding = {
                                 "text": content,
                                 "category": verdict.get("category", "文本违规"),
                             }
+                            if verdict.get("guard_verdict"):
+                                finding["guard_verdict"] = verdict["guard_verdict"]
+                            return finding
                     return None
 
                 result = await handlers._review_stage("ocr", frame.timestamp, operation, errors)
                 if result:
-                    add("ocr", result["category"], result["text"])
+                    add(
+                        "ocr",
+                        result["category"],
+                        result["text"],
+                        guard_verdict=result.get("guard_verdict"),
+                    )
             if progress is not None:
                 progress.finish_stage(window.index, "ocr")
 

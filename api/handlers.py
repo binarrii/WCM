@@ -159,7 +159,10 @@ async def _review_visual(images, timestamps, *, review_all=False, guard_call=Non
     )
     guard = await (guard_call or _call_llm_guard)(description)
     if not guard["safe"]:
-        return {"category": guard.get("category", "视觉违规"), "text": description}
+        finding = {"category": guard.get("category", "视觉违规"), "text": description}
+        if guard.get("guard_verdict"):
+            finding["guard_verdict"] = guard["guard_verdict"]
+        return finding
     return None
 
 
@@ -302,7 +305,7 @@ async def _request_ocr(base64_image):
 
 async def _call_llm_guard(text: str) -> dict:
     if not text.strip():
-        return {"safe": True, "category": ""}
+        return {"safe": True, "category": "", "guard_verdict": "safe"}
 
     return await _request_guard(text)
 
@@ -354,7 +357,15 @@ async def _request_guard(text):
             raise ModelResponseError(
                 "guard", "missing_safety_verdict", "安全判定模型未返回可识别的 Safety 判定"
             )
-        is_safe = all(verdict.lower() == "safe" for verdict in verdicts)
+        normalized_verdicts = [verdict.lower() for verdict in verdicts]
+        guard_verdict = (
+            "controversial"
+            if "controversial" in normalized_verdicts
+            else "unsafe"
+            if "unsafe" in normalized_verdicts
+            else "safe"
+        )
+        is_safe = guard_verdict == "safe"
         category = ""
 
         for line in analysis.split("\n"):
@@ -395,7 +406,11 @@ async def _request_guard(text):
         if mapped_categories:
             category = "、".join(str(mc) for mc in mapped_categories)
 
-        return {"safe": is_safe, "category": category}
+        return {
+            "safe": is_safe,
+            "category": category,
+            "guard_verdict": guard_verdict,
+        }
 
 
 def _decode_nsfw_frame(image: str, max_width: int, max_height: int):

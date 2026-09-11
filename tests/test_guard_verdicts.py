@@ -29,28 +29,42 @@ def install_guard_response(monkeypatch, content):
 @pytest.mark.parametrize(
     "response,expected",
     [
-        ("Safety: Safe", {"safe": True, "category": ""}),
+        ("Safety: Safe", {"safe": True, "category": "", "guard_verdict": "safe"}),
         (
             "Safety: Unsafe\nCategories: Sexual Content or Sexual Acts",
-            {"safe": False, "category": "色情或性行为"},
+            {"safe": False, "category": "色情或性行为", "guard_verdict": "unsafe"},
         ),
         (
             "Safety: Controversial\nCategories: Sexual Content or Sexual Acts",
-            {"safe": False, "category": "色情或性行为"},
+            {
+                "safe": False,
+                "category": "色情或性行为",
+                "guard_verdict": "controversial",
+            },
         ),
         (
             "  SAFETY : cOnTrOvErSiAl  \nCategories: 裸露",
-            {"safe": False, "category": "裸露"},
+            {"safe": False, "category": "裸露", "guard_verdict": "controversial"},
         ),
-        ("Safety: Controversial", {"safe": False, "category": "未知敏感内容"}),
-        ("Safety: Unsafe", {"safe": False, "category": "未知敏感内容"}),
+        (
+            "Safety: Controversial",
+            {
+                "safe": False,
+                "category": "未知敏感内容",
+                "guard_verdict": "controversial",
+            },
+        ),
+        (
+            "Safety: Unsafe",
+            {"safe": False, "category": "未知敏感内容", "guard_verdict": "unsafe"},
+        ),
         (
             "<think>Safety: Controversial</think>\nSafety: Safe",
-            {"safe": True, "category": ""},
+            {"safe": True, "category": "", "guard_verdict": "safe"},
         ),
         (
             "Safety: Safe\nExplanation: the word controversial is not a verdict here",
-            {"safe": True, "category": ""},
+            {"safe": True, "category": "", "guard_verdict": "safe"},
         ),
     ],
 )

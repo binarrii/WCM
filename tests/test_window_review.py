@@ -182,6 +182,32 @@ async def test_changed_subtitles_and_new_people_in_later_frames_are_kept_and_reu
 
 
 @pytest.mark.asyncio
+async def test_controversial_guard_verdict_reaches_visual_and_ocr_findings(monkeypatch):
+    install_video(monkeypatch, [sample(0)])
+    monkeypatch.setattr(handlers, "_face_task", AsyncMock(return_value=[]))
+    monkeypatch.setattr(handlers, "_call_nsfw_analysis", AsyncMock(return_value="画面描述"))
+    monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value="字幕文本"))
+    monkeypatch.setattr(
+        handlers,
+        "_call_llm_guard",
+        AsyncMock(
+            return_value={
+                "safe": False,
+                "category": "需复核",
+                "guard_verdict": "controversial",
+            }
+        ),
+    )
+
+    rows = await handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5)
+
+    assert {(row["source"], row["guard_verdict"]) for row in rows} == {
+        ("visual", "controversial"),
+        ("ocr", "controversial"),
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["ocr", "face", "visual"])
 async def test_failed_module_keeps_other_findings_and_later_windows(monkeypatch, failure):
     install_video(monkeypatch, [sample(i, i * 30) for i in range(6)])
@@ -285,6 +311,47 @@ def test_adjacent_windows_bridge_sampling_gap_despite_different_descriptions():
     assert len([r for r in rows if r["source"] == "face"]) == 2
     for change in ({"scene_id": 5}, {"index": 2}, {"start": 19}):
         assert len(review_windows.merge_window_results([first, {**second, **change}], 1.1)) == 6
+
+
+def test_controversial_guard_verdict_survives_adjacent_window_merging():
+    completed = [
+        {
+            "index": 0,
+            "scene_id": 1,
+            "start": 0,
+            "end": 1,
+            "hits": [
+                {
+                    "source": "visual",
+                    "category": "需复核",
+                    "description": "画面甲",
+                    "guard_verdict": "unsafe",
+                }
+            ],
+        },
+        {
+            "index": 1,
+            "scene_id": 1,
+            "start": 2,
+            "end": 3,
+            "hits": [
+                {
+                    "source": "visual",
+                    "category": "需复核",
+                    "description": "画面乙",
+                    "guard_verdict": "controversial",
+                }
+            ],
+        },
+    ]
+
+    [row] = review_windows.merge_window_results(completed, 1.1)
+
+    assert row["guard_verdict"] == "controversial"
+    assert [item["guard_verdict"] for item in row["evidence"]] == [
+        "unsafe",
+        "controversial",
+    ]
 
 
 def test_other_categories_or_sources_cannot_bridge_a_safe_category_window():

@@ -59,6 +59,15 @@ test('all findings at the clicked time become active together', () => {
   );
 });
 
+test('controversial Guard verdicts survive normalization and export', () => {
+  const [controversial] = normalizeResults([
+    { timestamp: '6~7', category: '画面', description: '需人工复核', guard_verdict: 'controversial' }
+  ]);
+
+  assert.equal(controversial.findings[0].guard_verdict, 'controversial');
+  assert.equal(serializeResults([controversial])[0].guard_verdict, 'controversial');
+});
+
 test('minimum similarity maps to the legacy distance contract', () => {
   assert.equal(similarityToDistance(0.5), 0.5);
   assert.equal(similarityToDistance(0.1), 0.9);
