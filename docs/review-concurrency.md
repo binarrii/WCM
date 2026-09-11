@@ -2,12 +2,12 @@
 
 相关文档：[审核并发测试记录](review-concurrency-tests.md)、[跨进程共享机制](cross-process-sharing.md)。
 
-在部署目录 `.env` 设置后，重建 API 容器使配置生效：
+在 WebUI 的“参数配置”页面修改以下运行时参数，保存后即可生效：
 
-```dotenv
-WCM_REVIEW_TASK_CONCURRENCY=4
-WCM_REVIEW_WINDOW_CONCURRENCY=4
-WCM_JPEG_QUALITY=95
+```text
+review_task_concurrency=4
+review_window_concurrency=4
+jpeg_quality=95
 ```
 
 任务并发和窗口并发默认均为 4。JPEG 压缩质量默认 95，有效范围为 1～100。
@@ -35,13 +35,15 @@ WCM_JPEG_QUALITY=95
 
 ## 调用超时
 
-| 模型 | 每轮默认总时限 | 环境变量 |
+| 模型 | 每轮默认总时限 | 参数键 |
 |---|---:|---|
-| visual | 50 秒 | `WCM_VISUAL_TIMEOUT_S` |
-| OCR | 10 秒 | `WCM_OCR_TIMEOUT_S` |
-| guard | 10 秒 | `WCM_GUARD_TIMEOUT_S` |
-| face | 10 秒 | `WCM_INSIGHTFACE_TIMEOUT_S` |
+| visual | 50 秒 | `visual_timeout_s` |
+| OCR | 10 秒 | `ocr_timeout_s` |
+| guard | 10 秒 | `guard_timeout_s` |
+| face | 10 秒 | `insightface_timeout_s` |
 
-HTTP 客户端超时及每轮异步总时限均使用这些配置，修改后重建 API 容器生效；显式环境变量会覆盖默认值。重试重新获得完整时限，visual 两轮的时限预算合计最多 100 秒，其余模型合计最多 20 秒（另有取消清理开销）。每轮总时限包含整个逻辑模型调用（OCR 流式读取、视觉兼容回退、人脸检索及结果补充），不会因持续返回少量数据而无限延长。视频下载使用原有独立超时。
+HTTP 客户端超时及每轮异步总时限均使用这些配置，保存后当前 worker
+立即刷新，其他 worker 最迟约 2 秒同步。重试重新获得完整时限，visual
+两轮的时限预算合计最多 100 秒，其余模型合计最多 20 秒（另有取消清理开销）。每轮总时限包含整个逻辑模型调用（OCR 流式读取、视觉兼容回退、人脸检索及结果补充），不会因持续返回少量数据而无限延长。视频下载使用原有独立超时。
 
 客户端取消不能保证上游推理服务立即停止已经接收的计算；face 的同步 SDK 在线程中运行，受底层 10 秒网络超时约束，取消等待无法强制终止 Python 线程。

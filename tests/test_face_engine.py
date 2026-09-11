@@ -31,6 +31,52 @@ def engine(fake_transport: FakeTransport, monkeypatch):
     return e
 
 
+def test_cached_engine_is_rebuilt_after_runtime_connection_setting_changes(monkeypatch):
+    import wcm_facerec.face_engine as fe_mod
+    from wcm_facerec import runtime_parameters
+
+    created = []
+
+    class FakeEngine:
+        def __init__(self):
+            created.append(
+                (
+                    settings.insightface_base_url,
+                    settings.insightface_collection_id,
+                    settings.insightface_timeout_s,
+                )
+            )
+
+    monkeypatch.setattr(fe_mod, "FaceEngine", FakeEngine)
+    monkeypatch.setattr(fe_mod, "_engine", None)
+    monkeypatch.setattr(fe_mod, "_engine_signature", None)
+    runtime_parameters.install(
+        {
+            "insightface_base_url": "http://first:18097",
+            "insightface_collection_id": "first",
+            "insightface_timeout_s": 10.0,
+        }
+    )
+    try:
+        first = fe_mod.get_face_engine()
+        assert fe_mod.get_face_engine() is first
+        runtime_parameters.install(
+            {
+                "insightface_base_url": "http://second:18097",
+                "insightface_collection_id": "second",
+                "insightface_timeout_s": 12.0,
+            }
+        )
+        second = fe_mod.get_face_engine()
+        assert second is not first
+        assert created == [
+            ("http://first:18097", "first", 10.0),
+            ("http://second:18097", "second", 12.0),
+        ]
+    finally:
+        runtime_parameters.install({})
+
+
 # ----------------------------------------------------------------------
 # Coercion of legacy img_source overload
 # ----------------------------------------------------------------------

@@ -27,6 +27,7 @@ import asyncio
 import hashlib
 import logging
 import math
+import threading
 from pathlib import Path
 
 import cv2
@@ -783,13 +784,30 @@ class FaceEngine:
 
 # Global engine instance
 _engine: FaceEngine | None = None
+_engine_signature: tuple | None = None
+_engine_lock = threading.Lock()
+
+
+def _current_engine_signature() -> tuple:
+    return (
+        settings.insightface_model_name,
+        settings.insightface_base_url,
+        settings.insightface_collection_id,
+        settings.insightface_timeout_s,
+        settings.insightface_api_key,
+    )
 
 
 def get_face_engine() -> FaceEngine:
-    """Get or create the global FaceEngine instance."""
-    global _engine
-    if _engine is None:
-        _engine = FaceEngine()
+    """Get the engine, rebuilding it when live connection settings change."""
+    global _engine, _engine_signature
+    signature = _current_engine_signature()
+    if _engine is None or _engine_signature != signature:
+        with _engine_lock:
+            signature = _current_engine_signature()
+            if _engine is None or _engine_signature != signature:
+                _engine = FaceEngine()
+                _engine_signature = signature
     return _engine
 
 

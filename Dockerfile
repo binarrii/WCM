@@ -76,9 +76,6 @@ COPY --from=web-builder /webui/dist /www
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
 ENV PYTHONPATH="/app/src"
-# InsightFace Server runs separately. The default can be overridden by
-# compose or the container runtime.
-ENV WCM_INSIGHTFACE_BASE_URL="http://10.252.25.251:18097"
 
 # Create the non-root user and seed the named-volume mount point with writable
 # ownership (Docker preserves it when initializing a new volume).

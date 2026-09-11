@@ -40,7 +40,7 @@ unless `RUN_LIVE=1`.
 - `webui/src/services/`: same-origin API client.
 
 The API process performs no local face inference. It calls the external
-InsightFace Server configured by `WCM_INSIGHTFACE_BASE_URL`.
+InsightFace Server configured by the runtime parameter `insightface_base_url`.
 
 ## Collections and identifiers
 

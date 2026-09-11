@@ -1,9 +1,12 @@
-"""Configuration management for face recognition service."""
+"""Bootstrap settings and database-managed business parameter definitions."""
 
-from typing import Literal
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from . import runtime_parameters
 
 # InsightFace Server is a single-model service (currently buffalo_m v0.7,
 # 512-dim ArcFace R50). The legacy per-model dim lookup is kept only as a
@@ -105,7 +108,7 @@ class Settings(BaseSettings):
     ocr_timeout_s: float = Field(default=10.0, gt=0)
     guard_timeout_s: float = Field(default=10.0, gt=0)
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
-    model_api_key: str = "sk-o8EGlzXqMQi8Ba06E2B1BcF8217c45B6Bb70Ce5765B70c42"
+    model_api_key: str = ""
 
     # Multi-image Qwen input, with contact-sheet compatibility fallback.
     nsfw_image_mode: Literal["auto", "montage"] = "auto"
@@ -137,4 +140,94 @@ class Settings(BaseSettings):
         return INSIGHTFACE_EMBEDDING_DIM
 
 
-settings = Settings()
+@dataclass(frozen=True)
+class BusinessParameterSpec:
+    value_type: Literal["string", "number", "json"]
+    group: str
+    secret: bool = False
+
+
+# Network addresses, ports, database bootstrap credentials and filesystem paths
+# intentionally stay in Settings/environment variables: the database-backed
+# snapshot cannot be loaded until those values are already known.
+BUSINESS_PARAMETER_SPECS = {
+    # InsightFace library behavior and credentials.
+    "insightface_base_url": BusinessParameterSpec("string", "人脸服务"),
+    "insightface_model_name": BusinessParameterSpec("string", "人脸服务"),
+    "insightface_collection_id": BusinessParameterSpec("string", "人脸服务"),
+    "insightface_api_key": BusinessParameterSpec("string", "人脸服务", secret=True),
+    "insightface_timeout_s": BusinessParameterSpec("number", "人脸服务"),
+    "insightface_verify_similarity_threshold": BusinessParameterSpec("number", "人脸服务"),
+    "insightface_quality_weight": BusinessParameterSpec("number", "人脸服务"),
+    "insightface_adaptive_threshold_step": BusinessParameterSpec("number", "人脸服务"),
+    "insightface_norm_reference": BusinessParameterSpec("number", "人脸服务"),
+    "insightface_category_collections": BusinessParameterSpec("json", "人物库"),
+    "default_category": BusinessParameterSpec("string", "人物库"),
+    # Profile and low-quality video face optimization.
+    "face_profile_optimization": BusinessParameterSpec("json", "人脸优化"),
+    "face_crop_padding": BusinessParameterSpec("number", "人脸优化"),
+    "face_candidate_similarity": BusinessParameterSpec("number", "人脸优化"),
+    "face_high_similarity": BusinessParameterSpec("number", "人脸优化"),
+    "face_min_candidate_margin": BusinessParameterSpec("number", "人脸优化"),
+    "face_min_confirming_frames": BusinessParameterSpec("number", "人脸优化"),
+    "face_profile_pose_threshold": BusinessParameterSpec("number", "人脸优化"),
+    "face_low_sharpness_threshold": BusinessParameterSpec("number", "人脸优化"),
+    "face_track_max_gap_s": BusinessParameterSpec("number", "人脸优化"),
+    "face_neighbor_offsets_s": BusinessParameterSpec("json", "人脸优化"),
+    "face_max_extra_frames_per_window": BusinessParameterSpec("number", "人脸优化"),
+    "face_max_extra_call_ratio": BusinessParameterSpec("number", "人脸优化"),
+    "face_neighbor_concurrency": BusinessParameterSpec("number", "人脸优化"),
+    "face_gallery_target_samples": BusinessParameterSpec("number", "人脸优化"),
+    # API limits and review scheduling.
+    "max_file_size_mb": BusinessParameterSpec("number", "审核调度"),
+    "review_task_concurrency": BusinessParameterSpec("number", "审核调度"),
+    "review_window_concurrency": BusinessParameterSpec("number", "审核调度"),
+    "jpeg_quality": BusinessParameterSpec("number", "审核调度"),
+    "visual_timeout_s": BusinessParameterSpec("number", "审核调度"),
+    "ocr_timeout_s": BusinessParameterSpec("number", "审核调度"),
+    "guard_timeout_s": BusinessParameterSpec("number", "审核调度"),
+    # Model gateway and behavior.
+    "model_api_url": BusinessParameterSpec("string", "模型服务"),
+    "model_api_key": BusinessParameterSpec("string", "模型服务", secret=True),
+    "nsfw_image_mode": BusinessParameterSpec("string", "内容审核"),
+    "nsfw_verify_target": BusinessParameterSpec("json", "内容审核"),
+    "nsfw_sampling_mode": BusinessParameterSpec("string", "内容审核"),
+    "nsfw_scene_max_stride": BusinessParameterSpec("number", "内容审核"),
+    "nsfw_scene_cut_threshold": BusinessParameterSpec("number", "内容审核"),
+    "nsfw_review_mode": BusinessParameterSpec("string", "内容审核"),
+    "nsfw_window_max_seconds": BusinessParameterSpec("number", "内容审核"),
+}
+
+
+def normalize_business_parameter(key: str, value: Any) -> Any:
+    """Apply the same enum/range/coercion validation as bootstrap settings."""
+    if key not in BUSINESS_PARAMETER_SPECS:
+        return value
+    validated = Settings(_env_file=None, **{key: value})
+    return object.__getattribute__(validated, key)
+
+
+class RuntimeSettings:
+    """Compatibility proxy that overlays live business values on Settings."""
+
+    def __init__(self, bootstrap: Settings):
+        object.__setattr__(self, "_bootstrap", bootstrap)
+
+    def __getattr__(self, name: str) -> Any:
+        bootstrap = object.__getattribute__(self, "_bootstrap")
+        fallback = getattr(bootstrap, name)
+        if name in BUSINESS_PARAMETER_SPECS:
+            return runtime_parameters.get(name, fallback)
+        return fallback
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Keep existing tests and operational scripts that monkeypatch settings
+        # compatible while the production read path remains database-backed.
+        setattr(object.__getattribute__(self, "_bootstrap"), name, value)
+
+    def seed_value(self, name: str) -> Any:
+        """Return the pre-database value used only for first-run seeding."""
+        return getattr(object.__getattribute__(self, "_bootstrap"), name)
+
+
+settings = RuntimeSettings(Settings())

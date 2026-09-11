@@ -18,7 +18,6 @@ from wcm_facerec.person_library import SameNamePeopleError
 face_records_bp = APIRouter()
 
 _LIST_PAGE_FETCH = 100
-_CATEGORY_LABELS = tuple(settings.insightface_category_collections)
 _IMAGE_ROOT = Path("/tmp/wcm")
 
 
@@ -133,8 +132,9 @@ async def list_face_records(
 
     collection_id: str | None = None
     inject_type: str | None = None
-    filter_other = bool(type and type != "All" and type not in _CATEGORY_LABELS)
-    if type in _CATEGORY_LABELS:
+    category_labels = tuple(settings.insightface_category_collections)
+    filter_other = bool(type and type != "All" and type not in category_labels)
+    if type in category_labels:
         collection_id = settings.insightface_category_collections.get(type)
         inject_type = type
 
@@ -155,7 +155,7 @@ async def list_face_records(
                 index += 1
                 if inject_type:
                     person["type"] = inject_type
-                elif filter_other and (person.get("type") or "") in _CATEGORY_LABELS:
+                elif filter_other and (person.get("type") or "") in category_labels:
                     continue
                 aggregate_id = None
                 if collection_id:

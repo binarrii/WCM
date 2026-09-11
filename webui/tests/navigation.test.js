@@ -7,6 +7,7 @@ test('sidebar routes are stable across refreshes', () => {
   assert.equal(routeFromHash('#/video'), 'video');
   assert.equal(routeFromHash('#/video?source=remote'), 'video');
   assert.equal(routeFromHash('#/tasks'), 'tasks');
+  assert.equal(routeFromHash('#/parameters'), 'parameters');
 });
 
 test('review task id is read from the video route query', () => {

@@ -10,7 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from wcm_facerec import __version__
 from wcm_facerec.config import settings
 
+from . import parameter_store
 from .face_records import face_records_bp
+from .parameters import parameters_bp
 from .review_events import review_events
 from .review_task_store import initialize as initialize_review_tasks
 from .review_tasks import review_tasks_bp
@@ -21,11 +23,15 @@ from .routes import api_bp
 async def lifespan(app: FastAPI):
     """Initialize optional service-owned persistence before accepting traffic."""
     await initialize_review_tasks()
-    await review_events.start()
+    await parameter_store.initialize()
     try:
-        yield
+        await review_events.start()
+        try:
+            yield
+        finally:
+            await review_events.close()
     finally:
-        await review_events.close()
+        await parameter_store.close()
 
 
 def create_app() -> FastAPI:
@@ -48,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(api_bp, prefix="/api/v1")
     app.include_router(face_records_bp, prefix="/api/v1")
     app.include_router(review_tasks_bp, prefix="/api/v1")
+    app.include_router(parameters_bp, prefix="/api/v1")
 
     # Mount persisted face images before the SPA catch-all.
     os.makedirs("/tmp/wcm", exist_ok=True)

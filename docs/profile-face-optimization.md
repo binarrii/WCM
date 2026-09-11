@@ -30,25 +30,25 @@ InsightFace Server 0.2.0 对外提供的是 0～1 的姿态质量分，不是校
 
 ## 配置与回滚
 
-| 环境变量 | 默认值 | 说明 |
+| 参数键 | 默认值 | 说明 |
 | --- | ---: | --- |
-| `WCM_FACE_PROFILE_OPTIMIZATION` | `true` | 总开关；设为 `false` 恢复原有视频判断和紧裁剪 |
-| `WCM_FACE_CROP_PADDING` | `0.25` | 优化查询裁剪的单侧扩展比例 |
-| `WCM_FACE_CANDIDATE_SIMILARITY` | `0.35` | 仅供聚合/补帧的内部候选下限 |
-| `WCM_FACE_HIGH_SIMILARITY` | `0.65` | 正脸单帧快速确认下限 |
-| `WCM_FACE_MIN_CANDIDATE_MARGIN` | `0.05` | 第一、第二候选最小差距 |
-| `WCM_FACE_MIN_CONFIRMING_FRAMES` | `2` | 普通确认所需不同帧数 |
-| `WCM_FACE_PROFILE_POSE_THRESHOLD` | `0.60` | 低于此姿态质量分视为困难样本 |
-| `WCM_FACE_LOW_SHARPNESS_THRESHOLD` | `0.15` | 低于此清晰度视为困难样本 |
-| `WCM_FACE_TRACK_MAX_GAP_S` | `2.5` | 同一短轨迹允许的最大时间间隔 |
-| `WCM_FACE_NEIGHBOR_OFFSETS_S` | `[-0.4,-0.2,0.2,0.4]` | 临帧候选偏移，JSON 数组 |
-| `WCM_FACE_MAX_EXTRA_FRAMES_PER_WINDOW` | `3` | 单窗口补帧上限 |
-| `WCM_FACE_MAX_EXTRA_CALL_RATIO` | `0.30` | 全视频补帧/主选中帧目标上限 |
-| `WCM_FACE_NEIGHBOR_CONCURRENCY` | `2` | 补帧人脸请求并发 |
-| `WCM_FACE_GALLERY_TARGET_SAMPLES` | `5` | 图库每人的目标样本数 |
-| `WCM_JPEG_QUALITY` | `95` | 包括侧脸查询裁剪在内的 JPEG 编码质量 |
+| `face_profile_optimization` | `true` | 总开关；设为 `false` 恢复原有视频判断和紧裁剪 |
+| `face_crop_padding` | `0.25` | 优化查询裁剪的单侧扩展比例 |
+| `face_candidate_similarity` | `0.35` | 仅供聚合/补帧的内部候选下限 |
+| `face_high_similarity` | `0.65` | 正脸单帧快速确认下限 |
+| `face_min_candidate_margin` | `0.05` | 第一、第二候选最小差距 |
+| `face_min_confirming_frames` | `2` | 普通确认所需不同帧数 |
+| `face_profile_pose_threshold` | `0.60` | 低于此姿态质量分视为困难样本 |
+| `face_low_sharpness_threshold` | `0.15` | 低于此清晰度视为困难样本 |
+| `face_track_max_gap_s` | `2.5` | 同一短轨迹允许的最大时间间隔 |
+| `face_neighbor_offsets_s` | `[-0.4,-0.2,0.2,0.4]` | 临帧候选偏移，JSON 数组 |
+| `face_max_extra_frames_per_window` | `3` | 单窗口补帧上限 |
+| `face_max_extra_call_ratio` | `0.30` | 全视频补帧/主选中帧目标上限 |
+| `face_neighbor_concurrency` | `2` | 补帧人脸请求并发 |
+| `face_gallery_target_samples` | `5` | 图库每人的目标样本数 |
+| `jpeg_quality` | `95` | 包括侧脸查询裁剪在内的 JPEG 编码质量 |
 
-紧急回滚只需把 `WCM_FACE_PROFILE_OPTIMIZATION=false` 后重建 API 容器，不需要迁移数据库或改写历史结果。
+紧急回滚只需在参数配置页面把 `face_profile_optimization` 改为 `false`，不需要重建 API 容器、迁移数据库或改写历史结果。
 
 ## 图库覆盖审计
 

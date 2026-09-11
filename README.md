@@ -65,10 +65,25 @@ set `WCM_BUILD_NETWORK=host` before running `docker compose build`.
 ## WebUI workflow
 
 Open <http://localhost:8000> and use the left sidebar to switch between people,
-video review and review tasks. Review-task rows are intentionally compact so more
-history fits on one page. Search matches task ids, video URLs and recorded failure
-messages; the status selector further filters processing, completed and failed
-tasks.
+video review, review tasks and parameter configuration. Review-task rows are
+intentionally compact so more history fits on one page. Search matches task ids,
+video URLs and recorded failure messages; the status selector further filters
+processing, completed and failed tasks.
+
+The parameter page stores typed `string`, `number` and `json` values in the
+`system_parameters` MySQL table. Built-in business settings are seeded from their
+effective legacy values on the first upgraded start, then the database becomes the
+source of truth. Built-in types, groups, enums and numeric ranges are validated and
+cannot be deleted. API keys are write-only in the UI and never returned by the list
+endpoint. Each API worker loads an immutable snapshot at startup, replaces it
+atomically after writes, and periodically refreshes it so updates become visible
+across workers. Existing `settings.<name>` reads resolve against that snapshot;
+generic call sites can also use `api.parameter_store.get(key, default)`.
+
+Only values required before the parameter database can be reached remain in the
+environment: API/database hosts and ports, database credentials, image/data paths,
+build networking and worker-process startup options. External business-service
+addresses, such as the InsightFace and model gateway URLs, are runtime parameters.
 
 Clicking a task row opens the video-review page and restores its video URL,
 sampling interval, candidate count, similarity threshold and stored findings.
@@ -136,8 +151,8 @@ RUN_LIVE=1 uv run pytest -m live tests/test_smoke_live.py -v
   converts InsightFace similarity to `distance = 1 - similarity`.
   HTTP and WebSocket search/media analysis, engine search, adapter search,
   and face verification default to `0.5` (50% minimum similarity / 0.5 maximum
-  distance). Explicit search thresholds and the verification setting
-  `WCM_INSIGHTFACE_VERIFY_SIMILARITY_THRESHOLD` still override their defaults.
+  distance). Explicit search thresholds and the runtime parameter
+  `insightface_verify_similarity_threshold` still override their defaults.
   Detection settings and the import script's exact-image deduplication threshold
   are separate and unchanged.
 - Search collapses multiple enrolled-sample hits for the same person and query

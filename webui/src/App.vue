@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ClipboardList, Database, Monitor, Moon, Sun, Video } from '@lucide/vue';
+import { ClipboardList, Database, Monitor, Moon, SlidersHorizontal, Sun, Video } from '@lucide/vue';
 import FaceDashboard from './views/FaceDashboard.vue';
+import ParameterConfig from './views/ParameterConfig.vue';
 import ReviewTasks from './views/ReviewTasks.vue';
 import VideoReview from './views/VideoReview.vue';
 import { navigateTo, routeFromHash } from './services/navigation';
@@ -26,6 +27,11 @@ const pages = {
     component: ReviewTasks,
     title: '审核任务',
     description: '检索、查看并继续复核历史视频审核任务'
+  },
+  parameters: {
+    component: ParameterConfig,
+    title: '参数配置',
+    description: '集中管理系统通用参数，保存后即时刷新运行时内存'
   }
 };
 const page = computed(() => pages[currentRoute.value]);
@@ -76,6 +82,9 @@ onBeforeUnmount(() => {
         </button>
         <button type="button" :class="['menu-item', { active: currentRoute === 'tasks' }]" @click="navigateTo('tasks')">
           <ClipboardList /><span>审核任务</span>
+        </button>
+        <button type="button" :class="['menu-item', { active: currentRoute === 'parameters' }]" @click="navigateTo('parameters')">
+          <SlidersHorizontal /><span>参数配置</span>
         </button>
       </nav>
     </aside>
