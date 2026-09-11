@@ -28,7 +28,7 @@ test('difficult face resampling exposes a dedicated bounded sub-progress', () =>
   }}});
   assert.equal(view.label,'审核收尾');
   assert.equal(view.percent,99);
-  assert.deepEqual(view.subProgress,{label:'困难人脸补采',percent:70,details:'7 / 10 帧'});
+  assert.deepEqual(view.subProgress,{label:'困难帧补采',percent:70,details:'7 / 10 帧'});
   assert.equal(taskProgress({status:'completed',progress:{phase:'finished',sub_progress:{stage:'face_resampling',completed:10,total:10}}}).subProgress,null);
 });
 

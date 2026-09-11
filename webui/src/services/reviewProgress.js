@@ -38,7 +38,7 @@ export const taskProgress = task => {
         const completed = finite(rawSubProgress.completed)
           ? Math.max(0, Math.min(rawSubProgress.total, rawSubProgress.completed)) : 0;
         return {
-          label: '困难人脸补采',
+          label: '困难帧补采',
           percent: completed / rawSubProgress.total * 100,
           details: `${completed} / ${rawSubProgress.total} 帧`
         };
