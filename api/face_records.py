@@ -345,6 +345,24 @@ class MergePeopleRequest(BaseModel):
         return self
 
 
+class DeleteFaceImagesRequest(BaseModel):
+    image_urls: list[str] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def valid_image_urls(self):
+        if (
+            len(set(self.image_urls)) != len(self.image_urls)
+            or any(
+                not isinstance(value, str)
+                or not value.startswith("/images/")
+                or len(value) > 2048
+                for value in self.image_urls
+            )
+        ):
+            raise ValueError("请选择有效且不重复的人物照片")
+        return self
+
+
 @face_records_bp.post("/face_records/merge")
 async def merge_face_records(body: MergePeopleRequest):
     try:
@@ -382,6 +400,30 @@ async def append_face_image(record_id: str, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"追加照片失败：{exc}") from exc
+
+
+@face_records_bp.delete("/face_records/{record_id}/images")
+async def delete_face_images(record_id: str, body: DeleteFaceImagesRequest):
+    image_paths = []
+    for image_url in body.image_urls:
+        image_path = _image_url_to_path(image_url)
+        if image_path is None:
+            raise HTTPException(status_code=400, detail="照片不存在或地址无效，请刷新后重试")
+        image_paths.append(str(image_path))
+
+    try:
+        result = await get_face_engine().delete_person_images(record_id, image_paths)
+        if not result:
+            raise HTTPException(status_code=404, detail="人物不存在，请刷新列表")
+        return {**result, "record": _item_with_person(result["record"])}
+    except HTTPException:
+        raise
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"删除照片失败：{exc}") from exc
 
 
 @face_records_bp.delete("/face_records/{record_id}")

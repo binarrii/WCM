@@ -35,6 +35,13 @@ export const faceService = {
     return response.data;
   },
 
+  async deleteImages(id, imageUrls) {
+    const response = await api.delete(`/face_records/${encodeURIComponent(id)}/images`, {
+      data: { image_urls: imageUrls }
+    });
+    return response.data;
+  },
+
   async mergeRecords(targetId, sourceIds) {
     const response = await api.post('/face_records/merge', { target_id: targetId, source_ids: sourceIds });
     return response.data;

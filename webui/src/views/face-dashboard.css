@@ -699,6 +699,193 @@
   color: var(--status-red);
 }
 
+.icon-btn.image-delete {
+  color: var(--text-secondary);
+}
+
+.icon-btn.image-delete:hover {
+  border-color: var(--status-yellow);
+  background-color: var(--status-yellow-bg);
+  color: var(--status-yellow);
+}
+
+.modal-card.image-delete-modal {
+  max-width: 760px;
+  max-height: min(90vh, 760px);
+  max-height: min(calc(100dvh - 40px), 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.image-delete-modal .modal-header {
+  flex: 0 0 auto;
+}
+
+.image-delete-modal .modal-form {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.image-delete-modal .modal-header > div {
+  min-width: 0;
+}
+
+.image-delete-modal .modal-header p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.image-delete-warning {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--status-yellow-border);
+  border-radius: 12px;
+  background: var(--status-yellow-bg);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.image-delete-warning svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--status-yellow);
+}
+
+.image-delete-grid {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  align-content: start;
+  gap: 14px;
+  padding-right: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-muted) transparent;
+}
+
+.image-delete-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.image-delete-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.image-delete-grid::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--text-muted);
+  background-clip: padding-box;
+}
+
+.image-delete-option {
+  position: relative;
+  height: 160px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-primary);
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.image-delete-option:hover:not(:disabled) {
+  border-color: var(--status-red);
+}
+
+.image-delete-option.selected {
+  border-color: var(--status-red);
+  box-shadow: 0 0 0 3px var(--status-red-bg);
+}
+
+.image-delete-option.locked {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.image-delete-option img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image-delete-index {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.76);
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.image-delete-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.45);
+  color: white;
+}
+
+.image-delete-option.selected .image-delete-check {
+  border-color: var(--status-red);
+  background: var(--status-red);
+}
+
+.image-delete-check svg {
+  width: 18px;
+  height: 18px;
+}
+
+.image-delete-summary {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.image-delete-confirm {
+  background: var(--status-red);
+  box-shadow: none;
+}
+
+.image-delete-confirm:hover:not(:disabled) {
+  background: var(--status-red);
+  filter: brightness(0.92);
+}
+
+.image-delete-modal .modal-actions {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 560px) {
+  .image-delete-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Modals overlays & glassmorphism */
 .modal-overlay {
   position: fixed;

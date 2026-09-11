@@ -174,6 +174,62 @@ async def test_append_keeps_identity_gallery_custom_metadata_and_both_indexes(li
 
 
 @pytest.mark.asyncio
+async def test_delete_images_rebuilds_both_indexes_and_keeps_one_enrollment(library):
+    engine, seed, root = library
+    paths = seed("target", "A", [b"first", b"second", b"third"], mirror_id="legacy")
+
+    result = await engine.delete_person_images("target", [paths[0], paths[2]])
+
+    assert result["removed_images"] == 2
+    assert result["record"]["id"] == "target"
+    assert result["record"]["file_path"] == paths[1]
+    assert result["record"]["image_paths"] == [paths[1]]
+    for key in [("all", "target"), ("a", "legacy")]:
+        person = engine._adapter.people[key]
+        assert person["face_count"] == 1
+        assert person["file_path"] == paths[1]
+        assert person["image_paths"] == [paths[1]]
+        assert list(engine._adapter.faces[key].values()) == [b"second"]
+    assert all(person_library.Path(path).exists() for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_delete_images_refuses_last_image_without_mutation(library):
+    engine, seed, root = library
+    paths = seed("target", "A", [b"first", b"second"])
+    before = deepcopy(engine._adapter.people)
+    before_samples = {key: list(faces.values()) for key, faces in engine._adapter.faces.items()}
+
+    with pytest.raises(ValueError, match="至少需要保留一张"):
+        await engine.delete_person_images("target", paths)
+
+    assert engine._adapter.people == before
+    assert {
+        key: list(faces.values()) for key, faces in engine._adapter.faces.items()
+    } == before_samples
+    assert engine._adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_delete_images_failure_restores_original_galleries(library):
+    engine, seed, root = library
+    paths = seed("target", "A", [b"first", b"second", b"third"])
+    before = deepcopy(engine._adapter.people)
+    before_samples = {key: list(faces.values()) for key, faces in engine._adapter.faces.items()}
+    engine._adapter.fail = ("add", ("a", "target"))
+
+    with pytest.raises(RuntimeError, match="lost enrollment response"):
+        await engine.delete_person_images("target", [paths[1]])
+
+    assert engine._adapter.people == before
+    assert {
+        key: list(faces.values()) for key, faces in engine._adapter.faces.items()
+    } == before_samples
+    journal = next((root / ".person-operations").glob("*.json"))
+    assert '"status": "rolled_back"' in journal.read_text()
+
+
+@pytest.mark.asyncio
 async def test_merge_cross_category_legacy_ids_all_photos_and_dedup(library):
     engine, seed, root = library
     original = seed("target", "A", [b"first"])

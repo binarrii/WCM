@@ -34,7 +34,13 @@ import numpy as np
 
 from .config import DEFAULT_DISTANCE_THRESHOLD, settings
 from .ifs_adapter import InsightFaceAdapter, crop_query_face
-from .person_library import SameNamePeopleError, gallery, library_write, mutate_gallery
+from .person_library import (
+    SameNamePeopleError,
+    gallery,
+    library_write,
+    mutate_gallery,
+    remove_gallery_images,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -552,6 +558,14 @@ class FaceEngine:
         return await mutate_gallery(
             self, person_id, image=image_bytes, image_ext=_detect_image_ext(image_bytes)
         )
+
+    @library_write
+    async def delete_person_images(self, person_id: str, image_paths: list[str]) -> dict | None:
+        resolved = await self._resolve_aggregate_person(person_id)
+        if not resolved:
+            return None
+        aggregate_id, _ = resolved
+        return await remove_gallery_images(self, aggregate_id, image_paths)
 
     @library_write
     async def merge_person_records(self, target_id: str, source_ids: list[str]) -> dict:

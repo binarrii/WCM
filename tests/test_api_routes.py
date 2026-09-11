@@ -636,6 +636,77 @@ def test_append_route_enforces_single_face_and_existing_identity(
     assert client.post("/api/v1/face_records/existing/images").status_code == 400
 
 
+def test_delete_images_route_supports_single_or_multiple_and_hides_internal_paths(
+    client_for, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+    paths = [tmp_path / f"face-{index}.jpg" for index in range(3)]
+    for path in paths:
+        path.write_bytes(b"image")
+
+    class DeleteImagesEngine(StubEngine):
+        async def delete_person_images(self, person_id, image_paths):
+            self.args = (person_id, image_paths)
+            return {
+                "record": {
+                    "id": person_id,
+                    "name": "测试人物",
+                    "face_count": 1,
+                    "file_path": str(paths[2]),
+                    "image_paths": [str(paths[2])],
+                },
+                "removed_images": 2,
+            }
+
+    engine = DeleteImagesEngine()
+    client = client_for(engine)
+    response = client.request(
+        "DELETE",
+        "/api/v1/face_records/person/images",
+        json={"image_urls": ["/images/face-0.jpg", "/images/face-1.jpg"]},
+    )
+
+    assert response.status_code == 200
+    assert engine.args == ("person", [str(paths[0]), str(paths[1])])
+    assert response.json()["removed_images"] == 2
+    assert response.json()["record"]["image_urls"] == ["/images/face-2.jpg"]
+    assert str(tmp_path) not in response.text
+
+
+def test_delete_images_route_validates_selection_and_preserves_last_image(
+    client_for, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(face_records, "_IMAGE_ROOT", tmp_path)
+    image = tmp_path / "face.jpg"
+    image.write_bytes(b"image")
+
+    class DeleteImagesEngine(StubEngine):
+        async def delete_person_images(self, person_id, image_paths):
+            raise ValueError("每个人物至少需要保留一张照片")
+
+    client = client_for(DeleteImagesEngine())
+    last = client.request(
+        "DELETE",
+        "/api/v1/face_records/person/images",
+        json={"image_urls": ["/images/face.jpg"]},
+    )
+    invalid = client.request(
+        "DELETE",
+        "/api/v1/face_records/person/images",
+        json={"image_urls": ["/images/missing.jpg"]},
+    )
+    duplicate = client.request(
+        "DELETE",
+        "/api/v1/face_records/person/images",
+        json={"image_urls": ["/images/face.jpg", "/images/face.jpg"]},
+    )
+
+    assert last.status_code == 400
+    assert "至少需要保留一张" in last.text
+    assert invalid.status_code == 400
+    assert duplicate.status_code == 422
+
+
 def test_video_search_awaits_async_engine_and_handles_zero_interval(monkeypatch, tmp_path):
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
 

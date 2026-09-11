@@ -13,6 +13,7 @@ import {
   UploadCloud, 
   X, 
   Image as ImageIcon,
+  ImageMinus,
   CheckCircle, 
   AlertTriangle,
   AlertCircle,
@@ -26,6 +27,7 @@ import {
 } from '@lucide/vue';
 import { faceService } from '../services/faceService';
 import { IMAGE_BASE } from '../services/api';
+import { recordImageUrls, toggleImageDeletion } from '../services/faceGallery';
 import { formatImageSimilarity, toSearchRecords } from '../services/searchResults';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 
@@ -210,12 +212,7 @@ const changePreviewImage = (direction) => {
   ) % previewImageUrls.value.length;
 };
 const activeCardImageIndexes = ref({});
-const getRecordImages = (record) => {
-  if (Array.isArray(record.image_urls) && record.image_urls.length > 0) {
-    return record.image_urls;
-  }
-  return record.image_url ? [record.image_url] : [];
-};
+const getRecordImages = recordImageUrls;
 const getActiveCardImageIndex = (record) => {
   const images = getRecordImages(record);
   if (images.length === 0) return 0;
@@ -229,6 +226,65 @@ const changeCardImage = (record, direction) => {
   if (images.length < 2) return;
   const current = getActiveCardImageIndex(record);
   activeCardImageIndexes.value[record.id] = (current + direction + images.length) % images.length;
+};
+
+// Delete one or more gallery images while always retaining one enrollment.
+const imageDeleteTarget = ref(null);
+const selectedImageUrls = ref(new Set());
+const deletingImages = ref(false);
+const imageDeleteUrls = computed(() => getRecordImages(imageDeleteTarget.value));
+const openImageDeleteModal = record => {
+  if (getRecordImages(record).length < 2) return;
+  imageDeleteTarget.value = record;
+  selectedImageUrls.value = new Set();
+};
+const closeImageDeleteModal = () => {
+  if (deletingImages.value) return;
+  imageDeleteTarget.value = null;
+  selectedImageUrls.value = new Set();
+};
+const toggleImageForDeletion = imageUrl => {
+  const result = toggleImageDeletion(imageDeleteUrls.value, selectedImageUrls.value, imageUrl);
+  selectedImageUrls.value = result.selected;
+  if (result.blocked) showToast('每个人物至少需要保留一张照片', 'error');
+};
+const imageSelectionDisabled = imageUrl => (
+  !selectedImageUrls.value.has(imageUrl)
+  && selectedImageUrls.value.size >= imageDeleteUrls.value.length - 1
+);
+const applyUpdatedRecord = updated => {
+  const merge = item => item.id === updated.id ? {
+    ...item,
+    ...updated,
+    person: { ...item.person, ...updated.person }
+  } : item;
+  records.value = records.value.map(merge);
+  if (isImageSearchActive.value && imageSearchResults.value) {
+    imageSearchResults.value = imageSearchResults.value.map(merge);
+  }
+  const nextCount = getRecordImages(updated).length;
+  activeCardImageIndexes.value = {
+    ...activeCardImageIndexes.value,
+    [updated.id]: Math.min(activeCardImageIndexes.value[updated.id] || 0, Math.max(0, nextCount - 1))
+  };
+};
+const confirmDeleteImages = async () => {
+  const target = imageDeleteTarget.value;
+  const imageUrls = [...selectedImageUrls.value];
+  if (!target || !imageUrls.length || deletingImages.value) return;
+  deletingImages.value = true;
+  try {
+    const result = await faceService.deleteImages(target.id, imageUrls);
+    applyUpdatedRecord(result.record);
+    imageDeleteTarget.value = null;
+    selectedImageUrls.value = new Set();
+    await fetchStats();
+    showToast(`已删除 ${result.removed_images} 张照片`);
+  } catch (error) {
+    showToast(error.response?.data?.detail || '照片删除失败，请刷新后重试', 'error');
+  } finally {
+    deletingImages.value = false;
+  }
 };
 
 // Toast state
@@ -744,6 +800,10 @@ const handleGlobalKeyDown = (e) => {
     return;
   }
   if (e.key === 'Escape' || e.keyCode === 27) {
+    if (imageDeleteTarget.value) {
+      closeImageDeleteModal();
+      return;
+    }
     if (isSameNameModalOpen.value) {
       cancelSameNameChoice();
       return;
@@ -979,6 +1039,15 @@ onUnmounted(() => {
                   </button>
                   <button class="icon-btn edit" @click="openEditModal(record)" title="编辑信息">
                     <Edit3 class="icon-btn-svg" />
+                  </button>
+                  <button
+                    v-if="getRecordImages(record).length > 1"
+                    class="icon-btn image-delete"
+                    @click="openImageDeleteModal(record)"
+                    title="删除照片"
+                    aria-label="删除人物照片"
+                  >
+                    <ImageMinus class="icon-btn-svg" />
                   </button>
                   <button class="icon-btn delete" @click="requestDeleteRecord(record)" title="删除">
                     <Trash2 class="icon-btn-svg" />
@@ -1349,6 +1418,50 @@ onUnmounted(() => {
       <span v-if="previewImageUrls.length > 1" class="preview-image-count">
         {{ previewImageIndex + 1 }} / {{ previewImageUrls.length }}
       </span>
+    </div>
+
+    <div v-if="imageDeleteTarget" class="modal-overlay" @click.self="closeImageDeleteModal">
+      <div class="modal-card image-delete-modal" role="dialog" aria-modal="true" aria-labelledby="image-delete-title">
+        <div class="modal-header">
+          <div>
+            <h3 id="image-delete-title" class="modal-title">删除人物照片</h3>
+            <p>{{ imageDeleteTarget.name }} · 共 {{ imageDeleteUrls.length }} 张</p>
+          </div>
+          <button class="close-btn" :disabled="deletingImages" @click="closeImageDeleteModal" aria-label="关闭照片删除窗口">
+            <X class="close-icon" />
+          </button>
+        </div>
+        <div class="modal-form">
+          <p class="image-delete-warning"><AlertTriangle />可选择单张或多张照片，系统会始终保留至少一张用于人脸识别。</p>
+          <div class="image-delete-grid">
+            <button
+              v-for="(imageUrl, index) in imageDeleteUrls"
+              :key="imageUrl"
+              type="button"
+              :class="['image-delete-option', { selected: selectedImageUrls.has(imageUrl), locked: imageSelectionDisabled(imageUrl) }]"
+              :disabled="deletingImages || imageSelectionDisabled(imageUrl)"
+              :aria-pressed="selectedImageUrls.has(imageUrl)"
+              :aria-label="`${selectedImageUrls.has(imageUrl) ? '取消选择' : '选择删除'}第 ${index + 1} 张照片`"
+              @click="toggleImageForDeletion(imageUrl)"
+            >
+              <img :src="`${IMAGE_BASE}${imageUrl}`" :alt="`${imageDeleteTarget.name} 第 ${index + 1} 张照片`" />
+              <span class="image-delete-index">第 {{ index + 1 }} 张</span>
+              <span class="image-delete-check"><CheckCircle v-if="selectedImageUrls.has(imageUrl)" /></span>
+            </button>
+          </div>
+          <p class="image-delete-summary">
+            已选择 {{ selectedImageUrls.size }} 张，删除后保留 {{ imageDeleteUrls.length - selectedImageUrls.size }} 张
+          </p>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" :disabled="deletingImages" @click="closeImageDeleteModal">取消</button>
+            <button type="button" class="btn-primary image-delete-confirm" :disabled="deletingImages || !selectedImageUrls.size" @click="confirmDeleteImages">
+              <Settings v-if="deletingImages" class="spinner btn-spinner" />
+              <ImageMinus v-else class="btn-icon" />
+              {{ deletingImages ? '正在删除...' : `删除 ${selectedImageUrls.size} 张照片` }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <ConfirmDialog
