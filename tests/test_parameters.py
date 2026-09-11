@@ -56,37 +56,76 @@ EXPECTED_BUSINESS_PARAMETERS = {
 }
 
 
-def _row(key, value, value_type="string", group="default"):
+def _row(key, value, value_type="string", group="default", enum_values=None):
     return {
         "config_key": key,
         "config_value": value,
         "value_type": value_type,
         "group_name": group,
+        "enum_values": enum_values,
         "created_at": None,
         "updated_at": None,
     }
 
 
 @pytest.mark.parametrize(
-    ("value", "value_type", "encoded"),
+    ("value", "value_type", "options", "encoded"),
     [
-        ("hello", "string", "hello"),
-        (12.5, "number", "12.5"),
-        ({"enabled": True, "tags": ["a", "b"]}, "json", '{"enabled":true,"tags":["a","b"]}'),
+        ("hello", "string", None, "hello"),
+        (12.5, "number", None, "12.5"),
+        (True, "boolean", None, "true"),
+        ("auto", "enum", ["auto", "montage"], '"auto"'),
+        (3, "enum", [1, 3, "auto"], "3"),
+        (
+            {"enabled": True, "tags": ["a", "b"]},
+            "json",
+            None,
+            '{"enabled":true,"tags":["a","b"]}',
+        ),
     ],
 )
-def test_typed_parameter_values_round_trip(value, value_type, encoded):
-    assert parameter_store.encode_value(value, value_type) == encoded
-    assert parameter_store.decode_value(encoded, value_type) == value
+def test_typed_parameter_values_round_trip(value, value_type, options, encoded):
+    assert parameter_store.encode_value(value, value_type, options) == encoded
+    assert parameter_store.decode_value(encoded, value_type, options) == value
 
 
 @pytest.mark.parametrize(
     ("value", "value_type"),
-    [(1, "string"), (True, "number"), ("12", "number"), (float("inf"), "number"), (set(), "json")],
+    [
+        (1, "string"),
+        (True, "number"),
+        ("12", "number"),
+        (float("inf"), "number"),
+        ("true", "boolean"),
+        (set(), "json"),
+    ],
 )
 def test_typed_parameter_values_reject_mismatches(value, value_type):
     with pytest.raises(ValueError):
         parameter_store.encode_value(value, value_type)
+
+
+@pytest.mark.parametrize(
+    ("value", "options", "message"),
+    [
+        ("auto", None, "非空"),
+        ("auto", [], "非空"),
+        ("auto", ["auto", True], "string 或 number"),
+        ("auto", ["auto", None], "string 或 number"),
+        ("auto", ["auto", {"mode": "manual"}], "string 或 number"),
+        ("auto", ["auto", "auto"], "不能重复"),
+        (1, [1, 1.0], "不能重复"),
+        ("missing", ["auto", 1], "来自可选值列表"),
+    ],
+)
+def test_enum_parameter_rejects_invalid_options_and_values(value, options, message):
+    with pytest.raises(ValueError, match=message):
+        parameter_store.encode_value(value, "enum", options)
+
+
+def test_only_enum_parameters_accept_options():
+    with pytest.raises(ValueError, match="只有 enum"):
+        parameter_store.encode_value("value", "string", ["value"])
 
 
 def test_memory_snapshot_is_defensive_and_visible_to_existing_threads():
@@ -129,6 +168,15 @@ def test_all_business_settings_are_declared_and_bootstrap_settings_are_excluded(
             "data_root",
         }
     )
+    boolean_parameters = {
+        key for key, spec in BUSINESS_PARAMETER_SPECS.items() if spec.value_type == "boolean"
+    }
+    assert boolean_parameters == {"face_profile_optimization", "nsfw_verify_target"}
+    assert all(
+        not isinstance(settings.seed_value(key), bool)
+        for key, spec in BUSINESS_PARAMETER_SPECS.items()
+        if spec.value_type == "json"
+    )
 
 
 def test_builtin_snapshot_overlays_settings_and_defensively_copies_json():
@@ -164,17 +212,17 @@ def test_secret_parameters_are_masked_but_remain_available_to_server_code():
 
 
 @pytest.mark.parametrize(
-    ("key", "value", "value_type", "group"),
+    ("key", "value", "value_type", "group", "options"),
     [
-        ("jpeg_quality", 101, "number", "审核调度"),
-        ("nsfw_image_mode", "grid", "string", "内容审核"),
-        ("face_profile_optimization", True, "string", "人脸优化"),
-        ("model_api_url", "https://example.com", "string", "错误分组"),
+        ("jpeg_quality", 101, "number", "审核调度", None),
+        ("nsfw_image_mode", "grid", "enum", "内容审核", ["auto", "montage"]),
+        ("face_profile_optimization", True, "string", "人脸优化", None),
+        ("model_api_url", "https://example.com", "string", "错误分组", None),
     ],
 )
-def test_builtin_parameter_type_group_and_domain_validation(key, value, value_type, group):
+def test_builtin_parameter_type_group_and_domain_validation(key, value, value_type, group, options):
     with pytest.raises(ValueError):
-        parameter_store._encoded_value(key, value, value_type, group)
+        parameter_store._encoded_value(key, value, value_type, group, options)
 
 
 def test_builtin_rows_with_manually_changed_groups_are_rejected():
@@ -204,7 +252,7 @@ def test_business_environment_variables_are_removed_from_runtime_manifests():
         assert env_name in compose_manifest
 
 
-def test_initialization_seeds_every_builtin_without_overwriting_existing_rows(monkeypatch):
+def test_initialization_upgrades_schema_and_seeds_every_builtin(monkeypatch):
     statements = []
 
     class FakeCursor:
@@ -216,7 +264,16 @@ def test_initialization_seeds_every_builtin_without_overwriting_existing_rows(mo
 
         def execute(self, statement, params=None):
             statements.append((statement, params))
+            if "GET_LOCK" in statement:
+                self.result = {"acquired": 1}
+            elif "CHECK_CONSTRAINTS" in statement:
+                self.result = {"CHECK_CLAUSE": "`type` in ('string','number','json')"}
+            else:
+                self.result = None
             return 1
+
+        def fetchone(self):
+            return self.result
 
     class FakeConnection:
         def __enter__(self):
@@ -232,14 +289,103 @@ def test_initialization_seeds_every_builtin_without_overwriting_existing_rows(mo
     parameter_store._initialize_sync()
 
     inserts = [
-        params
-        for statement, params in statements
-        if "INSERT IGNORE INTO system_parameters" in statement
+        params for statement, params in statements if "INSERT INTO system_parameters" in statement
     ]
     assert len(inserts) == len(EXPECTED_BUSINESS_PARAMETERS)
     assert {params[0] for params in inserts} == EXPECTED_BUSINESS_PARAMETERS
     assert all(params[2] == BUSINESS_PARAMETER_SPECS[params[0]].value_type for params in inserts)
     assert all(params[3] == BUSINESS_PARAMETER_SPECS[params[0]].group for params in inserts)
+    assert any("ADD COLUMN enum_values" in statement for statement, _ in statements)
+    assert any("DROP CHECK chk_system_parameters_type" in statement for statement, _ in statements)
+    assert any(
+        "ADD CONSTRAINT chk_system_parameters_type" in statement for statement, _ in statements
+    )
+
+
+def test_initialization_preserves_and_converts_legacy_builtin_values(monkeypatch):
+    statements = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, statement, params=None):
+            statements.append((statement, params))
+            if "GET_LOCK" in statement:
+                self.result = {"acquired": 1}
+            elif "SHOW COLUMNS" in statement:
+                self.result = {"Field": "enum_values"}
+            elif "CHECK_CONSTRAINTS" in statement:
+                self.result = {
+                    "CHECK_CLAUSE": "`type` in ('string','number','boolean','enum','json')"
+                }
+            elif "SELECT `value` AS config_value" in statement:
+                self.result = {
+                    "nsfw_image_mode": {
+                        "config_value": "montage",
+                        "value_type": "string",
+                        "enum_values": None,
+                    },
+                    "face_profile_optimization": {
+                        "config_value": "true",
+                        "value_type": "json",
+                        "enum_values": None,
+                    },
+                    "nsfw_verify_target": {
+                        "config_value": "false",
+                        "value_type": "json",
+                        "enum_values": None,
+                    },
+                }.get(params[0])
+            else:
+                self.result = None
+            return 1
+
+        def fetchone(self):
+            return self.result
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def cursor(self):
+            return FakeCursor()
+
+    monkeypatch.setattr(parameter_store, "_connect", lambda: FakeConnection())
+    parameter_store._initialize_sync()
+
+    migrated = {
+        params[-1]: params
+        for statement, params in statements
+        if "UPDATE system_parameters" in statement and params
+    }
+    assert migrated["nsfw_image_mode"] == (
+        '"montage"',
+        "enum",
+        "内容审核",
+        '["auto","montage"]',
+        "nsfw_image_mode",
+    )
+    assert migrated["face_profile_optimization"] == (
+        "true",
+        "boolean",
+        "人脸优化",
+        None,
+        "face_profile_optimization",
+    )
+    assert migrated["nsfw_verify_target"] == (
+        "false",
+        "boolean",
+        "内容审核",
+        None,
+        "nsfw_verify_target",
+    )
 
 
 def test_parameter_crud_routes(monkeypatch):
@@ -277,8 +423,8 @@ def test_parameter_crud_routes(monkeypatch):
     assert created.status_code == 201
     assert updated.json()["value"] == 4
     assert deleted.json() == {"deleted": 1, "key": "review.max_retries"}
-    create.assert_awaited_once_with("review.max_retries", 3, "number", "review")
-    update.assert_awaited_once_with("review.max_retries", 4, "number", "review")
+    create.assert_awaited_once_with("review.max_retries", 3, "number", "review", None)
+    update.assert_awaited_once_with("review.max_retries", 4, "number", "review", None)
     delete.assert_awaited_once_with("review.max_retries")
 
 
@@ -288,6 +434,31 @@ def test_parameter_crud_routes(monkeypatch):
         {"key": "bad key", "value": "x", "type": "string", "group": "default"},
         {"key": "valid.key", "value": "3", "type": "number", "group": "default"},
         {"key": "valid.key", "value": 3, "type": "string", "group": "default"},
+        {"key": "valid.key", "value": "true", "type": "boolean", "group": "default"},
+        {
+            "key": "valid.key",
+            "value": True,
+            "type": "boolean",
+            "group": "default",
+            "options": [True],
+        },
+        {"key": "valid.key", "value": "auto", "type": "enum", "group": "default"},
+        {"key": "valid.key", "value": "auto", "type": "enum", "group": "default", "options": []},
+        {
+            "key": "valid.key",
+            "value": "auto",
+            "type": "enum",
+            "group": "default",
+            "options": ["auto", False],
+        },
+        {
+            "key": "valid.key",
+            "value": "manual",
+            "type": "enum",
+            "group": "default",
+            "options": ["auto"],
+        },
+        {"key": "valid.key", "value": "x", "type": "string", "group": "default", "options": ["x"]},
         {"key": "valid.key", "value": {}, "type": "unknown", "group": "default"},
         {"key": "valid.key", "value": {}, "type": "json", "group": "  "},
     ],
@@ -296,6 +467,40 @@ def test_parameter_route_validates_keys_groups_and_typed_values(monkeypatch, pay
     monkeypatch.setattr(parameters.parameter_store, "create", AsyncMock())
     response = TestClient(create_app()).post("/api/v1/parameters", json=payload)
     assert response.status_code == 422
+
+
+def test_parameter_route_accepts_boolean_and_mixed_scalar_enum(monkeypatch):
+    create = AsyncMock(
+        side_effect=lambda key, value, value_type, group, options: {
+            "key": key,
+            "value": value,
+            "type": value_type,
+            "group": group,
+            "options": options,
+        }
+    )
+    monkeypatch.setattr(parameters.parameter_store, "create", create)
+    client = TestClient(create_app())
+
+    boolean_response = client.post(
+        "/api/v1/parameters",
+        json={"key": "feature.enabled", "value": False, "type": "boolean", "group": "feature"},
+    )
+    enum_response = client.post(
+        "/api/v1/parameters",
+        json={
+            "key": "feature.mode",
+            "value": 2,
+            "type": "enum",
+            "group": "feature",
+            "options": ["auto", 1, 2],
+        },
+    )
+
+    assert boolean_response.status_code == 201
+    assert boolean_response.json()["value"] is False
+    assert enum_response.status_code == 201
+    assert enum_response.json()["options"] == ["auto", 1, 2]
 
 
 def test_parameter_route_maps_storage_conflicts(monkeypatch):

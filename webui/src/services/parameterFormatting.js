@@ -1,6 +1,6 @@
 export function formatParameterValue(value, type, indent = 2) {
   if (type === 'json') return JSON.stringify(value, null, indent);
-  if (type === 'number') return String(value);
+  if (type === 'number' || type === 'boolean' || type === 'enum') return String(value);
   return value ?? '';
 }
 
@@ -38,10 +38,38 @@ export function parseParameterValue(text, type) {
   try {
     value = JSON.parse(text);
   } catch {
-    throw new Error(type === 'number' ? '请输入有效数字' : '请输入有效 JSON');
+    if (type === 'number') throw new Error('请输入有效数字');
+    if (type === 'boolean') throw new Error('布尔值必须是 true 或 false');
+    throw new Error('请输入有效 JSON');
   }
   if (type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) {
     throw new Error('请输入有效数字');
   }
+  if (type === 'boolean' && typeof value !== 'boolean') {
+    throw new Error('布尔值必须是 true 或 false');
+  }
   return value;
+}
+
+export function parseEnumOptions(text) {
+  let options;
+  try {
+    options = JSON.parse(text);
+  } catch {
+    throw new Error('枚举可选值必须是有效的 JSON 数组');
+  }
+  if (!Array.isArray(options) || options.length === 0) {
+    throw new Error('枚举类型必须提供非空的可选值列表');
+  }
+  const identities = new Set();
+  for (const option of options) {
+    const kind = typeof option;
+    if ((kind !== 'string' && kind !== 'number') || (kind === 'number' && !Number.isFinite(option))) {
+      throw new Error('枚举可选值只能是 string 或 number');
+    }
+    const identity = `${kind}:${String(option)}`;
+    if (identities.has(identity)) throw new Error('枚举可选值不能重复');
+    identities.add(identity);
+  }
+  return options;
 }

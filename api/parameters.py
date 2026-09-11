@@ -16,8 +16,9 @@ _KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
 class ParameterValue(BaseModel):
     value: Any
-    type: Literal["string", "number", "json"]
+    type: Literal["string", "number", "boolean", "enum", "json"]
     group: str = Field(min_length=1, max_length=100)
+    options: list[Any] | None = None
 
     @field_validator("group")
     @classmethod
@@ -29,7 +30,7 @@ class ParameterValue(BaseModel):
 
     @model_validator(mode="after")
     def validate_typed_value(self):
-        parameter_store.encode_value(self.value, self.type)
+        parameter_store.encode_value(self.value, self.type, self.options)
         return self
 
 
@@ -57,7 +58,9 @@ async def list_parameters():
 @parameters_bp.post("/parameters", status_code=201)
 async def create_parameter(body: ParameterCreate):
     try:
-        return await parameter_store.create(body.key, body.value, body.type, body.group)
+        return await parameter_store.create(
+            body.key, body.value, body.type, body.group, body.options
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except parameter_store.ParameterAlreadyExists as exc:
@@ -71,7 +74,7 @@ async def update_parameter(key: str, body: ParameterValue):
     if not _KEY_PATTERN.fullmatch(key):
         raise HTTPException(status_code=422, detail="无效的参数 key")
     try:
-        return await parameter_store.update(key, body.value, body.type, body.group)
+        return await parameter_store.update(key, body.value, body.type, body.group, body.options)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except parameter_store.ParameterNotFound as exc:

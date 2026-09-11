@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, ExternalLink, ListVideo, RefreshCw, Search, Trash2 } from '@lucide/vue';
+import { AlertCircle, CheckCircle2, Download, ExternalLink, ListVideo, RefreshCw, Search, Trash2 } from '@lucide/vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import PaginationBar from '../components/PaginationBar.vue';
 import ReviewProgress from '../components/ReviewProgress.vue';
 import { saveBlob } from '../services/downloads';
 import { navigateToReviewTask } from '../services/navigation';
@@ -219,7 +220,7 @@ onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStr
         <div v-if="loading && !tasks.length" class="task-empty"><RefreshCw class="spinner" /><p>正在加载任务…</p></div>
         <div v-else-if="!tasks.length" class="task-empty"><ListVideo /><p>没有找到审核任务</p><small>可调整检索条件，或先提交一个视频审核。</small></div>
       </div>
-      <footer class="task-pagination"><span>第 {{ page }} / {{ pageCount }} 页</span><button type="button" :disabled="page <= 1 || loading" @click="changePage(page - 1)"><ChevronLeft />上一页</button><button type="button" :disabled="page >= pageCount || loading" @click="changePage(page + 1)">下一页<ChevronRight /></button></footer>
+      <PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage" />
     </section>
 
     <ConfirmDialog

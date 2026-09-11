@@ -27,8 +27,9 @@ from wcm_facerec.config import (
 
 logger = logging.getLogger(__name__)
 
-ParameterType = Literal["string", "number", "json"]
-PARAMETER_TYPES = frozenset({"string", "number", "json"})
+ParameterType = Literal["string", "number", "boolean", "enum", "json"]
+EnumScalar = str | int | float
+PARAMETER_TYPES = frozenset({"string", "number", "boolean", "enum", "json"})
 SYNC_INTERVAL_SECONDS = 2
 
 
@@ -54,6 +55,7 @@ class _CachedParameter:
     value: Any
     value_type: ParameterType
     group: str
+    enum_values: tuple[EnumScalar, ...] | None
     created_at: str | None
     updated_at: str | None
 
@@ -65,6 +67,7 @@ class _CachedParameter:
             "value": None if secret else copy.deepcopy(self.value),
             "type": self.value_type,
             "group": self.group,
+            "options": list(self.enum_values) if self.enum_values is not None else None,
             "built_in": spec is not None,
             "secret": secret,
             "has_value": bool(self.value) if secret else True,
@@ -121,8 +124,65 @@ async def _run(function, *args):
         raise ParameterStoreUnavailable(f"参数配置数据库操作失败：{exc}") from exc
 
 
-def encode_value(value: Any, value_type: ParameterType) -> str:
+def _enum_scalar_identity(value: Any) -> tuple[str, Any]:
+    if isinstance(value, str):
+        return ("string", value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("enum 类型的可选值只能是 string 或 number")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("enum 类型的 number 可选值必须是有限数字")
+    return ("number", value)
+
+
+def validate_enum_values(enum_values: Any) -> tuple[EnumScalar, ...]:
+    """Return validated enum metadata with type-aware uniqueness."""
+    if not isinstance(enum_values, (list, tuple)) or not enum_values:
+        raise ValueError("enum 类型必须提供非空的可选值列表")
+    validated: list[EnumScalar] = []
+    identities: set[tuple[str, Any]] = set()
+    for option in enum_values:
+        identity = _enum_scalar_identity(option)
+        if identity in identities:
+            raise ValueError("enum 类型的可选值不能重复")
+        identities.add(identity)
+        validated.append(option)
+    return tuple(validated)
+
+
+def _encode_enum_values(enum_values: Any) -> str:
+    return json.dumps(
+        validate_enum_values(enum_values),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
+def _decode_enum_values(raw_value: str | None) -> tuple[EnumScalar, ...]:
+    if raw_value is None:
+        raise ParameterStoreUnavailable("数据库中的 enum 参数缺少可选值")
+    try:
+        value = json.loads(raw_value)
+        return validate_enum_values(value)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ParameterStoreUnavailable("数据库中的 enum 可选值无效") from exc
+
+
+def _json_loads(raw_value: str) -> Any:
+    def reject_constant(constant: str) -> None:
+        raise ValueError(f"无效 JSON 常量：{constant}")
+
+    return json.loads(raw_value, parse_constant=reject_constant)
+
+
+def encode_value(
+    value: Any,
+    value_type: ParameterType,
+    enum_values: Any = None,
+) -> str:
     """Validate and encode a typed value for text storage."""
+    if value_type != "enum" and enum_values is not None:
+        raise ValueError("只有 enum 类型可以设置可选值")
     if value_type == "string":
         if not isinstance(value, str):
             raise ValueError("string 类型的值必须是字符串")
@@ -132,6 +192,16 @@ def encode_value(value: Any, value_type: ParameterType) -> str:
             raise ValueError("number 类型的值必须是数字")
         if isinstance(value, float) and not math.isfinite(value):
             raise ValueError("number 类型的值必须是有限数字")
+        return json.dumps(value, ensure_ascii=False, allow_nan=False)
+    if value_type == "boolean":
+        if not isinstance(value, bool):
+            raise ValueError("boolean 类型的值必须是 true 或 false")
+        return json.dumps(value)
+    if value_type == "enum":
+        options = validate_enum_values(enum_values)
+        identity = _enum_scalar_identity(value)
+        if identity not in {_enum_scalar_identity(option) for option in options}:
+            raise ValueError("enum 类型的值必须来自可选值列表")
         return json.dumps(value, ensure_ascii=False, allow_nan=False)
     if value_type == "json":
         try:
@@ -146,17 +216,36 @@ def encode_value(value: Any, value_type: ParameterType) -> str:
     raise ValueError(f"不支持的参数类型：{value_type}")
 
 
-def decode_value(raw_value: str, value_type: ParameterType) -> Any:
+def decode_value(
+    raw_value: str,
+    value_type: ParameterType,
+    enum_values: Any = None,
+) -> Any:
     """Decode a persisted value and reject invalid manually edited rows."""
     if value_type == "string":
         return raw_value
     try:
-        value = json.loads(raw_value)
-    except (TypeError, json.JSONDecodeError) as exc:
+        value = _json_loads(raw_value)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ParameterStoreUnavailable("数据库包含无法解析的参数值") from exc
     if value_type == "number":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ParameterStoreUnavailable("数据库中的 number 参数不是数字")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ParameterStoreUnavailable("数据库中的 number 参数不是有限数字")
+        return value
+    if value_type == "boolean":
+        if not isinstance(value, bool):
+            raise ParameterStoreUnavailable("数据库中的 boolean 参数不是布尔值")
+        return value
+    if value_type == "enum":
+        try:
+            options = validate_enum_values(enum_values)
+            identity = _enum_scalar_identity(value)
+        except ValueError as exc:
+            raise ParameterStoreUnavailable("数据库中的 enum 参数无效") from exc
+        if identity not in {_enum_scalar_identity(option) for option in options}:
+            raise ParameterStoreUnavailable("数据库中的 enum 参数值不在可选值列表中")
         return value
     if value_type == "json":
         return value
@@ -172,7 +261,10 @@ def _iso(value: datetime | str | None) -> str | None:
 def _cached_parameter(row: dict[str, Any]) -> _CachedParameter:
     key = row["config_key"]
     value_type = row["value_type"]
-    value = decode_value(row["config_value"], value_type)
+    enum_values = _decode_enum_values(row.get("enum_values")) if value_type == "enum" else None
+    if value_type != "enum" and row.get("enum_values") is not None:
+        raise ParameterStoreUnavailable(f"非 enum 参数 {key} 不能包含可选值")
+    value = decode_value(row["config_value"], value_type, enum_values)
     spec = BUSINESS_PARAMETER_SPECS.get(key)
     if spec and value_type != spec.value_type:
         raise ParameterStoreUnavailable(
@@ -182,6 +274,8 @@ def _cached_parameter(row: dict[str, Any]) -> _CachedParameter:
         raise ParameterStoreUnavailable(
             f"内置参数 {key} 的分组必须是 {spec.group}，当前为 {row['group_name']}"
         )
+    if spec and spec.enum_values != enum_values:
+        raise ParameterStoreUnavailable(f"内置参数 {key} 的枚举可选值与定义不一致")
     try:
         value = normalize_business_parameter(key, value)
     except ValueError as exc:
@@ -191,6 +285,7 @@ def _cached_parameter(row: dict[str, Any]) -> _CachedParameter:
         value=value,
         value_type=value_type,
         group=row["group_name"],
+        enum_values=enum_values,
         created_at=_iso(row.get("created_at")),
         updated_at=_iso(row.get("updated_at")),
     )
@@ -213,6 +308,12 @@ def _install_snapshot(rows: list[dict[str, Any]]) -> None:
 
 def _initialize_sync() -> None:
     with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT GET_LOCK('wcm_system_parameters_initialize', 30) AS acquired")
+        lock_result = cursor.fetchone()
+        if not lock_result or lock_result.get("acquired") != 1:
+            raise ParameterStoreUnavailable("等待参数配置表初始化锁超时")
+        # The advisory lock is connection-scoped and is released when this
+        # short-lived initialization connection closes.
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS system_parameters (
@@ -220,26 +321,94 @@ def _initialize_sync() -> None:
                 `value` LONGTEXT NOT NULL,
                 `type` VARCHAR(16) NOT NULL,
                 `group` VARCHAR(100) NOT NULL DEFAULT 'default',
+                enum_values LONGTEXT NULL,
                 created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
                 updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
                     ON UPDATE CURRENT_TIMESTAMP(3),
                 INDEX idx_system_parameters_group_key (`group`, `key`),
                 CONSTRAINT chk_system_parameters_type
-                    CHECK (`type` IN ('string', 'number', 'json'))
+                    CHECK (`type` IN ('string', 'number', 'boolean', 'enum', 'json'))
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
             """
         )
-        # Existing rows always win. On the first upgraded start this captures
-        # the effective legacy environment values; later starts read the table.
-        for key, spec in BUSINESS_PARAMETER_SPECS.items():
-            value = normalize_business_parameter(key, settings.seed_value(key))
+        cursor.execute("SHOW COLUMNS FROM system_parameters LIKE 'enum_values'")
+        if cursor.fetchone() is None:
+            cursor.execute(
+                "ALTER TABLE system_parameters ADD COLUMN enum_values LONGTEXT NULL AFTER `group`"
+            )
+        cursor.execute(
+            """
+            SELECT CHECK_CLAUSE
+            FROM information_schema.CHECK_CONSTRAINTS
+            WHERE CONSTRAINT_SCHEMA = DATABASE()
+              AND CONSTRAINT_NAME = 'chk_system_parameters_type'
+            """
+        )
+        type_constraint = cursor.fetchone()
+        check_clause = (type_constraint or {}).get("CHECK_CLAUSE", "").lower()
+        if "boolean" not in check_clause or "enum" not in check_clause:
+            if type_constraint is not None:
+                cursor.execute(
+                    "ALTER TABLE system_parameters DROP CHECK chk_system_parameters_type"
+                )
             cursor.execute(
                 """
-                INSERT IGNORE INTO system_parameters (`key`, `value`, `type`, `group`)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (key, encode_value(value, spec.value_type), spec.value_type, spec.group),
+                ALTER TABLE system_parameters
+                ADD CONSTRAINT chk_system_parameters_type
+                CHECK (`type` IN ('string', 'number', 'boolean', 'enum', 'json'))
+                """
             )
+
+        # Existing values always win. Metadata follows the built-in definition,
+        # allowing old string/json values to be converted without losing edits.
+        for key, spec in BUSINESS_PARAMETER_SPECS.items():
+            cursor.execute(
+                """
+                SELECT `value` AS config_value, `type` AS value_type,
+                       enum_values
+                FROM system_parameters
+                WHERE `key` = %s
+                """,
+                (key,),
+            )
+            existing = cursor.fetchone()
+            if existing is None:
+                value = settings.seed_value(key)
+            else:
+                previous_options = (
+                    _decode_enum_values(existing.get("enum_values"))
+                    if existing["value_type"] == "enum"
+                    else None
+                )
+                value = decode_value(
+                    existing["config_value"],
+                    existing["value_type"],
+                    previous_options,
+                )
+            value = normalize_business_parameter(key, value)
+            encoded_value = encode_value(value, spec.value_type, spec.enum_values)
+            encoded_options = (
+                _encode_enum_values(spec.enum_values) if spec.value_type == "enum" else None
+            )
+            if existing is None:
+                cursor.execute(
+                    """
+                    INSERT INTO system_parameters
+                        (`key`, `value`, `type`, `group`, enum_values)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (key, encoded_value, spec.value_type, spec.group, encoded_options),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE system_parameters
+                    SET `value` = %s, `type` = %s, `group` = %s,
+                        enum_values = %s
+                    WHERE `key` = %s
+                    """,
+                    (encoded_value, spec.value_type, spec.group, encoded_options, key),
+                )
 
 
 def _load_sync() -> list[dict[str, Any]]:
@@ -248,7 +417,7 @@ def _load_sync() -> list[dict[str, Any]]:
             """
             SELECT `key` AS config_key, `value` AS config_value,
                    `type` AS value_type, `group` AS group_name,
-                   created_at, updated_at
+                   enum_values, created_at, updated_at
             FROM system_parameters
             ORDER BY `group`, `key`
             """
@@ -326,30 +495,47 @@ def get(key: str, default: Any = _MISSING) -> Any:
     return default
 
 
-def _encoded_value(key: str, value: Any, value_type: ParameterType, group: str) -> str:
+def _encoded_value(
+    key: str,
+    value: Any,
+    value_type: ParameterType,
+    group: str,
+    enum_values: Any = None,
+) -> tuple[str, str | None]:
     spec = BUSINESS_PARAMETER_SPECS.get(key)
     if spec:
         if value_type != spec.value_type:
             raise ValueError(f"内置参数 {key} 的类型必须是 {spec.value_type}")
         if group != spec.group:
             raise ValueError(f"内置参数 {key} 的分组必须是 {spec.group}")
+        if spec.enum_values != (
+            validate_enum_values(enum_values) if value_type == "enum" else None
+        ):
+            raise ValueError(f"内置参数 {key} 的枚举可选值不能修改")
         value = normalize_business_parameter(key, value)
-    return encode_value(value, value_type)
+    encoded_value = encode_value(value, value_type, enum_values)
+    encoded_options = _encode_enum_values(enum_values) if value_type == "enum" else None
+    return encoded_value, encoded_options
 
 
 def _create_and_refresh_sync(
-    key: str, value: Any, value_type: ParameterType, group: str
+    key: str,
+    value: Any,
+    value_type: ParameterType,
+    group: str,
+    enum_values: Any = None,
 ) -> dict[str, Any]:
-    encoded = _encoded_value(key, value, value_type, group)
+    encoded, encoded_options = _encoded_value(key, value, value_type, group, enum_values)
     with _database_sync_lock:
         try:
             with _connect() as connection, connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO system_parameters (`key`, `value`, `type`, `group`)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO system_parameters
+                        (`key`, `value`, `type`, `group`, enum_values)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (key, encoded, value_type, group),
+                    (key, encoded, value_type, group, encoded_options),
                 )
         except pymysql.err.IntegrityError as exc:
             if exc.args and exc.args[0] == 1062:
@@ -360,23 +546,34 @@ def _create_and_refresh_sync(
         return _snapshot[key].public()
 
 
-async def create(key: str, value: Any, value_type: ParameterType, group: str) -> dict[str, Any]:
-    return await _run(_create_and_refresh_sync, key, value, value_type, group)
+async def create(
+    key: str,
+    value: Any,
+    value_type: ParameterType,
+    group: str,
+    enum_values: Any = None,
+) -> dict[str, Any]:
+    return await _run(_create_and_refresh_sync, key, value, value_type, group, enum_values)
 
 
 def _update_and_refresh_sync(
-    key: str, value: Any, value_type: ParameterType, group: str
+    key: str,
+    value: Any,
+    value_type: ParameterType,
+    group: str,
+    enum_values: Any = None,
 ) -> dict[str, Any]:
-    encoded = _encoded_value(key, value, value_type, group)
+    encoded, encoded_options = _encoded_value(key, value, value_type, group, enum_values)
     with _database_sync_lock:
         with _connect() as connection, connection.cursor() as cursor:
             affected = cursor.execute(
                 """
                 UPDATE system_parameters
-                SET `value` = %s, `type` = %s, `group` = %s
+                SET `value` = %s, `type` = %s, `group` = %s,
+                    enum_values = %s
                 WHERE `key` = %s
                 """,
-                (encoded, value_type, group, key),
+                (encoded, value_type, group, encoded_options, key),
             )
             if not affected:
                 cursor.execute("SELECT 1 FROM system_parameters WHERE `key` = %s", (key,))
@@ -387,8 +584,14 @@ def _update_and_refresh_sync(
         return _snapshot[key].public()
 
 
-async def update(key: str, value: Any, value_type: ParameterType, group: str) -> dict[str, Any]:
-    return await _run(_update_and_refresh_sync, key, value, value_type, group)
+async def update(
+    key: str,
+    value: Any,
+    value_type: ParameterType,
+    group: str,
+    enum_values: Any = None,
+) -> dict[str, Any]:
+    return await _run(_update_and_refresh_sync, key, value, value_type, group, enum_values)
 
 
 def _delete_and_refresh_sync(key: str) -> None:

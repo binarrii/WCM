@@ -4,7 +4,6 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   DatabaseZap,
   Edit3,
@@ -15,9 +14,11 @@ import {
   X
 } from '@lucide/vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import PaginationBar from '../components/PaginationBar.vue';
 import {
   formatParameterValue,
   highlightJson,
+  parseEnumOptions,
   parseParameterValue,
   summarizeParameterValue
 } from '../services/parameterFormatting';
@@ -38,7 +39,17 @@ const expandedKeys = ref(new Set());
 const editingKey = ref(null);
 const deleteTarget = ref(null);
 const formError = ref('');
-const form = ref({ key: '', valueText: '', type: 'string', group: 'default', builtIn: false, secret: false });
+const form = ref({
+  key: '',
+  valueText: '',
+  booleanValue: false,
+  enumOptionsText: '[\n  "option-a",\n  "option-b"\n]',
+  enumValueIndex: '',
+  type: 'string',
+  group: 'default',
+  builtIn: false,
+  secret: false
+});
 
 const groups = computed(() => [...new Set(parameters.value.map(item => item.group))].sort());
 const filteredParameters = computed(() => {
@@ -58,11 +69,25 @@ const visibleParameters = computed(() => {
 });
 const visibleStart = computed(() => filteredParameters.value.length ? (page.value - 1) * pageSize + 1 : 0);
 const visibleEnd = computed(() => Math.min(page.value * pageSize, filteredParameters.value.length));
+const currentEnumOptions = computed(() => {
+  if (form.value.type !== 'enum') return [];
+  try {
+    return parseEnumOptions(form.value.enumOptionsText);
+  } catch {
+    return [];
+  }
+});
 
 const sortParameters = items => [...items].sort((left, right) => (
   left.group.localeCompare(right.group, 'zh-CN') || left.key.localeCompare(right.key, 'en')
 ));
 const requestError = (reason, fallback) => reason.response?.data?.detail || reason.message || fallback;
+const sameEnumValue = (left, right) => (
+  typeof left === typeof right && left === right
+);
+const enumOptionLabel = option => (
+  typeof option === 'string' ? `"${option}"（string）` : `${option}（number）`
+);
 
 const loadParameters = async () => {
   loading.value = true;
@@ -93,6 +118,9 @@ const openCreate = () => {
   form.value = {
     key: '',
     valueText: '',
+    booleanValue: false,
+    enumOptionsText: '[\n  "option-a",\n  "option-b"\n]',
+    enumValueIndex: '',
     type: 'string',
     group: selectedGroup.value || 'default',
     builtIn: false,
@@ -102,10 +130,16 @@ const openCreate = () => {
 };
 
 const openEdit = item => {
+  const enumOptions = item.type === 'enum' && Array.isArray(item.options) ? item.options : [];
   editingKey.value = item.key;
   form.value = {
     key: item.key,
     valueText: item.secret ? '' : formatParameterValue(item.value, item.type),
+    booleanValue: item.type === 'boolean' ? item.value : false,
+    enumOptionsText: JSON.stringify(enumOptions, null, 2),
+    enumValueIndex: item.type === 'enum'
+      ? String(enumOptions.findIndex(option => sameEnumValue(option, item.value)))
+      : '',
     type: item.type,
     group: item.group,
     builtIn: Boolean(item.built_in),
@@ -131,8 +165,20 @@ const saveParameter = async () => {
     return;
   }
   let value;
+  let options = null;
   try {
-    value = parseParameterValue(form.value.valueText, form.value.type);
+    if (form.value.type === 'boolean') {
+      value = form.value.booleanValue;
+    } else if (form.value.type === 'enum') {
+      options = parseEnumOptions(form.value.enumOptionsText);
+      const selectedIndex = Number(form.value.enumValueIndex);
+      if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= options.length) {
+        throw new Error('请选择一个枚举值');
+      }
+      value = options[selectedIndex];
+    } else {
+      value = parseParameterValue(form.value.valueText, form.value.type);
+    }
   } catch (reason) {
     formError.value = reason.message;
     return;
@@ -142,7 +188,7 @@ const saveParameter = async () => {
   error.value = '';
   notice.value = '';
   try {
-    const payload = { value, type: form.value.type, group };
+    const payload = { value, type: form.value.type, group, options };
     const saved = editingKey.value
       ? await parameterService.update(editingKey.value, payload)
       : await parameterService.create({ key, ...payload });
@@ -248,11 +294,7 @@ onMounted(loadParameters);
         <div v-if="loading && !parameters.length" class="parameter-empty"><RefreshCw class="spinner" /><p>正在加载参数配置…</p></div>
         <div v-else-if="!visibleParameters.length" class="parameter-empty"><DatabaseZap /><p>{{ parameters.length ? '没有匹配的参数' : '暂无参数配置' }}</p><small>{{ parameters.length ? '调整检索条件后重试' : '点击“新增参数”创建第一条配置' }}</small></div>
       </div>
-      <footer class="parameter-pagination">
-        <span>第 {{ page }} / {{ pageCount }} 页</span>
-        <button type="button" :disabled="page <= 1 || loading" @click="changePage(page - 1)"><ChevronLeft />上一页</button>
-        <button type="button" :disabled="page >= pageCount || loading" @click="changePage(page + 1)">下一页<ChevronRight /></button>
-      </footer>
+      <PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage" />
     </section>
 
     <Teleport to="body">
@@ -262,10 +304,27 @@ onMounted(loadParameters);
             <header><div><h2>{{ editingKey ? '编辑参数' : '新增参数' }}</h2><p>保存后会立即更新数据库与内存快照</p></div><button type="button" :disabled="saving" aria-label="关闭" @click="closeEditor"><X /></button></header>
             <label><span>Key</span><input v-model="form.key" :disabled="Boolean(editingKey) || saving" maxlength="191" placeholder="例如 review.max_retries" autocomplete="off" /></label>
             <div class="parameter-form-grid">
-              <label><span>类型</span><select v-model="form.type" :disabled="saving || form.builtIn"><option value="string">string</option><option value="number">number</option><option value="json">json</option></select></label>
+              <label><span>类型</span><select v-model="form.type" :disabled="saving || form.builtIn"><option value="string">string</option><option value="number">number</option><option value="boolean">boolean</option><option value="enum">enum</option><option value="json">json</option></select></label>
               <label><span>分组</span><input v-model="form.group" :disabled="saving || form.builtIn" maxlength="100" placeholder="default" autocomplete="off" /></label>
             </div>
-            <label><span>{{ form.secret ? '新密钥' : '值' }}</span><textarea v-model="form.valueText" :disabled="saving" rows="12" :placeholder="form.secret ? '敏感值不会回显；输入新值后保存，留空会清空当前密钥' : form.type === 'json' ? '{\n  &quot;enabled&quot;: true\n}' : form.type === 'number' ? '10' : '请输入字符串'"></textarea></label>
+            <template v-if="form.type === 'enum'">
+              <label>
+                <span>枚举可选值（仅支持 string、number）</span>
+                <textarea v-model="form.enumOptionsText" :disabled="saving || form.builtIn" rows="7" placeholder="[&#10;  &quot;auto&quot;,&#10;  &quot;manual&quot;,&#10;  10&#10;]"></textarea>
+              </label>
+              <label>
+                <span>值</span>
+                <select v-model="form.enumValueIndex" :disabled="saving || !currentEnumOptions.length">
+                  <option value="" disabled>请选择枚举值</option>
+                  <option v-for="(option, index) in currentEnumOptions" :key="`${typeof option}:${option}`" :value="String(index)">{{ enumOptionLabel(option) }}</option>
+                </select>
+              </label>
+            </template>
+            <label v-else-if="form.type === 'boolean'">
+              <span>值</span>
+              <select v-model="form.booleanValue" :disabled="saving"><option :value="true">true</option><option :value="false">false</option></select>
+            </label>
+            <label v-else><span>{{ form.secret ? '新密钥' : '值' }}</span><textarea v-model="form.valueText" :disabled="saving" rows="12" :placeholder="form.secret ? '敏感值不会回显；输入新值后保存，留空会清空当前密钥' : form.type === 'json' ? '{\n  &quot;enabled&quot;: true\n}' : form.type === 'number' ? '10' : '请输入字符串'"></textarea></label>
             <p v-if="formError" class="parameter-form-error" role="alert"><AlertCircle />{{ formError }}</p>
             <footer><button class="secondary" type="button" :disabled="saving" @click="closeEditor">取消</button><button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存参数' }}</button></footer>
           </form>

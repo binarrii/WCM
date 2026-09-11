@@ -142,9 +142,10 @@ class Settings(BaseSettings):
 
 @dataclass(frozen=True)
 class BusinessParameterSpec:
-    value_type: Literal["string", "number", "json"]
+    value_type: Literal["string", "number", "boolean", "enum", "json"]
     group: str
     secret: bool = False
+    enum_values: tuple[str | int | float, ...] | None = None
 
 
 # Network addresses, ports, database bootstrap credentials and filesystem paths
@@ -164,7 +165,7 @@ BUSINESS_PARAMETER_SPECS = {
     "insightface_category_collections": BusinessParameterSpec("json", "人物库"),
     "default_category": BusinessParameterSpec("string", "人物库"),
     # Profile and low-quality video face optimization.
-    "face_profile_optimization": BusinessParameterSpec("json", "人脸优化"),
+    "face_profile_optimization": BusinessParameterSpec("boolean", "人脸优化"),
     "face_crop_padding": BusinessParameterSpec("number", "人脸优化"),
     "face_candidate_similarity": BusinessParameterSpec("number", "人脸优化"),
     "face_high_similarity": BusinessParameterSpec("number", "人脸优化"),
@@ -189,12 +190,12 @@ BUSINESS_PARAMETER_SPECS = {
     # Model gateway and behavior.
     "model_api_url": BusinessParameterSpec("string", "模型服务"),
     "model_api_key": BusinessParameterSpec("string", "模型服务", secret=True),
-    "nsfw_image_mode": BusinessParameterSpec("string", "内容审核"),
-    "nsfw_verify_target": BusinessParameterSpec("json", "内容审核"),
-    "nsfw_sampling_mode": BusinessParameterSpec("string", "内容审核"),
+    "nsfw_image_mode": BusinessParameterSpec("enum", "内容审核", enum_values=("auto", "montage")),
+    "nsfw_verify_target": BusinessParameterSpec("boolean", "内容审核"),
+    "nsfw_sampling_mode": BusinessParameterSpec("enum", "内容审核", enum_values=("fixed", "scene")),
     "nsfw_scene_max_stride": BusinessParameterSpec("number", "内容审核"),
     "nsfw_scene_cut_threshold": BusinessParameterSpec("number", "内容审核"),
-    "nsfw_review_mode": BusinessParameterSpec("string", "内容审核"),
+    "nsfw_review_mode": BusinessParameterSpec("enum", "内容审核", enum_values=("target", "window")),
     "nsfw_window_max_seconds": BusinessParameterSpec("number", "内容审核"),
 }
 

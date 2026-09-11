@@ -70,12 +70,15 @@ intentionally compact so more history fits on one page. Search matches task ids,
 video URLs and recorded failure messages; the status selector further filters
 processing, completed and failed tasks.
 
-The parameter page stores typed `string`, `number` and `json` values in the
-`system_parameters` MySQL table. Built-in business settings are seeded from their
-effective legacy values on the first upgraded start, then the database becomes the
-source of truth. Built-in types, groups, enums and numeric ranges are validated and
-cannot be deleted. API keys are write-only in the UI and never returned by the list
-endpoint. Each API worker loads an immutable snapshot at startup, replaces it
+The parameter page stores typed `string`, `number`, `boolean`, `enum` and `json`
+values in the `system_parameters` MySQL table. Enum options are stored with the row
+and may contain only unique string or finite-number values. Built-in business
+settings are seeded from their effective legacy values on the first upgraded start,
+then the database becomes the source of truth. Startup migrations preserve current
+values while upgrading legacy JSON booleans and string enums. Built-in types,
+groups, enum options and numeric ranges are validated and cannot be deleted. API
+keys are write-only in the UI and never returned by the list endpoint. Each API
+worker loads an immutable snapshot at startup, replaces it
 atomically after writes, and periodically refreshes it so updates become visible
 across workers. Existing `settings.<name>` reads resolve against that snapshot;
 generic call sites can also use `api.parameter_store.get(key, default)`.

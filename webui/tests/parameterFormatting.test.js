@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   formatParameterValue,
   highlightJson,
+  parseEnumOptions,
   parseParameterValue,
   summarizeParameterValue
 } from '../src/services/parameterFormatting.js';
@@ -28,8 +29,22 @@ test('editor parsing enforces selected types', () => {
   assert.equal(parseParameterValue('42.5', 'number'), 42.5);
   assert.deepEqual(parseParameterValue('{"a":[1]}', 'json'), { a: [1] });
   assert.equal(parseParameterValue('{raw}', 'string'), '{raw}');
+  assert.equal(parseParameterValue('false', 'boolean'), false);
+  assert.equal(formatParameterValue(true, 'boolean'), 'true');
+  assert.equal(formatParameterValue('auto', 'enum'), 'auto');
   assert.throws(() => parseParameterValue('"42"', 'number'), /有效数字/);
+  assert.throws(() => parseParameterValue('0', 'boolean'), /true 或 false/);
   assert.throws(() => parseParameterValue('{bad}', 'json'), /有效 JSON/);
+});
+
+test('enum options only accept unique string and finite number values', () => {
+  assert.deepEqual(parseEnumOptions('["auto", 1, 2.5]'), ['auto', 1, 2.5]);
+  assert.throws(() => parseEnumOptions('[]'), /非空/);
+  assert.throws(() => parseEnumOptions('[true]'), /string 或 number/);
+  assert.throws(() => parseEnumOptions('[null]'), /string 或 number/);
+  assert.throws(() => parseEnumOptions('[{}]'), /string 或 number/);
+  assert.throws(() => parseEnumOptions('["auto", "auto"]'), /不能重复/);
+  assert.throws(() => parseEnumOptions('[1, 1.0]'), /不能重复/);
 });
 
 test('collapsed values are single-line and bounded', () => {
