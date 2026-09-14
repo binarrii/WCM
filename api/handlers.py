@@ -17,6 +17,7 @@ from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 
 from . import ocr, review_windows
+from .model_clients import model_client
 from .model_health import (
     ModelServiceUnavailable,
     gather_stages,
@@ -283,8 +284,8 @@ async def _request_ocr(base64_image):
         "max_tokens": 300,
         "temperature": 0.0,
     }
-    async with httpx.AsyncClient(timeout=settings.ocr_timeout_s) as client:
-        resp = await ocr.request_ocr(client, url, headers, payload)
+    async with model_client("ocr", settings.ocr_timeout_s) as client:
+        resp = await ocr.request_ocr(client, url, headers, payload, timeout=settings.ocr_timeout_s)
         resp.raise_for_status()
         _model_response_text(resp, "ocr", 300, allow_empty=True)
         # Inspect raw whitespace before strip(), otherwise a newline loop looks
@@ -342,8 +343,10 @@ async def _request_guard(text):
         "temperature": 0.1,
     }
 
-    async with httpx.AsyncClient(timeout=settings.guard_timeout_s) as client:
-        resp = await client.post(url, headers=headers, json=payload)
+    async with model_client("guard", settings.guard_timeout_s) as client:
+        resp = await client.post(
+            url, headers=headers, json=payload, timeout=settings.guard_timeout_s
+        )
         resp.raise_for_status()
         analysis = _model_response_text(resp, "guard", 512)
 
@@ -441,6 +444,10 @@ def _encode_nsfw_frame(frame) -> str:
     if not ok:
         raise ValueError("Could not encode NSFW frame")
     return base64.b64encode(encoded).decode("ascii")
+
+
+class PreparedVisualFrames(list):
+    """Internal marker for bounded JPEGs already encoded from decoded pixels."""
 
 
 def _compose_nsfw_frames(
@@ -655,6 +662,7 @@ async def _request_nsfw_caption(
         settings.model_api_url,
         headers={"Authorization": f"Bearer {settings.model_api_key}"},
         json=payload,
+        timeout=settings.visual_timeout_s,
     )
     response.raise_for_status()
     analysis = _model_response_text(response, "visual", 300).split("</think>")[-1].strip()
@@ -716,8 +724,8 @@ async def _call_nsfw_analysis(
     if timestamps is not None and len(timestamps) != len(images):
         raise ValueError("Each frame must have its own timestamp")
     try:
-        frames = []
-        for image in images:
+        frames = list(images) if isinstance(b64_images, PreparedVisualFrames) else []
+        for image in [] if isinstance(b64_images, PreparedVisualFrames) else images:
             frame = await asyncio.to_thread(
                 _decode_nsfw_frame,
                 image,
@@ -730,7 +738,7 @@ async def _call_nsfw_analysis(
     stage = "images"
     prompt = _NSFW_WINDOW_PROMPT if review_all else _NSFW_TARGET_PROMPT
     try:
-        async with httpx.AsyncClient(timeout=settings.visual_timeout_s) as client:
+        async with model_client("visual", settings.visual_timeout_s) as client:
             montage = len(frames) > 1 and settings.nsfw_image_mode == "montage"
             if not montage:
                 try:
@@ -1333,9 +1341,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
             frames_data = await asyncio.to_thread(
                 _extract_video_windows, video_path, sample_interval
             )
-            frame_results = await gather_stages(
-                *(_analyze_frame(window) for window in frames_data)
-            )
+            frame_results = await gather_stages(*(_analyze_frame(window) for window in frames_data))
         finally:
             if video_path.exists():
                 video_path.unlink()

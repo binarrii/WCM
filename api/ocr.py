@@ -49,14 +49,20 @@ def clean_output(text: str) -> tuple[str, bool]:
     return text[:MAX_CHARACTERS], cut is not None
 
 
-async def request_ocr(client, url: str, headers: dict, payload: dict) -> httpx.Response:
+async def request_ocr(
+    client, url: str, headers: dict, payload: dict, *, timeout=None
+) -> httpx.Response:
     """One request only. Closing the context cancels consumption on early stop.
 
     JSON responses remain compatible with gateways which ignore stream=True.
     Broken streams propagate so the shared model wrapper can retry once.
     """
     async with client.stream(
-        "POST", url, headers=headers, json={**payload, "stream": True}
+        "POST",
+        url,
+        headers=headers,
+        json={**payload, "stream": True},
+        **({"timeout": timeout} if timeout is not None else {}),
     ) as response:
         response.raise_for_status()
         if "text/event-stream" not in response.headers.get("content-type", ""):

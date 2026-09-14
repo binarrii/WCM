@@ -12,6 +12,7 @@ from wcm_facerec.config import settings
 
 from . import parameter_store
 from .face_records import face_records_bp
+from .model_clients import model_client_pool
 from .parameters import parameters_bp
 from .review_events import review_events
 from .review_task_store import initialize as initialize_review_tasks
@@ -27,7 +28,8 @@ async def lifespan(app: FastAPI):
     try:
         await review_events.start()
         try:
-            yield
+            async with model_client_pool():
+                yield
         finally:
             await review_events.close()
     finally:

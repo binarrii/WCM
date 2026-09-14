@@ -437,7 +437,7 @@ async def test_difficult_face_adds_only_budgeted_neighbor_frame(monkeypatch):
             )
         ]
 
-    monkeypatch.setattr(review_windows, "read_video_frames_near", neighbors)
+    monkeypatch.setattr(review_windows, "iter_video_frames_near", neighbors)
     calls = []
 
     async def face(

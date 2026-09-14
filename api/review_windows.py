@@ -8,12 +8,15 @@ import os
 from collections import OrderedDict
 from pathlib import Path
 
+import cv2
+
 from wcm_facerec.config import settings
 
 from . import handlers
 from .face_optimization import aggregate_face_candidates, observation_is_difficult
 from .model_health import gather_stages, protect_video_review
-from .utils import ReviewWindowPlanner, VideoFrameSampler, read_video_frames_near
+from .utils import ReviewWindowPlanner, VideoFrameSampler, iter_video_frames_near
+from .video_workers import threaded_iterator
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,32 @@ class AsyncMemo:
 
 def _digest(value):
     return hashlib.sha256(value.encode() if isinstance(value, str) else value).digest()
+
+
+def _prepare_ocr_frame(frame):
+    encoded = frame.b64
+    return encoded, _digest(encoded)
+
+
+def _prepare_visual_frames(frames):
+    """Encode directly from pixels, without an intermediate JPEG round trip."""
+    images = handlers.PreparedVisualFrames(
+        handlers._encode_nsfw_frame(frame.image) for frame in frames
+    )
+    return images, tuple(_digest(image) for image in images)
+
+
+def _sample_video(path, sample_interval):
+    with VideoFrameSampler(
+        path,
+        sample_interval,
+        max_dimension=1080,
+        sampling_mode=settings.nsfw_sampling_mode,
+        max_visual_stride=settings.nsfw_scene_max_stride,
+        scene_cut_threshold=settings.nsfw_scene_cut_threshold,
+    ) as sampler:
+        yield getattr(sampler, "duration_seconds", None)
+        yield from sampler
 
 
 def merge_window_results(completed, max_gap):
@@ -185,11 +214,11 @@ async def analyze_video(
                 )
 
             async def operation():
-                images = [frame.b64 for frame in window.frames]
+                images, key = await asyncio.to_thread(_prepare_visual_frames, window.frames)
                 # Only visible content is described; timestamps are annotations.
                 # Preserve image order, and assign this window's own span below.
                 return await visual_cache.get(
-                    tuple(_digest(image) for image in images),
+                    key,
                     lambda: handlers._review_visual(
                         images,
                         [frame.timestamp for frame in window.frames],
@@ -221,9 +250,8 @@ async def analyze_video(
                     await progress.start_stage(window.index, "ocr", [frame.timestamp])
 
                 async def operation(frame=frame):
-                    content = await ocr_cache.get(
-                        _digest(frame.b64), lambda: handlers._call_ocr_api(frame.b64)
-                    )
+                    encoded, digest = await asyncio.to_thread(_prepare_ocr_frame, frame)
+                    content = await ocr_cache.get(digest, lambda: handlers._call_ocr_api(encoded))
                     if content:
                         verdict = await guard(content)
                         if not verdict["safe"]:
@@ -254,9 +282,11 @@ async def analyze_video(
                 if progress is not None:
                     await progress.start_stage(window.index, "face", [frame.timestamp])
                 # Face matching receives raw pixels; do not key it by lossy JPEG.
-                key = (frame.image.shape, _digest(frame.image.tobytes()))
 
-                async def operation(frame=frame, key=key):
+                async def operation(frame=frame):
+                    key = await asyncio.to_thread(
+                        lambda: (frame.image.shape, _digest(frame.image.tobytes()))
+                    )
                     return await face_cache.get(
                         key,
                         lambda: handlers._video_face_task(
@@ -411,22 +441,10 @@ async def analyze_video(
         if progress is not None:
             await progress.begin_face_resampling(len(requests))
 
-        try:
-            frames = await asyncio.to_thread(
-                read_video_frames_near,
-                path,
-                [target for target, _ in requests],
-                max_dimension=1080,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Optional face neighbour sampling failed: %s", exc)
-            return 0
-        by_target = {round(target, 6): frame for target, frame in frames}
-        limit = asyncio.Semaphore(settings.face_neighbor_concurrency)
+        neighbor_concurrency = settings.face_neighbor_concurrency
 
-        async def review(target, result):
+        async def review(frame, result):
             try:
-                frame = by_target.get(round(target, 6))
                 if frame is None:
                     return
                 primary_times = {
@@ -436,21 +454,22 @@ async def analyze_video(
                 }
                 if any(abs(frame.timestamp - value) < 0.05 for value in primary_times):
                     return
-                key = (frame.image.shape, _digest(frame.image.tobytes()))
+                key = await asyncio.to_thread(
+                    lambda: (frame.image.shape, _digest(frame.image.tobytes()))
+                )
 
                 async def operation():
-                    async with limit:
-                        return await face_cache.get(
-                            key,
-                            lambda: handlers._video_face_task(
-                                engine,
-                                frame.image,
-                                top_k,
-                                threshold,
-                                frame.timestamp,
-                                auxiliary=True,
-                            ),
-                        )
+                    return await face_cache.get(
+                        key,
+                        lambda: handlers._video_face_task(
+                            engine,
+                            frame.image,
+                            top_k,
+                            threshold,
+                            frame.timestamp,
+                            auxiliary=True,
+                        ),
+                    )
 
                 records = await handlers._review_stage(
                     "face", frame.timestamp, operation, errors, default=[]
@@ -479,12 +498,37 @@ async def analyze_video(
                 if progress is not None:
                     await progress.advance_face_resampling()
 
-        await asyncio.gather(*(review(target, result) for target, result in requests))
+        pending = set()
+        decoded = 0
+        by_target = {round(target, 6): result for target, result in requests}
+        try:
+            async with threaded_iterator(
+                lambda: iter_video_frames_near(path, list(by_target), max_dimension=1080)
+            ) as frames:
+                try:
+                    async for target, frame in frames:
+                        if frame is not None:
+                            decoded += 1
+                        pending.add(asyncio.create_task(review(frame, by_target[round(target, 6)])))
+                        if len(pending) >= neighbor_concurrency:
+                            done, pending = await asyncio.wait(
+                                pending, return_when=asyncio.FIRST_COMPLETED
+                            )
+                            await asyncio.gather(*done)
+                except (OSError, ValueError, cv2.error) as exc:
+                    logger.warning(
+                        "Optional face neighbour sampling failed: %s", type(exc).__name__
+                    )
+                await asyncio.gather(*pending)
+        finally:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
         if progress is not None:
             await progress.finish_face_resampling()
         for result in completed:
             rebuild_face_hits(result)
-        return len(frames)
+        return decoded
 
     async def consumer():
         while True:
@@ -519,17 +563,11 @@ async def analyze_video(
             timeout=900.0,
         )
         consumers = [asyncio.create_task(consumer()) for _ in range(concurrency)]
-        with VideoFrameSampler(
-            path,
-            sample_interval,
-            max_dimension=1080,
-            sampling_mode=settings.nsfw_sampling_mode,
-            max_visual_stride=settings.nsfw_scene_max_stride,
-            scene_cut_threshold=settings.nsfw_scene_cut_threshold,
-        ) as sampler:
+        async with threaded_iterator(lambda: _sample_video(path, sample_interval)) as sampler:
+            duration = await anext(sampler)
             if progress is not None:
-                await progress.begin_review(getattr(sampler, "duration_seconds", None))
-            for sample in sampler:
+                await progress.begin_review(duration)
+            async for sample in sampler:
                 ready = planner.push(sample)
                 if ready is not None:
                     selected_frames += len(ready.frames)

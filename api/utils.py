@@ -309,18 +309,19 @@ class VideoFrameSampler:
         )
 
 
-def read_video_frames_near(
+def iter_video_frames_near(
     path: Path,
     timestamps,
     *,
     max_dimension: int | None = 1080,
-) -> list[tuple[float, VideoFrame]]:
+):
     """Read the nearest presented frame for each sparse auxiliary timestamp.
 
     This is intentionally separate from ``VideoFrameSampler``: primary review
     coverage and window semantics stay unchanged, while difficult face tracks
-    can request a small, bounded second pass. Returned timestamps are the
-    decoder's actual PTS, never the requested seek position.
+    can request a small, bounded second pass. Nearby targets share a forward
+    decode pass. Only the frames bracketing the target are kept in memory.
+    Every target is yielded, with None for a missing/already-used PTS.
     """
     targets = sorted(
         {
@@ -330,7 +331,7 @@ def read_video_frames_near(
         }
     )
     if not targets:
-        return []
+        return
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         cap.release()
@@ -340,12 +341,19 @@ def read_video_frames_near(
         fps = fps if math.isfinite(fps) and fps > 0 else 25.0
         radius = max(0.3, 3.0 / fps)
         max_reads = max(12, int(math.ceil(fps * (radius * 2 + 0.2))))
-        output = []
         used_pts = set()
+        previous_target = None
+        before = after = None
         for target in targets:
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, target - radius) * 1000.0)
-            best = None
+            if previous_target is None or target - previous_target > radius * 2:
+                cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, target - radius) * 1000.0)
+                before = after = None
+            previous_target = target
             for _ in range(max_reads):
+                if after is not None and after[0] > target:
+                    break
+                if after is not None:
+                    before = after
                 ok, image = cap.read()
                 if not ok:
                     break
@@ -353,39 +361,42 @@ def read_video_frames_near(
                 if not math.isfinite(pts) or pts < 0:
                     frame_index = cap.get(cv2.CAP_PROP_POS_FRAMES) - 1
                     pts = max(0.0, frame_index / fps)
-                delta = abs(pts - target)
-                if best is None or delta < best[0]:
-                    best = (delta, pts, image, int(max(0, cap.get(cv2.CAP_PROP_POS_FRAMES) - 1)))
-                if pts > target and delta > (best[0] if best else radius):
-                    break
-                if pts >= target + radius:
-                    break
-            if best is None:
+                after = (pts, image, int(max(0, cap.get(cv2.CAP_PROP_POS_FRAMES) - 1)))
+            candidates = [value for value in (before, after) if value is not None]
+            if not candidates:
+                yield target, None
                 continue
-            _, pts, image, frame_index = best
+            pts, image, frame_index = min(candidates, key=lambda value: abs(value[0] - target))
             pts_key = round(pts, 6)
             if pts_key in used_pts:
+                yield target, None
                 continue
             used_pts.add(pts_key)
             if max_dimension and max(image.shape[:2]) > max_dimension:
                 height, width = image.shape[:2]
                 scale = max_dimension / max(height, width)
                 image = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))))
-            output.append(
-                (
-                    target,
-                    VideoFrame(
-                        timestamp=pts,
-                        image=image,
-                        sampled=False,
-                        frame_index=frame_index,
-                        duration=1.0 / fps,
-                    ),
-                )
+            yield (
+                target,
+                VideoFrame(
+                    timestamp=pts,
+                    image=image,
+                    sampled=False,
+                    frame_index=frame_index,
+                    duration=1.0 / fps,
+                ),
             )
-        return output
     finally:
         cap.release()
+
+
+def read_video_frames_near(path: Path, timestamps, *, max_dimension=1080):
+    """List compatibility helper; the review pipeline consumes the iterator."""
+    return [
+        (target, frame)
+        for target, frame in iter_video_frames_near(path, timestamps, max_dimension=max_dimension)
+        if frame is not None
+    ]
 
 
 async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> bytes:

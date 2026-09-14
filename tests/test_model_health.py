@@ -283,7 +283,10 @@ async def test_breaker_stops_producer_models_and_persists_failure(
             calls += 1
             await asyncio.sleep(0.005)
             raise httpx.ReadTimeout("private upstream details")
-        if calls >= 9:  # Let four operations exhaust both attempts before blocking siblings.
+        # Off-thread face preprocessing can start after its faster siblings.
+        # Block them after four exhausted calls; Guard needs an upstream result
+        # to enter its fifth call, so keep that branch's threshold at nine.
+        if calls >= (8 if failed_model == "face" else 9):
             blocked_stages.add(name)
             try:
                 await asyncio.Event().wait()
