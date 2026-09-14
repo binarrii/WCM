@@ -23,6 +23,7 @@
 .parameter-table-card h2 { font: 700 1rem var(--font-display); }
 .parameter-table-card header span, .parameter-table-card header small { color: var(--text-muted); font-size: .7rem; }
 .parameter-table-scroll { min-height: 0; flex: 1; overflow: auto; }
+.parameter-table-scroll thead th { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg-primary) 65%, var(--bg-secondary)); box-shadow: inset 0 -1px 0 var(--border-color); }
 .parameter-table-card table { width: 100%; min-width: 840px; border-collapse: collapse; table-layout: fixed; }
 .parameter-table-card th { padding: 9px 12px; color: var(--text-muted); text-align: left; background: color-mix(in srgb, var(--bg-primary) 65%, transparent); border-bottom: 1px solid var(--border-color); font-size: .68rem; letter-spacing: .04em; }
 .parameter-table-card th:first-child { width: 44px; }

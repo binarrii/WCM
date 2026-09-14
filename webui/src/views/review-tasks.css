@@ -25,6 +25,7 @@
 .task-table-card h2 { font: 700 1rem var(--font-display); }
 .task-table-card header span, .task-table-card header small { color: var(--text-muted); font-size: .7rem; }
 .task-table-scroll { min-height: 0; flex: 1; overflow: auto; }
+.task-table-scroll thead th { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg-primary) 65%, var(--bg-secondary)); box-shadow: inset 0 -1px 0 var(--border-color); }
 table { width: 100%; min-width: 920px; border-collapse: collapse; table-layout: fixed; }
 th { padding: 9px 12px; color: var(--text-muted); text-align: left; background: color-mix(in srgb, var(--bg-primary) 65%, transparent); border-bottom: 1px solid var(--border-color); font-size: .68rem; letter-spacing: .04em; }
 th:nth-child(1) { width: 42px; } th:nth-child(2) { width: 104px; } th:nth-child(3) { width: 38%; } th:nth-child(4) { width: 240px; } th:nth-child(5) { width: 76px; } th:nth-child(6) { width: 170px; } th:last-child { width: 112px; }
