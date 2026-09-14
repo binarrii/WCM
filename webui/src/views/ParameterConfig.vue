@@ -34,7 +34,7 @@ const notice = ref('');
 const query = ref('');
 const selectedGroup = ref('');
 const page = ref(1);
-const pageSize = 30;
+const pageSize = ref(30);
 const expandedKeys = ref(new Set());
 const editingKey = ref(null);
 const deleteTarget = ref(null);
@@ -62,13 +62,13 @@ const filteredParameters = computed(() => {
       .includes(term);
   });
 });
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredParameters.value.length / pageSize)));
+const pageCount = computed(() => Math.max(1, Math.ceil(filteredParameters.value.length / pageSize.value)));
 const visibleParameters = computed(() => {
-  const start = (page.value - 1) * pageSize;
-  return filteredParameters.value.slice(start, start + pageSize);
+  const start = (page.value - 1) * pageSize.value;
+  return filteredParameters.value.slice(start, start + pageSize.value);
 });
-const visibleStart = computed(() => filteredParameters.value.length ? (page.value - 1) * pageSize + 1 : 0);
-const visibleEnd = computed(() => Math.min(page.value * pageSize, filteredParameters.value.length));
+const visibleStart = computed(() => filteredParameters.value.length ? (page.value - 1) * pageSize.value + 1 : 0);
+const visibleEnd = computed(() => Math.min(page.value * pageSize.value, filteredParameters.value.length));
 const currentEnumOptions = computed(() => {
   if (form.value.type !== 'enum') return [];
   try {
@@ -197,7 +197,7 @@ const saveParameter = async () => {
       saved
     ]);
     const savedIndex = filteredParameters.value.findIndex(item => item.key === saved.key);
-    if (savedIndex >= 0) page.value = Math.floor(savedIndex / pageSize) + 1;
+    if (savedIndex >= 0) page.value = Math.floor(savedIndex / pageSize.value) + 1;
     expandedKeys.value = new Set([...expandedKeys.value, saved.key]);
     notice.value = editingKey.value ? `参数 ${saved.key} 已更新并刷新内存` : `参数 ${saved.key} 已创建并载入内存`;
     editingKey.value = null;
@@ -230,7 +230,7 @@ const confirmDelete = async () => {
   }
 };
 
-watch([query, selectedGroup], () => { page.value = 1; });
+watch([query, selectedGroup, pageSize], () => { page.value = 1; });
 watch(pageCount, count => { if (page.value > count) page.value = count; });
 onMounted(loadParameters);
 </script>
@@ -294,7 +294,7 @@ onMounted(loadParameters);
         <div v-if="loading && !parameters.length" class="parameter-empty"><RefreshCw class="spinner" /><p>正在加载参数配置…</p></div>
         <div v-else-if="!visibleParameters.length" class="parameter-empty"><DatabaseZap /><p>{{ parameters.length ? '没有匹配的参数' : '暂无参数配置' }}</p><small>{{ parameters.length ? '调整检索条件后重试' : '点击“新增参数”创建第一条配置' }}</small></div>
       </div>
-      <PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage" />
+      <PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage" :total="filteredParameters.length" v-model:page-size="pageSize" />
     </section>
 
     <Teleport to="body">

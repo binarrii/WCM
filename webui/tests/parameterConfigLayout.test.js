@@ -54,9 +54,9 @@ test('built-in parameters are protected and secrets are never rendered', () => {
 
 test('parameter table paginates like review tasks and fills the viewport', () => {
   assert.match(component, /const page = ref\(1\)/);
-  assert.match(component, /const pageSize = 30/);
-  assert.match(component, /filteredParameters\.value\.slice\(start, start \+ pageSize\)/);
-  assert.match(component, /watch\(\[query, selectedGroup\]/);
+  assert.match(component, /const pageSize = ref\(30\)/);
+  assert.match(component, /filteredParameters\.value\.slice\(start, start \+ pageSize\.value\)/);
+  assert.match(component, /watch\(\[query, selectedGroup, pageSize\]/);
   assert.match(component, /import PaginationBar/);
   assert.match(component, /<PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage"/);
   assert.match(css, /\.parameter-config\s*\{[^}]*height:\s*calc\(100dvh\s*-\s*108px\)[^}]*min-height:\s*0[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*overflow:\s*hidden[^}]*\}/);

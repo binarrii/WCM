@@ -15,8 +15,8 @@ test('review task table fills the viewport while keeping a bottom margin', () =>
   assert.match(component, /<PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage"/);
   assert.doesNotMatch(css, /\.task-pagination/);
   assert.match(pagination, /aria-label="分页导航"/);
-  assert.match(pagination, /@click="\$emit\('change', page - 1\)"/);
-  assert.match(pagination, /@click="\$emit\('change', page \+ 1\)"/);
+  assert.match(pagination, /@click="changePage\(currentPage - 1\)"/);
+  assert.match(pagination, /@click="changePage\(currentPage \+ 1\)"/);
 });
 
 test('action column remains a table cell so row separators span the full width', () => {

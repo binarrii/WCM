@@ -14,7 +14,7 @@ import { mergeReviewTask } from '../services/reviewStream';
 const query = ref('');
 const status = ref('');
 const page = ref(1);
-const pageSize = 30;
+const pageSize = ref(30);
 const total = ref(0);
 const tasks = ref([]);
 const loading = ref(false);
@@ -41,7 +41,7 @@ const taskStream = reviewTaskService.stream({
   }
 });
 
-const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
 const allSelected = computed(() => tasks.value.length > 0 && tasks.value.every(task => selectedIds.value.has(task.id)));
 const someSelected = computed(() => !allSelected.value && tasks.value.some(task => selectedIds.value.has(task.id)));
 const downloadableSelectedIds = computed(() => tasks.value
@@ -73,7 +73,7 @@ const loadTasks = async ({ silent = false } = {}) => {
   if (!silent) { loading.value = true; error.value = ''; }
   try {
     const payload = await reviewTaskService.list({
-      query: query.value.trim(), status: status.value, page: page.value, pageSize
+      query: query.value.trim(), status: status.value, page: page.value, pageSize: pageSize.value
     });
     if (sequence !== requestSequence) return;
     const previous = new Map(tasks.value.map(task => [task.id, task]));
@@ -181,6 +181,7 @@ watch(query, () => {
   searchTimer = setTimeout(searchNow, 300);
 });
 watch(status, searchNow);
+watch(pageSize, searchNow);
 onMounted(loadTasks);
 onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStream.stop(); });
 </script>
@@ -225,7 +226,7 @@ onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStr
         <div v-if="loading && !tasks.length" class="task-empty"><RefreshCw class="spinner" /><p>正在加载任务…</p></div>
         <div v-else-if="!tasks.length" class="task-empty"><ListVideo /><p>没有找到审核任务</p><small>可调整检索条件，或先提交一个视频审核。</small></div>
       </div>
-      <PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage" />
+      <PaginationBar :page="page" :page-count="pageCount" :disabled="loading" @change="changePage" :total="total" v-model:page-size="pageSize" />
     </section>
 
     <ConfirmDialog
