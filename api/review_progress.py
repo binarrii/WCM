@@ -6,6 +6,8 @@ import logging
 import math
 import time
 
+from wcm_facerec.execution import current_execution
+
 from . import review_task_store
 
 logger = logging.getLogger(__name__)
@@ -210,6 +212,9 @@ class ReviewProgress:
             self.sequence += 1
             data = self.snapshot()
             data["sequence"] = self.sequence
+            execution = current_execution.get()
+            if execution:
+                data["attempt"] = execution.attempt
             percent = f"{data['percent']:.1f}%" if data["percent"] is not None else "unknown"
             logger.info(
                 "Review progress: task=%s phase=%s progress=%s windows=%s/%s samples=%s/%s "

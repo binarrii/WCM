@@ -11,6 +11,8 @@ from functools import wraps
 from pathlib import Path
 from uuid import uuid4
 
+from . import image_store, person_operations
+from .cluster import cluster_slot
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,16 @@ def library_write(func):
 
     @wraps(func)
     async def locked(*args, **kwargs):
+        if settings.cluster_enabled:
+            async with cluster_slot("person-library"):
+                task = asyncio.create_task(
+                    person_operations.run(args[0], func, *args[1:], **kwargs)
+                )
+                try:
+                    return await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    await task
+                    raise
         IMAGE_ROOT.mkdir(parents=True, exist_ok=True)
         with (IMAGE_ROOT / ".person-library.lock").open("a") as lock:
             while True:
@@ -60,9 +72,11 @@ def read_gallery(item):
     images = {}
     for value in gallery(item):
         path = Path(value).resolve()
-        if not path.is_relative_to(IMAGE_ROOT.resolve()) or not path.is_file():
+        if not path.is_relative_to(IMAGE_ROOT.resolve()) or not image_store.exists(
+            path, IMAGE_ROOT
+        ):
             raise ValueError(f"人物 {item['id']} 的原照片缺失，无法安全合并，请先恢复照片")
-        images[value] = path.read_bytes()
+        images[value] = image_store.read_bytes(path, IMAGE_ROOT)
     if not images or int(item.get("face_count") or 0) > len(images):
         raise ValueError(f"人物 {item['id']} 的原照片不完整，无法安全合并")
     return images
@@ -123,8 +137,7 @@ async def mutate_gallery(engine, target_id, *, source_ids=None, image=None, imag
             return {"record": target, "added_images": 0, "merged_ids": []}
         # Keep paths independent of mutable names/category and of other people.
         path = IMAGE_ROOT / "uploads" / f"{uuid4().hex}{image_ext}"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        await run(path.write_bytes, image)
+        await run(image_store.write_bytes, path, image, IMAGE_ROOT)
         new_file = path
         paths.append(str(path))
         images[str(path)] = image
@@ -138,6 +151,8 @@ async def mutate_gallery(engine, target_id, *, source_ids=None, image=None, imag
 
     def save_journal(status):
         journal_data["status"] = status
+        if settings.cluster_enabled:
+            return person_operations.save_journal(operation_id, journal_data)
         temporary = journal.with_suffix(".tmp")
         temporary.write_text(json.dumps(journal_data, ensure_ascii=False), encoding="utf-8")
         temporary.replace(journal)
@@ -241,7 +256,7 @@ async def mutate_gallery(engine, target_id, *, source_ids=None, image=None, imag
             except Exception:
                 failures.append(pid)
         if new_file and not failures:
-            new_file.unlink(missing_ok=True)
+            image_store.delete(new_file, IMAGE_ROOT)
         await run(save_journal, "recovery_required" if failures else "rolled_back")
         if failures:
             raise RuntimeError(
@@ -308,6 +323,8 @@ async def remove_gallery_images(engine, target_id: str, image_paths: list[str]):
 
     def save_journal(status):
         journal_data["status"] = status
+        if settings.cluster_enabled:
+            return person_operations.save_journal(operation_id, journal_data)
         temporary = journal.with_suffix(".tmp")
         temporary.write_text(json.dumps(journal_data, ensure_ascii=False), encoding="utf-8")
         temporary.replace(journal)

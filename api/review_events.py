@@ -8,6 +8,10 @@ import os
 import uuid
 from pathlib import Path
 
+from redis.asyncio import Redis
+
+from wcm_facerec.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,8 +21,21 @@ class ReviewEventBus:
         self.path = None
         self.server = None
         self.listeners = set()
+        self.redis = None
+        self.reader = None
+        self.origin = uuid.uuid4().hex
+        self.channel = f"{settings.cluster_namespace}:review-events"
 
     async def start(self):
+        if settings.cluster_enabled:
+            if not settings.redis_url:
+                raise RuntimeError("Cluster mode requires WCM_REDIS_URL")
+            self.redis = Redis.from_url(
+                settings.redis_url, socket_connect_timeout=2, socket_timeout=2
+            )
+            await self.redis.ping()
+            self.reader = asyncio.create_task(self._read_redis())
+            return
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.path = self.directory / f"worker-{os.getpid()}-{uuid.uuid4().hex[:12]}.sock"
         self.server = await asyncio.start_unix_server(
@@ -26,6 +43,13 @@ class ReviewEventBus:
         )
 
     async def close(self):
+        if self.reader:
+            self.reader.cancel()
+            await asyncio.gather(self.reader, return_exceptions=True)
+            self.reader = None
+        if self.redis:
+            await self.redis.aclose()
+            self.redis = None
         if self.server:
             self.server.close()
             await self.server.wait_closed()
@@ -88,6 +112,14 @@ class ReviewEventBus:
 
     async def publish(self, event):
         self._deliver(event)
+        if self.redis:
+            try:
+                await self.redis.publish(
+                    self.channel, json.dumps({"origin": self.origin, "event": event})
+                )
+            except Exception as exc:
+                logger.warning("Redis event publication unavailable: %s", type(exc).__name__)
+            return
         if not self.server:
             return  # Single-process scripts/tests can use the local fan-out.
         try:
@@ -103,6 +135,28 @@ class ReviewEventBus:
         except Exception as exc:
             # Event delivery is independent of the persisted audit outcome.
             logger.warning("Review event publication unavailable: %s", type(exc).__name__)
+
+    async def _read_redis(self):
+        while True:
+            try:
+                async with self.redis.pubsub() as pubsub:
+                    await pubsub.subscribe(self.channel)
+                    # Reconnect always requires a fresh database snapshot.
+                    self._deliver({"type": "resync"})
+                    async for message in pubsub.listen():
+                        if message["type"] != "message":
+                            continue
+                        payload = json.loads(message["data"])
+                        if payload.get("origin") != self.origin:
+                            event = payload.get("event", {})
+                            if event.get("type") in {"changed", "progress"}:
+                                self._deliver(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Redis event subscription reconnecting: %s", type(exc).__name__)
+                self._deliver({"type": "resync"})
+                await asyncio.sleep(1)
 
 
 review_events = ReviewEventBus()

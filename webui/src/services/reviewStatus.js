@@ -1,9 +1,9 @@
-export const reviewTaskActive = task => ['processing', 'cancelling'].includes(task?.status);
+export const reviewTaskActive = task => ['queued', 'processing', 'cancelling'].includes(task?.status);
 
 /** Processing has finished and results (including incomplete checks) can be reviewed. */
 export const reviewResultsReady = task => {
   const status = typeof task === 'string' ? task : task?.status;
-  if (status === 'processing') return false;
+  if (['queued', 'processing', 'cancelling'].includes(status)) return false;
   return status === 'completed' || status === 'partial'
     || (status === 'failed' && (task?.has_results === true || Array.isArray(task?.results)));
 };

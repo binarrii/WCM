@@ -1,64 +1,92 @@
+name: wcm-cluster
+
+x-runtime: &runtime
+  image: wcm-cluster-api:${WCM_IMAGE_TAG:-dev}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    network: ${WCM_BUILD_NETWORK:-default}
+  init: true
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    WCM_API_HOST: 0.0.0.0
+    WCM_API_PORT: "8000"
+    WCM_CLUSTER_ENABLED: "true"
+    WCM_CLUSTER_NAMESPACE: wcm-cluster
+    WCM_REVIEW_TASKS_DB_ENABLED: "true"
+    WCM_REVIEW_TASKS_DB_HOST: mysql
+    WCM_REVIEW_TASKS_DB_PORT: "3306"
+    WCM_REDIS_URL: redis://redis:6379/0
+    WCM_IMAGE_STORAGE: s3
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
+
 services:
   mysql:
     image: mysql:8.4
-    container_name: wcm-review-tasks-mysql
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-    ports:
-      # Use a non-default host port to avoid colliding with an existing MySQL.
-      - "127.0.0.1:${WCM_MYSQL_PORT:-13306}:3306"
+    command: [--character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci]
     environment:
       MYSQL_DATABASE: ${WCM_REVIEW_TASKS_DB_NAME:-wcm}
       MYSQL_USER: ${WCM_REVIEW_TASKS_DB_USER:-wcm}
-      MYSQL_PASSWORD: ${WCM_REVIEW_TASKS_DB_PASSWORD:-wcm}
-      MYSQL_ROOT_PASSWORD: ${WCM_MYSQL_ROOT_PASSWORD:-wcm-root}
+      MYSQL_PASSWORD: ${WCM_REVIEW_TASKS_DB_PASSWORD:?Set database password in .env}
+      MYSQL_ROOT_PASSWORD: ${WCM_MYSQL_ROOT_PASSWORD:?Set root password in .env}
+    ports: ["127.0.0.1:${WCM_MYSQL_PORT:-13307}:3306"]
+    volumes: [mysql-data:/var/lib/mysql]
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent']
       interval: 5s
       timeout: 5s
-      retries: 20
-      start_period: 20s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:8-alpine
+    command: [redis-server, --save, "", --appendonly, "no"]
     restart: unless-stopped
-    networks:
-      - wcm-network
-    volumes:
-      - review-tasks-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   api:
+    <<: *runtime
+    deploy: {replicas: 2}
+    cpus: 2
+    mem_limit: 2g
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  worker:
+    <<: *runtime
+    command: [python, -m, api.worker]
+    deploy: {replicas: 2}
+    cpus: 2
+    mem_limit: 4g
+    stop_grace_period: 150s
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-float(pathlib.Path('/tmp/wcm-worker-health').read_text()) < 30"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  webui:
+    image: wcm-cluster-webui:${WCM_IMAGE_TAG:-dev}
     build:
       context: .
-      dockerfile: Dockerfile
-      # Some deployment hosts do not provide DNS inside Docker's build
-      # bridge. Set WCM_BUILD_NETWORK=host there; keep the portable default.
+      dockerfile: Dockerfile.webui
       network: ${WCM_BUILD_NETWORK:-default}
-    container_name: wcm-facerec-api
-    ports:
-      - "8000:8000"
-    environment:
-      - GUNICORN_WORKERS=4
-      - WCM_API_HOST=0.0.0.0
-      - WCM_API_PORT=8000
-      - WCM_REVIEW_TASKS_DB_ENABLED=true
-      - WCM_REVIEW_TASKS_DB_HOST=mysql
-      - WCM_REVIEW_TASKS_DB_PORT=3306
-      - WCM_REVIEW_TASKS_DB_NAME=${WCM_REVIEW_TASKS_DB_NAME:-wcm}
-      - WCM_REVIEW_TASKS_DB_USER=${WCM_REVIEW_TASKS_DB_USER:-wcm}
-      - WCM_REVIEW_TASKS_DB_PASSWORD=${WCM_REVIEW_TASKS_DB_PASSWORD:-wcm}
+    ports: ["${WCM_HTTP_PORT:-8000}:8080"]
     depends_on:
-      mysql:
-        condition: service_healthy
+      api: {condition: service_healthy}
     restart: unless-stopped
-    networks:
-      - wcm-network
-    volumes:
-      # Keep the existing host image library visible inside the container.
-      # Override WCM_IMAGE_DIR when deploying from a different host path.
-      - ${WCM_IMAGE_DIR:-/tmp/wcm}:/tmp/wcm
-
-networks:
-  wcm-network:
-    driver: bridge
 
 volumes:
-  review-tasks-mysql-data:
+  mysql-data:

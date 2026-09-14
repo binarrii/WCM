@@ -1,22 +1,3 @@
-# Stage 1: Build the Vue dashboard
-FROM node:22-slim AS web-builder
-
-WORKDIR /webui
-RUN --mount=type=cache,target=/root/.npm \
-    npm install --global pnpm@10.33.0 \
-    --fetch-retries=10 \
-    --fetch-timeout=600000
-COPY webui/package.json webui/pnpm-lock.yaml ./
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm config set store-dir /pnpm/store \
-    && pnpm install --frozen-lockfile \
-    --fetch-retries=10 \
-    --fetch-timeout=600000 \
-    --network-concurrency=4
-COPY webui/ ./
-RUN pnpm build
-
-
 # Stage 2: Build Python dependencies
 FROM python:3.12-slim AS builder
 
@@ -70,7 +51,6 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/api ./api
 COPY --from=builder /app/scripts ./scripts
-COPY --from=web-builder /webui/dist /www
 
 # Use virtual environment python
 ENV PATH="/app/.venv/bin:$PATH"
@@ -93,7 +73,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health 2>/dev/null || exit 1
 
-# Dynamic worker count: GUNICORN_WORKERS env var (default: CPU cores * 2 + 1, min 4)
-# Override with: docker run -e GUNICORN_WORKERS=8
-# CMD ["sh", "-c", "cpus=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2); workers=${GUNICORN_WORKERS:-$((cpus * 2 + 1))}; workers=$((workers < 4 ? 4 : workers)); echo \"Starting gunicorn with $workers workers\"; gunicorn -w $workers -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -t 60 api.main:app"]
-CMD ["sh", "-c", "cpus=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2); workers=${GUNICORN_WORKERS:-$((cpus - 1))}; workers=$((workers < 4 ? 4 : workers)); echo \"Starting gunicorn with $workers workers\"; gunicorn -w $workers -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -t 60 api.main:app"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

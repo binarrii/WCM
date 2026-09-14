@@ -8,10 +8,14 @@ export const reviewStreamUrl = (apiBase, pageUrl) => {
 
 export const mergeReviewTask = (current, next) => {
   if (!current) return next;
+  const currentAttempt = current.attempt ?? current.progress?.attempt ?? 0;
+  const nextAttempt = next.attempt ?? next.progress?.attempt ?? currentAttempt;
+  if (nextAttempt < currentAttempt) return current;
+  if (next.updated_at && current.updated_at && next.updated_at < current.updated_at) return current;
   if (!reviewTaskActive(current) && reviewTaskActive(next)) return current;
-  if (current.status === 'cancelling' && next.status === 'processing') return current;
+  if (current.status === 'cancelling' && ['queued', 'processing'].includes(next.status)) return current;
   const merged = { ...current, ...next };
-  if (next.status === 'processing' && (current.progress?.sequence ?? -1) > (next.progress?.sequence ?? -1)) {
+  if (nextAttempt === currentAttempt && next.status === 'processing' && (current.progress?.sequence ?? -1) > (next.progress?.sequence ?? -1)) {
     merged.progress = current.progress;
   }
   return merged;

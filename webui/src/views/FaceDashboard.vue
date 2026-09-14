@@ -66,6 +66,7 @@ const formatImagesPerPerson = (images, people) => (
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
 const editingRecordId = ref(null);
+const editingRecordRevision = ref(null);
 const isAppendMode = ref(false);
 const mergeMode = ref(false);
 const selectedPeople = ref([]);
@@ -279,7 +280,7 @@ const confirmDeleteImages = async () => {
   if (!target || !imageUrls.length || deletingImages.value) return;
   deletingImages.value = true;
   try {
-    const result = await faceService.deleteImages(target.id, imageUrls);
+    const result = await faceService.deleteImages(target.id, imageUrls, target.revision);
     applyUpdatedRecord(result.record);
     imageDeleteTarget.value = null;
     selectedImageUrls.value = new Set();
@@ -490,6 +491,7 @@ const openEditModal = (record) => {
   isAppendMode.value = false;
   isEditMode.value = true;
   editingRecordId.value = record.id;
+  editingRecordRevision.value = record.revision;
   form.value = {
     name: record.name,
     occupation: record.person?.occupation || '',
@@ -536,7 +538,7 @@ const handleSubmit = async () => {
     if (isAppendMode.value) {
       const formData = new FormData();
       formData.append('file', form.value.file);
-      const result = await faceService.appendImage(editingRecordId.value, formData);
+      const result = await faceService.appendImage(editingRecordId.value, formData, editingRecordRevision.value);
       submitting.value = false;
       closeModal();
       records.value = records.value.map(item => item.id === result.record.id ? result.record : item);
@@ -553,7 +555,7 @@ const handleSubmit = async () => {
         occupation: form.value.occupation,
         type: form.value.type,
         remarks: form.value.remarks
-      });
+      }, editingRecordRevision.value);
       showToast('人脸及人物记录更新成功');
       submitting.value = false;
       closeModal();
@@ -628,7 +630,7 @@ const handleDelete = async () => {
   if (!record) return;
   submitting.value = true;
   try {
-    await faceService.deleteRecord(record.id);
+    await faceService.deleteRecord(record.id, record.revision);
     showToast('记录删除成功');
     
     // Filter out deleted record from active search results

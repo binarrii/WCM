@@ -11,6 +11,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, model_validator
 
+from wcm_facerec import person_operations
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
 from wcm_facerec.person_library import SameNamePeopleError
@@ -36,7 +37,7 @@ def _path_to_image_url(file_path: str | None) -> str | None:
         target.relative_to(image_root)
     except ValueError:
         return None
-    if not target.is_file():
+    if settings.image_storage != "s3" and not target.is_file():
         return None
     return f"/images/{relative.as_posix()}"
 
@@ -66,7 +67,7 @@ def _image_url_to_path(image_url: str) -> Path | None:
         target.relative_to(root)
     except (TypeError, ValueError, OSError):
         return None
-    return target if target.is_file() else None
+    return target if settings.image_storage == "s3" or target.is_file() else None
 
 
 def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
@@ -78,6 +79,9 @@ def _item_with_person(item: dict, *, aggregate_id: str | None = None) -> dict:
     image_urls = _item_image_urls(item)
     return {
         "id": record_id,
+        "revision": person_operations.record_revision(item)
+        if item.get("id") == record_id
+        else None,
         "name": item.get("name"),
         "image_url": image_urls[0] if image_urls else None,
         "image_urls": image_urls,
@@ -350,14 +354,9 @@ class DeleteFaceImagesRequest(BaseModel):
 
     @model_validator(mode="after")
     def valid_image_urls(self):
-        if (
-            len(set(self.image_urls)) != len(self.image_urls)
-            or any(
-                not isinstance(value, str)
-                or not value.startswith("/images/")
-                or len(value) > 2048
-                for value in self.image_urls
-            )
+        if len(set(self.image_urls)) != len(self.image_urls) or any(
+            not isinstance(value, str) or not value.startswith("/images/") or len(value) > 2048
+            for value in self.image_urls
         ):
             raise ValueError("请选择有效且不重复的人物照片")
         return self

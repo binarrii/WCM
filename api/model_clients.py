@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 
 import httpx
 
+from wcm_facerec.cluster import model_slot
+
 _pools = {}
 
 
@@ -23,6 +25,13 @@ async def model_client_pool():
 
 @asynccontextmanager
 async def model_client(model, timeout):
+    async with model_slot(model):
+        async with _model_client(model, timeout) as client:
+            yield client
+
+
+@asynccontextmanager
+async def _model_client(model, timeout):
     clients = _pools.get(asyncio.get_running_loop())
     if clients is None:
         # CLI calls and tests without an application lifespan still own/close

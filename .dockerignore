@@ -29,3 +29,8 @@ test_*
 *_test.py
 bench_*
 benchmark*
+backups/
+.codegraph/
+source.tar.gz
+update.tar.gz
+webui/node_modules/

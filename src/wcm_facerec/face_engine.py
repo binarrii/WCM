@@ -33,6 +33,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from . import image_store, person_operations
+from .cluster import model_slot
 from .config import DEFAULT_DISTANCE_THRESHOLD, settings
 from .ifs_adapter import InsightFaceAdapter, crop_query_face
 from .person_library import (
@@ -89,10 +91,12 @@ def _persist_image(
     already exists (idempotent).
     """
     target_path = _image_target_path(image_bytes, name, category, ext)
-    target_dir = target_path.parent
-    target_dir.mkdir(parents=True, exist_ok=True)
-    if not target_path.exists():
-        target_path.write_bytes(image_bytes)
+    if settings.image_storage == "local":
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if not target_path.exists():
+            target_path.write_bytes(image_bytes)
+    elif not image_store.exists(target_path):
+        image_store.write_bytes(target_path, image_bytes)
     return str(target_path)
 
 
@@ -115,7 +119,7 @@ def _to_bytes(img_source: str | Path | bytes | np.ndarray) -> bytes:
                 "URLs must be downloaded by the route layer via _download_url_safe "
                 "before calling FaceEngine — engine accepts bytes only."
             )
-        return Path(s).read_bytes()
+        return image_store.read_bytes(s) if settings.image_storage == "s3" else Path(s).read_bytes()
     raise TypeError(f"unsupported img_source type: {type(img_source)!r}")
 
 
@@ -258,7 +262,7 @@ class FaceEngine:
             min_similarity = 0.0
         else:
             min_similarity = max(0.0, 1.0 - float(threshold))
-        grouped = await asyncio.to_thread(
+        grouped = await self._run(
             self._adapter.search_multi_face,
             image_bytes,
             top_k=top_k,
@@ -331,9 +335,19 @@ class FaceEngine:
         limit = asyncio.Semaphore(4)
 
         def compare_image(path: Path) -> float | None:
-            if path.stat().st_size > settings.max_file_size_mb * 1024 * 1024:
+            size = (
+                image_store.stat(path)["ContentLength"]
+                if settings.image_storage == "s3"
+                else path.stat().st_size
+            )
+            if size > settings.max_file_size_mb * 1024 * 1024:
                 return None
-            value = float(self._adapter.compare(query, path.read_bytes()))
+            data = (
+                image_store.read_bytes(path)
+                if settings.image_storage == "s3"
+                else path.read_bytes()
+            )
+            value = float(self._adapter.compare(query, data))
             return value if math.isfinite(value) else None
 
         async def score(path: Path | None) -> float | None:
@@ -424,8 +438,12 @@ class FaceEngine:
         cat = category or type_ or settings.default_category
         record_type = type_ or (cat if cat in settings.insightface_category_collections else "")
         image_target = _image_target_path(image_bytes, name, cat)
-        image_existed = image_target.exists()
-        persisted_path = _persist_image(image_bytes, name, cat)
+        image_existed = (
+            await self._run(image_store.exists, image_target)
+            if settings.image_storage == "s3"
+            else image_target.exists()
+        )
+        persisted_path = await self._run(_persist_image, image_bytes, name, cat)
 
         # Metadata shared by both enrollments so list / search results
         # can echo the form fields back without a DB lookup.
@@ -447,7 +465,10 @@ class FaceEngine:
             )
         except Exception:
             if not image_existed:
-                Path(persisted_path).unlink(missing_ok=True)
+                if settings.image_storage == "s3":
+                    await self._run(image_store.delete, persisted_path)
+                else:
+                    Path(persisted_path).unlink(missing_ok=True)
             raise
 
         # Mirror into the category collection using the same Person id. The
@@ -471,7 +492,10 @@ class FaceEngine:
                     await self._run(self._adapter.delete_person, person_id)
                 finally:
                     if not image_existed:
-                        Path(persisted_path).unlink(missing_ok=True)
+                        if settings.image_storage == "s3":
+                            await self._run(image_store.delete, persisted_path)
+                        else:
+                            Path(persisted_path).unlink(missing_ok=True)
                 raise
 
         # Read back the canonical aggregate record so we surface the
@@ -601,7 +625,11 @@ class FaceEngine:
         file_path = current.get("file_path")
         image_path = Path(str(file_path)) if file_path else None
         image_bytes: bytes | None = (
-            image_path.read_bytes() if image_path and image_path.is_file() else None
+            await self._run(image_store.read_bytes, image_path)
+            if settings.image_storage == "s3" and image_path
+            else image_path.read_bytes()
+            if image_path and image_path.is_file()
+            else None
         )
         prepared_new_mirror: dict | None = None
 
@@ -647,7 +675,9 @@ class FaceEngine:
                     await self._run(
                         self._adapter.add_person_image,
                         prepared_new_mirror["id"],
-                        Path(path).read_bytes(),
+                        await self._run(image_store.read_bytes, path)
+                        if settings.image_storage == "s3"
+                        else Path(path).read_bytes(),
                         collection_id=new_cid,
                     )
 
@@ -725,9 +755,14 @@ class FaceEngine:
 
         rollback_images: dict[tuple[str, str], list[bytes]] = {}
         for cid, mirror in mirrors:
-            rollback_images[(cid, mirror["id"])] = [
-                Path(path).read_bytes() for path in gallery(mirror) if Path(path).is_file()
-            ]
+            if settings.image_storage == "s3":
+                rollback_images[(cid, mirror["id"])] = [
+                    await self._run(image_store.read_bytes, path) for path in gallery(mirror)
+                ]
+            else:
+                rollback_images[(cid, mirror["id"])] = [
+                    Path(path).read_bytes() for path in gallery(mirror) if Path(path).is_file()
+                ]
 
         deleted: list[tuple[str, dict]] = []
         try:
@@ -771,7 +806,8 @@ class FaceEngine:
             if item.get("file_path")
         }
         for image_path in image_paths:
-            image_path.unlink(missing_ok=True)
+            if settings.image_storage == "local":
+                image_path.unlink(missing_ok=True)
         return current
 
     # ------------------------------------------------------------------
@@ -779,7 +815,16 @@ class FaceEngine:
     # ------------------------------------------------------------------
     @staticmethod
     async def _run(func, *args, **kwargs):
-        return await asyncio.to_thread(func, *args, **kwargs)
+        if getattr(func, "__name__", "") == "health":
+            return await person_operations.call(func, *args, **kwargs)
+        # Include the composed gallery comparison, whose SDK call is inside a closure.
+        if (
+            getattr(func, "__self__", None) is not None
+            or getattr(func, "__name__", "") == "compare_image"
+        ):
+            async with model_slot("insightface"):
+                return await person_operations.call(func, *args, **kwargs)
+        return await person_operations.call(func, *args, **kwargs)
 
 
 # Global engine instance

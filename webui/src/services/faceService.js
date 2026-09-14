@@ -1,5 +1,10 @@
 import api from './api';
 
+const mutationHeaders = revision => ({
+  'Idempotency-Key': Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''),
+  ...(revision ? { 'If-Match': revision } : {}),
+});
+
 export const faceService = {
   async findSameName(name) {
     const response = await api.get('/face_records/name_matches', { params: { name } });
@@ -23,6 +28,7 @@ export const faceService = {
   async createRecord(formData) {
     const response = await api.post('/face_records', formData, {
       headers: {
+        ...mutationHeaders(),
         'Content-Type': 'multipart/form-data'
       }
     });
@@ -30,31 +36,31 @@ export const faceService = {
   },
 
   // Update face record
-  async appendImage(id, formData) {
-    const response = await api.post(`/face_records/${encodeURIComponent(id)}/images`, formData);
+  async appendImage(id, formData, revision) {
+    const response = await api.post(`/face_records/${encodeURIComponent(id)}/images`, formData, { headers: mutationHeaders(revision) });
     return response.data;
   },
 
-  async deleteImages(id, imageUrls) {
+  async deleteImages(id, imageUrls, revision) {
     const response = await api.delete(`/face_records/${encodeURIComponent(id)}/images`, {
-      data: { image_urls: imageUrls }
+      data: { image_urls: imageUrls }, headers: mutationHeaders(revision)
     });
     return response.data;
   },
 
-  async mergeRecords(targetId, sourceIds) {
-    const response = await api.post('/face_records/merge', { target_id: targetId, source_ids: sourceIds });
+  async mergeRecords(targetId, sourceIds, revision) {
+    const response = await api.post('/face_records/merge', { target_id: targetId, source_ids: sourceIds }, { headers: mutationHeaders(revision) });
     return response.data;
   },
 
-  async updateRecord(id, data) {
-    const response = await api.put(`/face_records/${id}`, data);
+  async updateRecord(id, data, revision) {
+    const response = await api.put(`/face_records/${id}`, data, { headers: mutationHeaders(revision) });
     return response.data;
   },
 
   // Delete face record
-  async deleteRecord(id) {
-    const response = await api.delete(`/face_records/${id}`);
+  async deleteRecord(id, revision) {
+    const response = await api.delete(`/face_records/${id}`, { headers: mutationHeaders(revision) });
     return response.data;
   },
 

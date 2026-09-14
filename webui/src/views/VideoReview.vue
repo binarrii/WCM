@@ -296,7 +296,7 @@ const analyze = async () => {
       onTaskAccepted: id => {
         if (disposed) return;
         loadedTaskId.value = id;
-        currentTask.value = { id, status: 'processing', progress: { phase: 'downloading' } };
+        currentTask.value = { id, status: 'queued', progress: { phase: 'queued' } };
         streamState.value = 'connected';
       },
       onTaskEvent: handleTaskEvent,

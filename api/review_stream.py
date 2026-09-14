@@ -6,6 +6,8 @@ import re
 
 from fastapi import WebSocketDisconnect
 
+from wcm_facerec.config import settings
+
 from . import review_task_store
 from .review_events import review_events
 
@@ -51,12 +53,32 @@ async def stream_review_tasks(websocket, payload):
             update = asyncio.create_task(queue.get())
             pending = {incoming, update}
             heartbeat_at = asyncio.get_running_loop().time() + HEARTBEAT_SECONDS
+            snapshot_at = asyncio.get_running_loop().time() + HEARTBEAT_SECONDS
             while True:
                 ready, _ = await asyncio.wait(
                     pending,
-                    timeout=max(0, heartbeat_at - asyncio.get_running_loop().time()),
+                    timeout=max(
+                        0, min(heartbeat_at, snapshot_at) - asyncio.get_running_loop().time()
+                    ),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                if asyncio.get_running_loop().time() >= snapshot_at:
+                    if settings.cluster_enabled:
+                        tasks = await review_task_store.get_summaries(ids)
+                        await send(
+                            websocket,
+                            {
+                                "type": "snapshot",
+                                "tasks": tasks,
+                                "missing_ids": sorted(set(ids) - {task["id"] for task in tasks}),
+                            },
+                        )
+                        if watch_list:
+                            await send(
+                                websocket,
+                                {"type": "changed", "task_ids": [], "reason": "reconcile"},
+                            )
+                    snapshot_at = asyncio.get_running_loop().time() + HEARTBEAT_SECONDS
                 if asyncio.get_running_loop().time() >= heartbeat_at:
                     await send(websocket, {"type": "heartbeat"})
                     heartbeat_at = asyncio.get_running_loop().time() + HEARTBEAT_SECONDS

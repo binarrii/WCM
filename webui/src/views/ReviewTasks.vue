@@ -51,7 +51,7 @@ const hasActiveSelection = computed(() => tasks.value.some(task => selectedIds.v
 const updateCancelledTask = task => {
   tasks.value = tasks.value.map(current => current.id === task.id ? mergeReviewTask(current, task) : current);
 };
-const statusLabel = value => ({ cancelling: '取消中', cancelled: '已取消', processing: '处理中', completed: '已完成', partial: '含未审核项', failed: '失败' }[value] || value);
+const statusLabel = value => ({ queued: '排队中', cancelling: '取消中', cancelled: '已取消', processing: '处理中', completed: '已完成', partial: '含未审核项', failed: '失败' }[value] || value);
 const formatTime = value => value ? new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
@@ -193,7 +193,7 @@ onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStr
         <Search />
         <input v-model="query" type="search" placeholder="检索任务 ID、视频地址或失败原因" aria-label="检索审核任务" />
       </form>
-      <label class="task-status-filter"><span>任务状态</span><select v-model="status"><option value="">全部状态</option><option value="processing">处理中</option><option value="cancelling">取消中</option><option value="cancelled">已取消</option><option value="completed">已完成</option><option value="partial">含未审核项</option><option value="failed">失败</option></select></label>
+      <label class="task-status-filter"><span>任务状态</span><select v-model="status"><option value="">全部状态</option><option value="queued">排队中</option><option value="processing">处理中</option><option value="cancelling">取消中</option><option value="cancelled">已取消</option><option value="completed">已完成</option><option value="partial">含未审核项</option><option value="failed">失败</option></select></label>
       <button class="task-refresh" type="button" :disabled="loading" @click="loadTasks"><RefreshCw :class="{ spinner: loading }" />刷新</button>
     </section>
 

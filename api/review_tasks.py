@@ -6,13 +6,34 @@ import re
 import zipfile
 
 from fastapi import APIRouter, HTTPException, Query, Response
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
+
+from wcm_facerec.config import DEFAULT_DISTANCE_THRESHOLD, settings
 
 from . import review_task_store
 from .review_results import consolidate_results
 
 review_tasks_bp = APIRouter()
-_STATUSES = {"processing", "cancelling", "cancelled", "completed", "partial", "failed"}
+_STATUSES = {"queued", "processing", "cancelling", "cancelled", "completed", "partial", "failed"}
+
+
+class ReviewTaskSubmission(BaseModel):
+    url: AnyHttpUrl
+    sample_interval: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    top_k: int = Field(default=10, ge=1, le=10)
+    threshold: float = Field(default=DEFAULT_DISTANCE_THRESHOLD, ge=0, le=1, allow_inf_nan=False)
+
+
+@review_tasks_bp.post("/review_tasks", status_code=202)
+async def submit_review_task(body: ReviewTaskSubmission):
+    if not settings.cluster_enabled:
+        raise HTTPException(status_code=503, detail="独立审核 Worker 未启用")
+    try:
+        parameters = body.model_dump(exclude={"url"})
+        task_id = await review_task_store.create(str(body.url), parameters)
+        return await review_task_store.get(task_id)
+    except review_task_store.ReviewTaskStoreUnavailable as exc:
+        raise _storage_error(exc) from exc
 
 
 class ReviewTaskDeleteRequest(BaseModel):

@@ -35,7 +35,7 @@ test('person cards only expose image deletion for multi-image galleries', () => 
   assert.match(dashboard, /v-if="getRecordImages\(record\)\.length > 1"/);
   assert.match(dashboard, /openImageDeleteModal\(record\)/);
   assert.match(dashboard, /v-for="\(imageUrl, index\) in imageDeleteUrls"/);
-  assert.match(dashboard, /faceService\.deleteImages\(target\.id, imageUrls\)/);
+  assert.match(dashboard, /faceService\.deleteImages\(target\.id, imageUrls, target\.revision\)/);
 });
 
 test('image deletion keeps controls visible while the photo grid scrolls', () => {

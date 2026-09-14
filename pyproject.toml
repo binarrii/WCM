@@ -25,6 +25,8 @@ dependencies = [
     # The InsightFace Server Python SDK is vendored under
     # src/wcm_facerec/vendor/insightface_server/. Upgrade by replacing the
     # vendored directory contents and bumping _VENDORED.md.
+    "redis>=5.2",
+    "boto3>=1.35",
 ]
 
 [project.optional-dependencies]

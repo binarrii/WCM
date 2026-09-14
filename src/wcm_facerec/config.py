@@ -130,6 +130,28 @@ class Settings(BaseSettings):
     review_tasks_db_password: str = "wcm"
     review_tasks_db_connect_timeout_s: int = 5
 
+    # Cluster deployment; local scripts can retain the single-process mode.
+    cluster_enabled: bool = False
+    cluster_namespace: str = "wcm"
+    redis_url: str = ""
+    review_lease_seconds: int = Field(default=60, ge=15)
+    review_heartbeat_seconds: float = Field(default=5, gt=0)
+    review_max_attempts: int = Field(default=3, ge=1, le=10)
+    review_retry_seconds: int = Field(default=5, ge=0)
+    worker_concurrency: int = Field(default=2, ge=1, le=32)
+    worker_shutdown_seconds: int = Field(default=120, ge=1)
+    insightface_concurrency: int = Field(default=4, ge=1)
+    ocr_concurrency: int = Field(default=8, ge=1)
+    visual_concurrency: int = Field(default=4, ge=1)
+    guard_concurrency: int = Field(default=8, ge=1)
+    image_storage: Literal["local", "s3"] = "local"
+    s3_endpoint: str = ""
+    s3_region: str = "us-east-1"
+    s3_bucket: str = "wcm-dev"
+    s3_prefix: str = "wcm/images"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+
     # Filesystem
     data_root: str = "/data/wcm"
     default_category: str = "未分类"
@@ -183,6 +205,10 @@ BUSINESS_PARAMETER_SPECS = {
     "max_file_size_mb": BusinessParameterSpec("number", "审核调度"),
     "review_task_concurrency": BusinessParameterSpec("number", "审核调度"),
     "review_window_concurrency": BusinessParameterSpec("number", "审核调度"),
+    "insightface_concurrency": BusinessParameterSpec("number", "审核调度"),
+    "ocr_concurrency": BusinessParameterSpec("number", "审核调度"),
+    "visual_concurrency": BusinessParameterSpec("number", "审核调度"),
+    "guard_concurrency": BusinessParameterSpec("number", "审核调度"),
     "jpeg_quality": BusinessParameterSpec("number", "审核调度"),
     "visual_timeout_s": BusinessParameterSpec("number", "审核调度"),
     "ocr_timeout_s": BusinessParameterSpec("number", "审核调度"),

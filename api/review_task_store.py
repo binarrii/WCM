@@ -11,10 +11,12 @@ from typing import Any
 import pymysql
 from pymysql.cursors import DictCursor
 
-from wcm_facerec.config import settings
+from wcm_facerec.config import BUSINESS_PARAMETER_SPECS, settings
+from wcm_facerec.execution import current_execution
 
 from .review_coverage import completion_status, coverage_message
 from .review_events import review_events
+from .review_evidence import archive_evidence
 from .review_results import consolidate_results, flatten_findings
 
 
@@ -96,6 +98,15 @@ async def initialize() -> None:
         await _run(_initialize_sync)
 
 
+def _ownership(task_id):
+    if not settings.cluster_enabled:
+        return "", ()
+    execution = current_execution.get()
+    if execution is None or execution.task_id != task_id:
+        return " AND 1 = 0", ()
+    return " AND lease_token = %s AND lease_expires > UTC_TIMESTAMP(3)", (execution.token,)
+
+
 def _json_dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -126,6 +137,8 @@ def _public_row(row: dict, *, include_results: bool) -> dict:
         "created_at": _iso(row["created_at"]),
         "updated_at": _iso(row["updated_at"]),
     }
+    if "attempts" in row:
+        item["attempt"] = row["attempts"]
     if row["status"] == "partial" and item["review_summary"] is None:
         item["error"] = (item["error"] or "含未审核项。") + "（历史任务未记录总采样数，比例未知）"
     if include_results:
@@ -138,6 +151,20 @@ def _public_row(row: dict, *, include_results: bool) -> dict:
 
 def _create_sync(video_url: str, parameters: dict, task_id: str) -> None:
     with _connect() as connection, connection.cursor() as cursor:
+        if settings.cluster_enabled:
+            snapshot = {key: getattr(settings, key) for key in BUSINESS_PARAMETER_SPECS}
+            cursor.execute(
+                "INSERT INTO review_tasks (id, video_url, parameters, status, runtime_parameters, progress) "
+                "VALUES (%s, %s, %s, 'queued', %s, %s)",
+                (
+                    task_id,
+                    video_url,
+                    _json_dump(parameters),
+                    _json_dump(snapshot),
+                    _json_dump({"phase": "queued", "sequence": 0, "attempt": 0}),
+                ),
+            )
+            return
         cursor.execute(
             """
             INSERT INTO review_tasks (id, video_url, parameters, status)
@@ -157,6 +184,8 @@ async def create(video_url: str, parameters: dict, task_id: str | None = None) -
 
 
 def _complete_sync(task_id: str, results: list[dict], summary: dict | None = None) -> bool:
+    fence, ownership = _ownership(task_id)
+    results = archive_evidence(task_id, results)
     incomplete = [
         item for item in flatten_findings(results) if item.get("review_status") == "incomplete"
     ]
@@ -176,7 +205,8 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
             SET status = %s, results = %s, result_count = %s, error = %s, review_summary = %s
                 , progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'finished', '$.percent', 100)
             WHERE id = %s AND status = 'processing'
-            """,
+            """
+            + fence,
             (
                 status,
                 _json_dump(results),
@@ -184,6 +214,7 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
                 error,
                 _json_dump(summary) if summary is not None else None,
                 task_id,
+                *ownership,
             ),
         )
         return bool(cursor.rowcount)
@@ -200,7 +231,25 @@ async def complete(task_id: str | None, results: list[dict], summary: dict | Non
 
 
 def _fail_sync(task_id: str, error: str) -> bool:
+    fence, ownership = _ownership(task_id)
     with _connect() as connection, connection.cursor() as cursor:
+        if settings.cluster_enabled:
+            return bool(
+                cursor.execute(
+                    "UPDATE review_tasks SET status = IF(attempts < %s, 'queued', 'failed'), error = %s, "
+                    "progress = JSON_OBJECT('phase', IF(attempts < %s, 'queued', 'failed'), 'attempt', attempts), "
+                    "available_at = TIMESTAMPADD(SECOND, %s, UTC_TIMESTAMP(3)), lease_token = NULL, lease_expires = NULL "
+                    "WHERE id = %s AND status = 'processing'" + fence,
+                    (
+                        settings.review_max_attempts,
+                        error[:65535],
+                        settings.review_max_attempts,
+                        settings.review_retry_seconds,
+                        task_id,
+                        *ownership,
+                    ),
+                )
+            )
         cursor.execute(
             """
             UPDATE review_tasks SET status = 'failed', error = %s,
@@ -222,6 +271,15 @@ async def fail(task_id: str | None, error: str) -> bool:
 
 def _request_cancel_sync(task_id: str) -> None:
     with _connect() as connection, connection.cursor() as cursor:
+        if settings.cluster_enabled:
+            cursor.execute(
+                "UPDATE review_tasks SET progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), "
+                "'$.phase', IF(status = 'queued', 'cancelled', 'cancelling')), "
+                "status = IF(status = 'queued', 'cancelled', 'cancelling') "
+                "WHERE id = %s AND status IN ('queued', 'processing')",
+                (task_id,),
+            )
+            return
         cursor.execute(
             "UPDATE review_tasks SET status = 'cancelling', "
             "progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'cancelling') "
@@ -234,7 +292,7 @@ async def request_cancel(task_id: str) -> dict | None:
     await _run(_request_cancel_sync, task_id)
     tasks = await get_summaries([task_id])
     task = tasks[0] if tasks else None
-    if task and task["status"] == "cancelling":
+    if task and task["status"] in {"cancelling", "cancelled"}:
         await review_events.publish(
             {"type": "changed", "task_ids": [task_id], "reason": "cancelling"}
         )
@@ -253,11 +311,16 @@ async def cancellation_requested(task_id: str) -> bool:
 
 
 def _cancelled_sync(task_id: str, progress: dict) -> None:
+    fence, ownership = _ownership(task_id)
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(
             "UPDATE review_tasks SET status = 'cancelled', error = NULL, progress = %s "
-            "WHERE id = %s AND status = 'cancelling'",
-            (_json_dump({**progress, "phase": "cancelled", "active_windows": []}), task_id),
+            "WHERE id = %s AND status = 'cancelling'" + fence,
+            (
+                _json_dump({**progress, "phase": "cancelled", "active_windows": []}),
+                task_id,
+                *ownership,
+            ),
         )
 
 
@@ -270,12 +333,14 @@ async def cancelled(task_id: str, progress: dict) -> None:
 
 
 def _update_progress_sync(task_id: str, progress: dict) -> bool:
+    fence, ownership = _ownership(task_id)
     with _connect() as connection, connection.cursor() as cursor:
         return bool(
             cursor.execute(
                 "UPDATE review_tasks SET progress = %s WHERE id = %s AND status = 'processing' "
-                "AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(progress, '$.sequence')) AS SIGNED), -1) < %s",
-                (_json_dump(progress), task_id, progress["sequence"]),
+                "AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(progress, '$.sequence')) AS SIGNED), -1) < %s"
+                + fence,
+                (_json_dump(progress), task_id, progress["sequence"], *ownership),
             )
         )
 
@@ -321,7 +386,9 @@ def _get_summaries_sync(task_ids: list[str]) -> list[dict]:
     placeholders = ", ".join(["%s"] * len(task_ids))
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(
-            "SELECT id, video_url, parameters, status, result_count, error, review_summary, progress, "
+            "SELECT "
+            + ("attempts, " if settings.cluster_enabled else "")
+            + "id, video_url, parameters, status, result_count, error, review_summary, progress, "
             f"results IS NOT NULL AS has_results, created_at, updated_at FROM review_tasks WHERE id IN ({placeholders})",
             task_ids,
         )
@@ -343,7 +410,9 @@ def _delete_many_sync(task_ids: list[str]) -> int:
         cursor.execute(
             f"SELECT status FROM review_tasks WHERE id IN ({placeholders}) FOR UPDATE", task_ids
         )
-        if any(row["status"] in {"processing", "cancelling"} for row in cursor.fetchall()):
+        if any(
+            row["status"] in {"queued", "processing", "cancelling"} for row in cursor.fetchall()
+        ):
             connection.rollback()
             raise ReviewTaskConflict("请先取消正在处理的任务，待任务停止后再删除")
         deleted = cursor.execute(f"DELETE FROM review_tasks WHERE id IN ({placeholders})", task_ids)
@@ -374,7 +443,9 @@ def _list_sync(query: str, status: str, page: int, page_size: int) -> dict:
         cursor.execute(f"SELECT COUNT(*) AS total FROM review_tasks{where}", values)
         total = cursor.fetchone()["total"]
         cursor.execute(
-            "SELECT id, video_url, parameters, status, result_count, error, review_summary, progress, "
+            "SELECT "
+            + ("attempts, " if settings.cluster_enabled else "")
+            + "id, video_url, parameters, status, result_count, error, review_summary, progress, "
             "results IS NOT NULL AS has_results, "
             f"created_at, updated_at FROM review_tasks{where} "
             "ORDER BY created_at DESC LIMIT %s OFFSET %s",

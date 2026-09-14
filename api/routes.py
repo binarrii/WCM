@@ -15,7 +15,7 @@ from wcm_facerec import __version__
 from wcm_facerec.config import DEFAULT_DISTANCE_THRESHOLD, settings
 from wcm_facerec.face_engine import get_face_engine
 
-from . import review_task_store
+from . import review_task_store, task_queue
 from .face_records import _image_url_to_path, _item_image_urls
 from .handlers import (
     _process_analyze_media,
@@ -552,7 +552,7 @@ async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
     progress.phase = "queued"
 
     async def review():
-        async with review_task_slot():
+        async with contextlib.nullcontext() if settings.cluster_enabled else review_task_slot():
             await progress.set_phase("downloading")
             return await _process_analyze_media(
                 url, sample_interval, top_k, threshold, coverage=coverage, progress=progress
@@ -584,9 +584,10 @@ async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
             await record_cancellation()
             raise
         except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
-                await review_task_store.cancelled(task_id, progress.snapshot())
-                await review_task_store.fail(task_id, "审核任务被中断。")
+            if not settings.cluster_enabled:
+                with contextlib.suppress(Exception):
+                    await review_task_store.cancelled(task_id, progress.snapshot())
+                    await review_task_store.fail(task_id, "审核任务被中断。")
             await progress.set_phase("failed", persist=False)
             raise
         except Exception as exc:
@@ -628,7 +629,11 @@ async def analyze_media(request: Request, response: Response):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+        result = (
+            await task_queue.wait_result(task_id)
+            if settings.cluster_enabled
+            else await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+        )
     except ReviewTaskCancelled as exc:
         raise HTTPException(
             status_code=409, detail="审核任务已取消", headers={"X-Review-Task-ID": task_id}
@@ -685,7 +690,11 @@ async def websocket_analyze_media(websocket: WebSocket):
 
             try:
                 async with push_review_progress(websocket, task_id):
-                    result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+                    result = (
+                        await task_queue.wait_result(task_id)
+                        if settings.cluster_enabled
+                        else await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+                    )
             except ReviewTaskCancelled:
                 with contextlib.suppress(Exception):
                     await websocket.send_json({"status": "cancelled", "taskId": task_id})
