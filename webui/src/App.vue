@@ -74,16 +74,16 @@ onBeforeUnmount(() => {
 
       <nav class="main-menu" aria-label="主菜单">
         <span class="menu-heading">主菜单</span>
-        <button type="button" :class="['menu-item', { active: currentRoute === 'people' }]" @click="navigateTo('people')">
+        <button type="button" aria-label="人物库管理" :class="['menu-item', { active: currentRoute === 'people' }]" @click="navigateTo('people')">
           <Database /><span>人物库管理</span>
         </button>
-        <button type="button" :class="['menu-item', { active: currentRoute === 'video' }]" @click="navigateTo('video')">
+        <button type="button" aria-label="视频审核" :class="['menu-item', { active: currentRoute === 'video' }]" @click="navigateTo('video')">
           <Video /><span>视频审核</span>
         </button>
-        <button type="button" :class="['menu-item', { active: currentRoute === 'tasks' }]" @click="navigateTo('tasks')">
+        <button type="button" aria-label="审核任务" :class="['menu-item', { active: currentRoute === 'tasks' }]" @click="navigateTo('tasks')">
           <ClipboardList /><span>审核任务</span>
         </button>
-        <button type="button" :class="['menu-item', { active: currentRoute === 'parameters' }]" @click="navigateTo('parameters')">
+        <button type="button" aria-label="参数配置" :class="['menu-item', { active: currentRoute === 'parameters' }]" @click="navigateTo('parameters')">
           <SlidersHorizontal /><span>参数配置</span>
         </button>
       </nav>
