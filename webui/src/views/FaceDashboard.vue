@@ -56,6 +56,11 @@ const stats = ref({
   politicalImages: null,
   officialsImages: null
 });
+const formatImagesPerPerson = (images, people) => (
+  Number.isFinite(images) && images >= 0 && Number.isFinite(people) && people > 0
+    ? (images / people).toFixed(2)
+    : '—'
+);
 
 // Modal state
 const isModalOpen = ref(false);
@@ -851,7 +856,10 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">库总容量</h3>
             <p class="stat-value">{{ stats.total }} <span class="unit">人</span></p>
-            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.totalImages ?? '—' }} 张</p>
+            <p class="stat-image-count">
+              <span title="已注册图片总数">图片 {{ stats.totalImages ?? '—' }} 张</span>
+              <span title="已注册图片数 ÷ 人数，保留两位小数">人均 {{ formatImagesPerPerson(stats.totalImages, stats.total) }} 张</span>
+            </p>
           </div>
         </div>
 
@@ -862,7 +870,10 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">劣迹艺人</h3>
             <p class="stat-value">{{ stats.badArtists }} <span class="unit">人</span></p>
-            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.badArtistsImages ?? '—' }} 张</p>
+            <p class="stat-image-count">
+              <span title="已注册图片总数">图片 {{ stats.badArtistsImages ?? '—' }} 张</span>
+              <span title="已注册图片数 ÷ 人数，保留两位小数">人均 {{ formatImagesPerPerson(stats.badArtistsImages, stats.badArtists) }} 张</span>
+            </p>
           </div>
         </div>
 
@@ -873,7 +884,10 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">时政敏感</h3>
             <p class="stat-value">{{ stats.political }} <span class="unit">人</span></p>
-            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.politicalImages ?? '—' }} 张</p>
+            <p class="stat-image-count">
+              <span title="已注册图片总数">图片 {{ stats.politicalImages ?? '—' }} 张</span>
+              <span title="已注册图片数 ÷ 人数，保留两位小数">人均 {{ formatImagesPerPerson(stats.politicalImages, stats.political) }} 张</span>
+            </p>
           </div>
         </div>
 
@@ -884,7 +898,10 @@ onUnmounted(() => {
           <div class="stat-content">
             <h3 class="stat-label">落马官员</h3>
             <p class="stat-value">{{ stats.officials }} <span class="unit">人</span></p>
-            <p class="stat-image-count" title="已注册图片总数">图片 {{ stats.officialsImages ?? '—' }} 张</p>
+            <p class="stat-image-count">
+              <span title="已注册图片总数">图片 {{ stats.officialsImages ?? '—' }} 张</span>
+              <span title="已注册图片数 ÷ 人数，保留两位小数">人均 {{ formatImagesPerPerson(stats.officialsImages, stats.officials) }} 张</span>
+            </p>
           </div>
         </div>
       </section>
