@@ -38,7 +38,8 @@ test('parameter editor renders boolean and scalar enum controls', () => {
   assert.match(component, /枚举可选值（仅支持 string、number）/);
   assert.match(component, /v-model="form\.enumValueIndex"/);
   assert.match(css, /\.parameter-type\.boolean/);
-  assert.match(css, /\.parameter-type\.enum/);
+  assert.match(css, /\.parameter-type\.enum\s*\{[^}]*color:\s*#ec4899/);
+  assert.match(css, /:root\[data-theme="light"\] \.parameter-type\.enum\s*\{[^}]*color:\s*#be185d/);
 });
 
 test('built-in parameters are protected and secrets are never rendered', () => {
