@@ -555,12 +555,11 @@ async def analyze_video(
 
     consumers = []
     try:
-        await asyncio.to_thread(
-            handlers._download_video_safe_sync,
+        await handlers._download_review_video(
             url,
             path,
             settings.max_file_size_mb * 100 * 1024 * 1024,
-            timeout=900.0,
+            progress=progress,
         )
         consumers = [asyncio.create_task(consumer()) for _ in range(concurrency)]
         async with threaded_iterator(lambda: _sample_video(path, sample_interval)) as sampler:

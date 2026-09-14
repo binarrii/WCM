@@ -6,6 +6,7 @@ import inspect
 import logging
 import os
 import re
+from contextlib import suppress
 from pathlib import Path
 from textwrap import dedent
 
@@ -448,6 +449,30 @@ def _encode_nsfw_frame(frame) -> str:
 
 class PreparedVisualFrames(list):
     """Internal marker for bounded JPEGs already encoded from decoded pixels."""
+
+
+async def _download_review_video(url, path, max_size, *, progress=None):
+    callback = None
+    if progress is not None:
+        await progress.begin_download()
+        loop = asyncio.get_running_loop()
+
+        def callback(completed, total):
+            # The downloader limits callbacks to twice a second. All progress
+            # mutation/persistence stays on the event loop, never its IO thread.
+            with suppress(RuntimeError):  # The owning loop may already be shut down.
+                loop.call_soon_threadsafe(progress.update_download, completed, total)
+
+    await asyncio.to_thread(
+        _download_video_safe_sync,
+        url,
+        path,
+        max_size,
+        timeout=900.0,
+        **({"on_progress": callback} if callback is not None else {}),
+    )
+    if progress is not None:
+        await progress.finish_download()
 
 
 def _compose_nsfw_frames(
@@ -1141,12 +1166,11 @@ async def _process_analyze_media(
     if is_video:
         video_path = Path(f"/tmp/analyze_video_{os.urandom(8).hex()}.mp4")
         try:
-            await asyncio.to_thread(
-                _download_video_safe_sync,
+            await _download_review_video(
                 url,
                 video_path,
                 settings.max_file_size_mb * 100 * 1024 * 1024,
-                timeout=900.0,
+                progress=progress,
             )
 
             concurrency = settings.review_window_concurrency

@@ -54,12 +54,32 @@ class ReviewProgress:
 
     async def begin_review(self, duration=None):
         self.phase = "reviewing"
+        self.sub_progress = None
         self.duration = (
             duration
             if isinstance(duration, (int, float)) and math.isfinite(duration) and duration > 0
             else None
         )
         await self.report(force=True)
+
+    async def begin_download(self):
+        self.phase = "downloading"
+        self.sub_progress = {"stage": "download", "completed": 0, "total": None, "complete": False}
+        await self.report(force=True)
+
+    def update_download(self, completed, total):
+        """Called on the event loop; late downloader callbacks cannot revive a stage."""
+        if self.phase != "downloading" or self.sub_progress is None:
+            return
+        if self.sub_progress.get("stage") != "download" or self.sub_progress.get("complete"):
+            return
+        self.sub_progress["completed"] = max(self.sub_progress["completed"], completed)
+        self.sub_progress["total"] = total
+
+    async def finish_download(self):
+        if self.phase == "downloading" and self.sub_progress is not None:
+            self.sub_progress["complete"] = True
+            await self.report(force=True)
 
     def enqueue(self, samples):
         self.queued_windows += 1
@@ -145,9 +165,19 @@ class ReviewProgress:
         if self.sub_progress is not None:
             total = self.sub_progress["total"]
             completed = self.sub_progress["completed"]
+            if self.sub_progress["stage"] == "download":
+                sub_percent = (
+                    100.0
+                    if self.sub_progress["complete"]
+                    else min(99.9, round(completed / total * 100, 1))
+                    if total
+                    else None
+                )
+            else:
+                sub_percent = round(completed / total * 100, 1) if total else 100.0
             sub_progress = {
                 **self.sub_progress,
-                "percent": round(completed / total * 100, 1) if total else 100.0,
+                "percent": sub_percent,
             }
         return {
             "phase": self.phase,

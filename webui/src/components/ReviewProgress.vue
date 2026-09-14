@@ -21,10 +21,10 @@ const expanded = ref(false);
       <div class="sub-progress-heading">
         <span>{{ state.subProgress.label }}</span>
         <small>{{ state.subProgress.details }}</small>
-        <strong>{{ state.subProgress.percent.toFixed(1) }}%</strong>
+        <strong>{{ state.subProgress.percent == null ? '—' : `${state.subProgress.percent.toFixed(1)}%` }}</strong>
       </div>
-      <div class="progress-track sub-progress-track" role="progressbar" :aria-label="`${state.subProgress.label}进度`" :aria-valuenow="state.subProgress.percent" aria-valuemin="0" aria-valuemax="100" :aria-valuetext="`${state.subProgress.label} ${state.subProgress.details}`">
-        <span :style="{ width: `${state.subProgress.percent}%` }"></span>
+      <div class="progress-track sub-progress-track" :class="{ indeterminate: state.subProgress.percent == null && state.active }" role="progressbar" :aria-label="`${state.subProgress.label}进度`" :aria-valuenow="state.subProgress.percent ?? undefined" aria-valuemin="0" aria-valuemax="100" :aria-valuetext="`${state.subProgress.label} ${state.subProgress.details}`">
+        <span :style="{ width: `${state.subProgress.percent ?? 0}%` }"></span>
       </div>
     </div>
     <small v-if="!collapsible && state.details" :title="state.details">{{ state.details }}</small>
@@ -49,7 +49,7 @@ const expanded = ref(false);
 .progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--bg-secondary, #e2e8f0); }
 .progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--progress-color); transition: width .3s ease; }
 .sub-progress { margin-top: 9px; padding-left: 12px; border-left: 2px solid color-mix(in srgb, var(--progress-color) 35%, transparent); }
-.sub-progress-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; }
+.sub-progress-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 5px; font-size: 11px; }
 .sub-progress-heading small { display: inline; margin: 0; color: inherit; }
 .sub-progress-heading strong { margin-left: auto; color: var(--progress-color); font-variant-numeric: tabular-nums; }
 .sub-progress-track { height: 4px; opacity: .85; }

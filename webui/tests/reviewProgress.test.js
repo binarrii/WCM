@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { taskProgress, sampleTime } from '../src/services/reviewProgress.js';
+import { taskProgress, sampleTime, downloadSize } from '../src/services/reviewProgress.js';
 import { reviewSocketUrl, submitReview } from '../src/services/reviewSubmission.js';
 
 const progressComponent = readFileSync(new URL('../src/components/ReviewProgress.vue', import.meta.url), 'utf8');
@@ -38,6 +38,31 @@ test('difficult face resampling exposes a dedicated bounded sub-progress', () =>
   assert.equal(view.percent,99);
   assert.deepEqual(view.subProgress,{label:'困难帧补采',percent:70,details:'7 / 10 帧'});
   assert.equal(taskProgress({status:'completed',progress:{phase:'finished',sub_progress:{stage:'face_resampling',completed:10,total:10}}}).subProgress,null);
+});
+
+test('video download has byte progress independently of overall review progress', () => {
+  const progress = {phase:'downloading',percent:null,completed_windows:0,completed_samples:0,sub_progress:{
+    stage:'download',completed:512*1024*1024,total:2*1024**3,complete:false
+  }};
+  const view=taskProgress({status:'processing',progress});
+  assert.equal(view.percent,null);
+  assert.deepEqual(view.subProgress,{label:'视频下载',percent:25,details:'512.0 MB / 2.0 GB'});
+  assert.equal(view.details,'');
+  assert.equal(taskProgress({status:'processing',progress:{...progress,phase:'reviewing'}}).subProgress,null);
+  assert.equal(taskProgress({status:'failed',progress}).subProgress,null);
+});
+
+test('unknown or inconsistent download sizes stay indeterminate and show received bytes', () => {
+  for (const total of [null,0,100]) {
+    const progress={phase:'downloading',sub_progress:{stage:'download',completed:2048,total,complete:false}};
+    assert.deepEqual(taskProgress({status:'processing',progress}).subProgress,{
+      label:'视频下载',percent:null,details:'已下载 2.0 KB · 总大小未知'
+    });
+    progress.sub_progress.complete=true;
+    assert.equal(taskProgress({status:'processing',progress}).subProgress.percent,100);
+  }
+  assert.equal(downloadSize(0),'0 B');
+  assert.equal(downloadSize(1024),'1.0 KB');
 });
 
 test('submission returns the task id before results and never resubmits on disconnect', async () => {

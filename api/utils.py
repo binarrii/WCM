@@ -3,6 +3,7 @@
 import base64
 import logging
 import math
+import time
 from collections import deque
 from dataclasses import dataclass
 from functools import cached_property
@@ -416,22 +417,45 @@ async def _download_url_safe(url: str, max_size: int, timeout: float = 60.0) -> 
             return bytes(chunks)
 
 
-def _download_video_safe_sync(url: str, file_path: Path, max_size: int, timeout: float = 120.0):
+def _download_video_safe_sync(
+    url: str, file_path: Path, max_size: int, timeout: float = 120.0, *, on_progress=None
+):
     """Synchronously download a video to disk safely, enforcing max size."""
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         with client.stream("GET", url) as response:
             response.raise_for_status()
             content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > max_size:
+            try:
+                total = int(content_length) if content_length is not None else None
+            except ValueError:
+                total = None
+            # iter_bytes yields decoded bytes. A compressed response's wire size
+            # cannot be used as the denominator for the saved video size.
+            if (total is not None and total < 0) or response.headers.get(
+                "Content-Encoding", "identity"
+            ).lower() != "identity":
+                total = None
+            if total is not None and total > max_size:
                 raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
 
             downloaded = 0
+            last_report = time.monotonic()
+            if on_progress is not None:
+                on_progress(downloaded, total)
             with open(file_path, "wb") as f:
-                for chunk in response.iter_bytes():
+                for chunk in response.iter_bytes(chunk_size=64 * 1024):
                     f.write(chunk)
                     downloaded += len(chunk)
                     if downloaded > max_size:
                         raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
+                    if total is not None and downloaded > total:
+                        total = None
+                    now = time.monotonic()
+                    if on_progress is not None and now - last_report >= 0.5:
+                        on_progress(downloaded, total)
+                        last_report = now
+            if on_progress is not None:
+                on_progress(downloaded, total)
 
 
 def _extract_video_frames_for_ocr(
