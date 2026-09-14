@@ -45,7 +45,7 @@ const cancelTask = async () => {
 </template>
 
 <style scoped>
-.cancel-review-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; border: 1px solid var(--status-red-border); border-radius: 9px; background: var(--status-red-bg); color: var(--status-red); font: 600 .8rem var(--font-sans); white-space: nowrap; cursor: pointer; }
+.cancel-review-button { box-sizing: border-box; height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid var(--status-red-border); border-radius: 9px; background: var(--status-red-bg); color: var(--status-red); font: 600 .8rem var(--font-sans); white-space: nowrap; cursor: pointer; }
 .cancel-review-button svg { width: 16px; height: 16px; }
 .cancel-review-button:hover:not(:disabled) { filter: brightness(.95); }
 .cancel-review-button:disabled { opacity: .6; cursor: default; }

@@ -10,7 +10,7 @@
 .task-back-link:hover { text-decoration: underline; }
 .review-safety-note { padding: 6px 11px; color: var(--status-yellow); background: var(--status-yellow-bg); border: 1px solid var(--status-yellow-border); border-radius: 20px; font-size: .72rem; white-space: nowrap; }
 .setup-heading-actions { display: flex; align-items: center; gap: 9px; }
-.setup-toggle { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 9px; cursor: pointer; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.setup-toggle { box-sizing: border-box; height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 9px; cursor: pointer; font-size: .72rem; font-weight: 700; white-space: nowrap; }
 .setup-toggle:hover { color: var(--text-primary); border-color: var(--border-hover); }
 .setup-toggle:focus-visible { outline: 3px solid var(--color-primary-glow); outline-offset: 2px; }
 .setup-toggle svg { width: 15px; height: 15px; }
