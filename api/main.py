@@ -10,8 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from wcm_facerec import __version__, image_store, person_operations
-from wcm_facerec.cluster import run_sync
+from wcm_facerec import __version__, face_sync_store, image_store, person_operations
+from wcm_facerec.cluster import cluster_slot, run_sync
 from wcm_facerec.config import settings
 
 from . import parameter_store, task_queue
@@ -19,6 +19,7 @@ from .face_records import face_records_bp
 from .images import images_bp
 from .model_clients import model_client_pool
 from .parameters import parameters_bp
+from .request_identity import person_request_fingerprint
 from .review_events import review_events
 from .review_task_store import initialize as initialize_review_tasks
 from .review_tasks import review_tasks_bp
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("Cluster mode requires configured S3 image storage")
         await run_sync(image_store.client().head_bucket, Bucket=settings.s3_bucket)
     await parameter_store.initialize()
+    await run_sync(face_sync_store.initialize)
     try:
         await review_events.start()
         try:
@@ -62,19 +64,28 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": "幂等键过长"}, status_code=400)
         identity = None
         if key and settings.cluster_enabled:
-            fingerprint = hashlib.sha256(
-                request.method.encode() + request.url.path.encode() + await request.body()
-            ).hexdigest()
+            fingerprint = await person_request_fingerprint(request)
             identity = (hashlib.sha256(key.encode()).hexdigest(), fingerprint)
         token = person_operations.request_key.set(identity)
         revision = person_operations.expected_revision.set(
             request.headers.get("if-match", "").strip('"') or None
         )
         try:
-            response = await call_next(request)
+            if (
+                settings.insightface_replication_enabled
+                and request.method == "GET"
+                and request.url.path.startswith("/api/v1/face_records")
+            ):
+                async with cluster_slot("person-library"):
+                    await run_sync(face_sync_store.assert_primary_clean)
+                    response = await call_next(request)
+            else:
+                response = await call_next(request)
             if settings.cluster_enabled:
                 response.headers["X-WCM-Instance"] = socket.gethostname()
             return response
+        except face_sync_store.ReplicationUnavailable as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=503)
         finally:
             person_operations.request_key.reset(token)
             person_operations.expected_revision.reset(revision)
@@ -92,6 +103,12 @@ def create_app() -> FastAPI:
     app.include_router(face_records_bp, prefix="/api/v1")
     app.include_router(review_tasks_bp, prefix="/api/v1")
     app.include_router(parameters_bp, prefix="/api/v1")
+
+    @app.get("/api/v1/insightface/replication")
+    async def replication_status():
+        if not settings.insightface_replication_enabled:
+            return {"enabled": False}
+        return await run_sync(face_sync_store.status)
 
     # Mount persisted face images before the SPA catch-all.
     if settings.image_storage == "s3":

@@ -10,9 +10,10 @@ import json
 from contextvars import ContextVar
 from uuid import uuid4
 
-from . import image_store
+from . import face_sync_store, image_store
 from .cluster import check_locks, connect, model_slot, run_sync
 from .config import settings
+from .face_replication import capture
 
 _operation = ContextVar("person_operation", default=None)
 request_key = ContextVar("person_request_key", default=None)
@@ -70,7 +71,7 @@ def _load(operation_id=None):
             cursor.execute("SELECT * FROM person_operations WHERE id = %s", (operation_id,))
         else:
             cursor.execute(
-                "SELECT * FROM person_operations WHERE status IN ('running', 'recovering') ORDER BY updated_at"
+                "SELECT * FROM person_operations WHERE status IN ('running', 'recovering', 'uncertain') ORDER BY updated_at"
             )
         rows = cursor.fetchall()
     return [{**json.loads(row["payload"]), "version": row["version"]} for row in rows]
@@ -82,6 +83,10 @@ async def call(function, *args, **kwargs):
     data = _operation.get()
     name = getattr(function, "__name__", "")
     if data is not None and name in _MUTATIONS:
+        if settings.insightface_replication_enabled and data.get("uncertain"):
+            raise face_sync_store.ReplicationUnavailable(
+                "先前写入结果不确定，停止后续写入和在线补偿"
+            )
         bound = inspect.signature(function).bind_partial(*args, **kwargs)
         if name == "register_person" and not bound.arguments.get("person_id"):
             bound.arguments["person_id"] = str(uuid4())
@@ -98,14 +103,30 @@ async def call(function, *args, **kwargs):
                         p for p in [item.get("file_path"), *(item.get("image_paths") or [])] if p
                     )
                 )
-                if len(paths) < int(item.get("face_count") or 0):
+                face_count = int(item.get("face_count") or 0)
+                if len(paths) < face_count or (
+                    settings.insightface_replication_enabled and len(paths) != face_count
+                ):
                     raise ValueError("人物原照片不完整，无法建立可恢复的操作快照")
                 for path in paths:
                     await run_sync(image_store.read_bytes, path)
             data["before"][identity] = {"collection": cid, "person_id": pid, "item": item}
             await run_sync(_save, data)
+        if settings.insightface_replication_enabled:
+            data["inflight"] = {"collection": cid, "person_id": pid, "method": name}
+            await run_sync(_save, data)
     check_locks()
-    return await run_sync(function, *args, **kwargs)
+    try:
+        result = await run_sync(function, *args, **kwargs)
+    except BaseException:
+        if settings.insightface_replication_enabled and data is not None and name in _MUTATIONS:
+            data.update(status="uncertain", uncertain=True)
+            await run_sync(_save, data)
+        raise
+    if settings.insightface_replication_enabled and data is not None and name in _MUTATIONS:
+        data["inflight"] = None
+        await run_sync(_save, data)
+    return result
 
 
 async def restore(engine, data):
@@ -115,7 +136,7 @@ async def restore(engine, data):
 
 async def _restore(engine, data):
     """Idempotent full-person compensation; repeating after a crash is safe."""
-    data["status"] = "recovering"
+    data.update(status="recovering", uncertain=False, inflight=None)
     await run_sync(_save, data)
     adapter = engine._adapter
     for entry in reversed(list(data["before"].values())):
@@ -135,10 +156,11 @@ async def _restore(engine, data):
         current = await run_sync(adapter.get_person, pid, collection_id=cid)
         if current:
             check_locks()
-            await run_sync(adapter.delete_person, pid, collection_id=cid)
+            await _restore_call(data, adapter.delete_person, pid, collection_id=cid)
         if item:
             check_locks()
-            await run_sync(
+            await _restore_call(
+                data,
                 adapter.register_person,
                 name=item["name"],
                 image_bytes=images[0],
@@ -149,16 +171,41 @@ async def _restore(engine, data):
             )
             for image in images[1:]:
                 check_locks()
-                await run_sync(adapter.add_person_image, pid, image, collection_id=cid)
+                await _restore_call(data, adapter.add_person_image, pid, image, collection_id=cid)
     data["status"] = "rolled_back"
     await run_sync(_save, data)
+
+
+async def _restore_call(data, function, *args, **kwargs):
+    # Recovery has the same response-loss window as the original mutation.
+    if settings.insightface_replication_enabled:
+        data["inflight"] = {"method": function.__name__, "recovery": True}
+        await run_sync(_save, data)
+    try:
+        result = await run_sync(function, *args, **kwargs)
+    except BaseException:
+        if settings.insightface_replication_enabled:
+            data.update(status="uncertain", uncertain=True)
+            await run_sync(_save, data)
+        raise
+    if settings.insightface_replication_enabled:
+        data["inflight"] = None
+        await run_sync(_save, data)
+    return result
 
 
 async def run(engine, function, *args, **kwargs):
     # The caller holds the global library lock. Another API instance can finish
     # compensation left behind by a dead process before accepting a new write.
+    await run_sync(face_sync_store.before_write)
     for pending in await run_sync(_load):
         if pending.get("kind") == "transaction":
+            if settings.insightface_replication_enabled and (
+                pending.get("inflight") or pending.get("uncertain")
+            ):
+                raise face_sync_store.ReplicationUnavailable(
+                    "主节点有结果不确定的写入，必须隔离在途请求后恢复"
+                )
             await restore(engine, pending)
     key = request_key.get()
     operation_id = key[0] if key else uuid4().hex
@@ -190,14 +237,59 @@ async def run(engine, function, *args, **kwargs):
         result = await function(engine, *args, **kwargs)
         check_locks()
         data.update(status="completed", result=result)
-        await run_sync(_save, data)
+        if settings.insightface_replication_enabled:
+            snapshots = await capture(engine, data["before"].values())
+            await run_sync(_commit_replicated, data, snapshots)
+        else:
+            await run_sync(_save, data)
         return result
+    except CommitUncertain:
+        # Do not compensate a transaction whose COMMIT may have succeeded.
+        raise
     except Exception:
         check_locks()
+        if settings.insightface_replication_enabled and (
+            data.get("uncertain") or data.get("inflight")
+        ):
+            data.update(status="uncertain", uncertain=True)
+            await run_sync(_save, data)
+            raise face_sync_store.ReplicationUnavailable(
+                "人物写入结果不确定，已暂停后续写入；请执行主节点恢复流程"
+            ) from None
         await restore(engine, data)
         raise
     finally:
         _operation.reset(token)
+
+
+class CommitUncertain(face_sync_store.ReplicationUnavailable):
+    pass
+
+
+def _commit_replicated(data, snapshots):
+    try:
+        with connect() as connection:
+            connection.begin()
+            with connection.cursor() as cursor:
+                changed = cursor.execute(
+                    "UPDATE person_operations SET status='completed',payload=%s,version=version+1 WHERE id=%s AND version=%s",
+                    (json.dumps(data, ensure_ascii=False), data["id"], data["version"]),
+                )
+                if not changed:
+                    raise RuntimeError("人物操作版本冲突")
+                face_sync_store.append(cursor, data["id"], snapshots)
+            connection.commit()
+        data["version"] += 1
+    except Exception as exc:
+        try:
+            saved = _load(data["id"])
+            if saved and saved[0]["status"] == "completed":
+                return
+        except Exception:
+            pass
+        raise CommitUncertain(
+            "人物提交结果待确认；请用同一幂等键查询或重试，不要生成新请求"
+        ) from exc
 
 
 def record_revision(item):

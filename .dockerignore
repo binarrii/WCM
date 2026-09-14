@@ -30,6 +30,8 @@ test_*
 bench_*
 benchmark*
 backups/
+insightface-replicas/
+.env.insightface-replicas
 .codegraph/
 source.tar.gz
 update.tar.gz

@@ -2,6 +2,9 @@
 
 本轮实现最初方案的第 1–3 项。InsightFace Server、其模型、SQLite 和索引部署保持原状。
 
+后续新增的独立 InsightFace 副本、可靠同步及故障恢复流程见 [InsightFace 可靠副本同步](insightface-replication.md)。
+原主节点保持原镜像和数据格式，新增副本不与原主节点共用 SQLite 文件。
+
 ## 251 上的两套入口
 
 | 项目 | 旧版备用 | 新架构 |

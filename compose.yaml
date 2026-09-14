@@ -77,6 +77,22 @@ services:
       retries: 5
       start_period: 60s
 
+  face-sync:
+    <<: *runtime
+    profiles: [face-replication]
+    command: [python, -m, api.face_sync_worker]
+    cpus: 1
+    mem_limit: 1g
+    stop_grace_period: 150s
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-float(pathlib.Path('/tmp/wcm-face-sync-health').read_text()) < 30"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
   webui:
     image: wcm-cluster-webui:${WCM_IMAGE_TAG:-dev}
     build:

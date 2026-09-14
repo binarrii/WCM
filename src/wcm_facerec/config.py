@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     insightface_verify_similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD
     # Optional bearer token. Empty when auth is disabled on the server.
     insightface_api_key: str = ""
+    # WCM-owned replication; every server keeps its own unmodified SQLite.
+    insightface_replication_enabled: bool = False
+    insightface_replicas: dict[str, str] = {}
+    insightface_sync_poll_s: float = Field(default=2.0, ge=0.2)
+    insightface_sync_batch_size: int = Field(default=50, ge=1, le=500)
+    insightface_read_lease_s: int = Field(default=120, ge=30)
+    insightface_replica_health_ttl_s: int = Field(default=15, ge=5)
 
     # ---- Search-quality enhancements (all default to 0.0 = off) ----
     # #3 quality-aware fusion: weight each match's similarity by the query

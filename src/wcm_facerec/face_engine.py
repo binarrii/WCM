@@ -36,6 +36,7 @@ import numpy as np
 from . import image_store, person_operations
 from .cluster import model_slot
 from .config import DEFAULT_DISTANCE_THRESHOLD, settings
+from .face_replication import current_adapter, replica_read
 from .ifs_adapter import InsightFaceAdapter, crop_query_face
 from .person_library import (
     SameNamePeopleError,
@@ -126,6 +127,14 @@ def _to_bytes(img_source: str | Path | bytes | np.ndarray) -> bytes:
 class FaceEngine:
     """Face recognition engine backed by InsightFace Server."""
 
+    @property
+    def _adapter(self):
+        return current_adapter.get() or self._primary_adapter
+
+    @_adapter.setter
+    def _adapter(self, value):
+        self._primary_adapter = value
+
     def __init__(
         self,
         model_name: str | None = None,
@@ -148,6 +157,7 @@ class FaceEngine:
     # ------------------------------------------------------------------
     # Read paths (legacy contract preserved)
     # ------------------------------------------------------------------
+    @replica_read
     async def detect_faces(self, img_source: str | Path | bytes | np.ndarray) -> list[dict]:
         """Detect faces in an image.
 
@@ -168,6 +178,7 @@ class FaceEngine:
             include_embeddings=True,
         )
 
+    @replica_read
     async def generate_embedding(self, img_source: str | Path | bytes | np.ndarray) -> np.ndarray:
         """Generate a 512-d float32 embedding for the most prominent face."""
         image_bytes = _to_bytes(img_source)
@@ -211,6 +222,7 @@ class FaceEngine:
         )
         return grouped["all_results"]
 
+    @replica_read
     async def search_multi_face(
         self,
         img_source: str | Path | bytes | np.ndarray,
@@ -315,6 +327,7 @@ class FaceEngine:
             face["matches"] = face["matches"][:top_k]
         return grouped
 
+    @replica_read
     async def compare_gallery(
         self,
         image_bytes: bytes,
@@ -362,6 +375,7 @@ class FaceEngine:
 
         return list(await asyncio.gather(*(score(path) for path in paths)))
 
+    @replica_read
     async def verify_faces(
         self,
         img1: str | Path | bytes | np.ndarray,

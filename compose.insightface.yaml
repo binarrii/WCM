@@ -1,0 +1,33 @@
+# Use with compose.yaml. Both replicas keep the original InsightFace image and
+# private, independent data directories. Seed and verify before enabling reads.
+x-face-replica: &face-replica
+  image: ${WCM_IFS_REPLICA_IMAGE:?Set the exact currently deployed InsightFace image}
+  profiles: [face-replication]
+  restart: unless-stopped
+  init: true
+  cpus: 4
+  mem_limit: 4g
+  env_file:
+    - path: .env.insightface-replicas
+      format: raw
+  expose: ["8080"]
+  healthcheck:
+    test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/v1/health',timeout=5).read()"]
+    interval: 10s
+    timeout: 6s
+    retries: 12
+    start_period: 120s
+
+services:
+  insightface-a:
+    <<: *face-replica
+    volumes:
+      - ./insightface-replicas/a/data:/data
+      - ./insightface-replicas/server.toml:/etc/insightface/server.toml:ro
+      - ${WCM_IFS_MODELS_DIR:-/opt/binarii/insightface-server/.models}:/models:ro
+  insightface-b:
+    <<: *face-replica
+    volumes:
+      - ./insightface-replicas/b/data:/data
+      - ./insightface-replicas/server.toml:/etc/insightface/server.toml:ro
+      - ${WCM_IFS_MODELS_DIR:-/opt/binarii/insightface-server/.models}:/models:ro

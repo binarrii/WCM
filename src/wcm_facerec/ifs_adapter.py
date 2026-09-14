@@ -26,7 +26,9 @@ from wcm_facerec.vendor.insightface_server import (  # type: ignore  # noqa: F40
 )
 from wcm_facerec.vendor.insightface_server.exceptions import NotFoundError
 
+from .cluster import check_locks
 from .config import DEFAULT_SIMILARITY_THRESHOLD, settings
+from .face_sync_store import ReplicationUnavailable, read_guard
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,17 @@ class InsightFaceAdapter:
             api_key=api_key or None,
             timeout=timeout,
         )
+        request = self._client._request
+
+        def guarded_request(*args, **kwargs):
+            # Composed SDK calls may issue several HTTP requests in one thread.
+            check_locks()
+            guard = read_guard.get()
+            if guard is not None and guard["lost"]:
+                raise ReplicationUnavailable("副本读取租约已失效")
+            return request(*args, **kwargs)
+
+        self._client._request = guarded_request
 
     # ------------------------------------------------------------------
     # Health / readiness

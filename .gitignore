@@ -16,6 +16,8 @@ wheels/
 
 # Environment variables
 .env
+.env.insightface-replicas
+insightface-replicas/
 
 # Generated video review copies and API analysis reports
 data/media_reviews/
