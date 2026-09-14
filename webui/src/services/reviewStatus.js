@@ -1,3 +1,5 @@
+export const reviewTaskActive = task => ['processing', 'cancelling'].includes(task?.status);
+
 /** Processing has finished and results (including incomplete checks) can be reviewed. */
 export const reviewResultsReady = task => {
   const status = typeof task === 'string' ? task : task?.status;

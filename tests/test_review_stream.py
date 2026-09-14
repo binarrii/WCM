@@ -26,6 +26,7 @@ def test_submission_socket_delivers_accepted_progress_and_final_result(monkeypat
     monkeypatch.setattr(review_task_store, "create", AsyncMock())
     monkeypatch.setattr(review_task_store, "complete", AsyncMock())
     monkeypatch.setattr(review_task_store, "_run", AsyncMock(return_value=True))
+    monkeypatch.setattr(review_task_store, "cancellation_requested", AsyncMock(return_value=False))
 
     async def summaries(ids):
         return [{"id": ids[0], "status": "completed", "progress": {"percent": 100}}]
@@ -49,7 +50,7 @@ def test_submission_socket_delivers_accepted_progress_and_final_result(monkeypat
             messages = []
             while True:
                 message = socket.receive_json()
-                assert message.get("status") != "error", message
+                assert message.get("status") not in {"error", "cancelled"}, message
                 messages.append(message)
                 if message.get("status") == "completed":
                     break

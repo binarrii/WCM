@@ -6,7 +6,6 @@ import inspect
 import logging
 import os
 import re
-from contextlib import suppress
 from pathlib import Path
 from textwrap import dedent
 
@@ -29,6 +28,7 @@ from .utils import (
     VIDEO_EXTENSIONS,
     VideoFrameSampler,
     _download_url_safe,
+    _download_video_safe_async,
     _download_video_safe_sync,
     _extract_video_frames_for_ocr,
     _extract_video_windows,
@@ -452,24 +452,14 @@ class PreparedVisualFrames(list):
 
 
 async def _download_review_video(url, path, max_size, *, progress=None):
-    callback = None
     if progress is not None:
         await progress.begin_download()
-        loop = asyncio.get_running_loop()
-
-        def callback(completed, total):
-            # The downloader limits callbacks to twice a second. All progress
-            # mutation/persistence stays on the event loop, never its IO thread.
-            with suppress(RuntimeError):  # The owning loop may already be shut down.
-                loop.call_soon_threadsafe(progress.update_download, completed, total)
-
-    await asyncio.to_thread(
-        _download_video_safe_sync,
+    await _download_video_safe_async(
         url,
         path,
         max_size,
         timeout=900.0,
-        **({"on_progress": callback} if callback is not None else {}),
+        on_progress=progress.update_download if progress is not None else None,
     )
     if progress is not None:
         await progress.finish_download()

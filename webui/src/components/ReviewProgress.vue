@@ -56,6 +56,8 @@ const expanded = ref(false);
 .indeterminate span { width: 35% !important; animation: review-progress-pulse 1.5s ease-in-out infinite; }
 .completed { --progress-color: var(--status-green, #10b981); }
 .partial { --progress-color: var(--status-yellow, #f59e0b); }
+.cancelled { --progress-color: var(--text-muted, #94a3b8); }
+.cancelling { --progress-color: var(--status-yellow, #f59e0b); }
 .failed { --progress-color: var(--status-red, #ef4444); }
 small { display: block; margin-top: 7px; font-size: 11px; line-height: 1.5; }
 .active-windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 8px 24px; }

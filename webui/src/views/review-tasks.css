@@ -63,3 +63,8 @@ tbody tr.selected { background: var(--color-primary-glow); }
 
 .task-status.partial { color: var(--status-yellow); background: var(--status-yellow-bg); border-color: var(--status-yellow-border); white-space: nowrap; }
 .task-video em.partial { color: var(--status-yellow); }
+
+.task-status.cancelling { color: var(--status-yellow); background: var(--status-yellow-bg); border-color: var(--status-yellow-border); }
+.task-status.cancelled { color: var(--text-muted); background: var(--bg-secondary); }
+.task-actions button.cancel-review-button { color: var(--status-red); margin-left: 4px; }
+.task-actions button.cancel-review-button:hover:not(:disabled) { background: var(--status-red-bg); border-color: var(--status-red-border); }

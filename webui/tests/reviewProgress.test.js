@@ -77,3 +77,16 @@ test('submission returns the task id before results and never resubmits on disco
   socket.onclose();await assert.rejects(failed,error=>error.taskId==='second');
   assert.equal(reviewSocketUrl('/api/v1','https://example.com/#/video'),'wss://example.com/api/v1/ws/analyze_media');
 });
+
+
+test('cancelled progress preserves the stopping position without showing success', () => {
+  const progress = { phase: 'reviewing', percent: 43, completed_samples: 18, elapsed_seconds: 80 };
+  const cancelling = taskProgress({ status: 'cancelling', progress });
+  assert.equal(cancelling.label, '取消中…');
+  assert.equal(cancelling.active, true);
+  const cancelled = taskProgress({ status: 'cancelled', progress });
+  assert.equal(cancelled.label, '已取消');
+  assert.equal(cancelled.percent, 43);
+  assert.equal(cancelled.active, false);
+  assert.equal(cancelled.subProgress, null);
+});

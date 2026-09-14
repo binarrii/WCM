@@ -71,3 +71,25 @@ test('leaving the page closes its submission socket without sending a task cance
   await assert.rejects(result,error=>error.taskId==='task');
   assert.equal(sockets[0].closed,true);assert.equal(sockets[0].sent.length,1);
 });
+
+test('late snapshots and progress cannot undo cancelling or cancelled state', () => {
+  const processing = { id: 'task', status: 'processing', progress: { percent: 43 } };
+  const cancelling = mergeReviewTask(processing, { status: 'cancelling' });
+  assert.equal(mergeReviewTask(cancelling, processing).status, 'cancelling');
+  const cancelled = mergeReviewTask(cancelling, { status: 'cancelled' });
+  assert.equal(mergeReviewTask(cancelled, cancelling).status, 'cancelled');
+  assert.equal(mergeReviewTask(cancelled, processing).status, 'cancelled');
+});
+
+test('submission distinguishes manual cancellation and never resolves empty results', async () => {
+  const { sockets, factory } = mockSockets();
+  const events = [];
+  const result = submitReview('ws://test', {}, () => {}, factory, event => events.push(event));
+  sockets[0].message({ status: 'accepted', taskId: 'task' });
+  sockets[0].message({ type: 'changed', reason: 'cancelling', task_ids: ['task'] });
+  sockets[0].message({ status: 'cancelled', taskId: 'task' });
+  await assert.rejects(result, error => error.cancelled && error.taskId === 'task');
+  assert.equal(events[0].reason, 'cancelling');
+  assert.equal(events[1].task.status, 'cancelled');
+  assert.equal(sockets[0].closed, true);
+});

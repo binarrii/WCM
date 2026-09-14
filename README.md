@@ -139,8 +139,17 @@ RUN_LIVE=1 uv run pytest -m live tests/test_smoke_live.py -v
   - `GET /review_tasks/{task_id}` for parameters and full stored results;
   - `GET /review_tasks/{task_id}/results/download` for one JSON attachment;
   - `POST /review_tasks/results/download` with `{"ids": [...]}` for a ZIP;
+  - `POST /review_tasks/{task_id}/cancel` to stop a queued or running review;
   - `DELETE /review_tasks/{task_id}` and `DELETE /review_tasks` with
     `{"ids": [...]}` for single and batch deletion.
+- The task list and review page expose a cancel button with confirmation.
+  Cancellation transitions through `cancelling` to `cancelled` after downloads,
+  model requests and decoder cleanup finish; the record and stopping progress
+  remain available. Cancellation requests cross API workers via the event bus,
+  with a two-second database check as fallback. Completed tasks reject cancellation
+  (409); repeated cancellation is safe. Active tasks must stop before deletion.
+  Cancelled submissions return HTTP 409 or WebSocket `status: "cancelled"`, without
+  a completed analysis result. Closing the browser still leaves a review running.
 - Face-record listing uses opaque cursor pagination. Pass the returned
   `next_cursor` unchanged on the next request.
 - `/face_records/stats` retains the person counts (`total`, `bad_artists`,

@@ -1,5 +1,6 @@
 # pyright: ignore[reportUnusedFunction]
 
+import asyncio
 import base64
 import logging
 import math
@@ -444,6 +445,48 @@ def _download_video_safe_sync(
                 on_progress(downloaded, total)
             with open(file_path, "wb") as f:
                 for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded > max_size:
+                        raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
+                    if total is not None and downloaded > total:
+                        total = None
+                    now = time.monotonic()
+                    if on_progress is not None and now - last_report >= 0.5:
+                        on_progress(downloaded, total)
+                        last_report = now
+            if on_progress is not None:
+                on_progress(downloaded, total)
+
+
+async def _download_video_safe_async(
+    url: str, file_path: Path, max_size: int, timeout: float = 120.0, *, on_progress=None
+):
+    """Stream a review download; cancellation closes the response and file promptly."""
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            content_length = response.headers.get("Content-Length")
+            try:
+                total = int(content_length) if content_length is not None else None
+            except ValueError:
+                total = None
+            # iter_bytes yields decoded bytes. A compressed response's wire size
+            # cannot be used as the denominator for the saved video size.
+            if (total is not None and total < 0) or response.headers.get(
+                "Content-Encoding", "identity"
+            ).lower() != "identity":
+                total = None
+            if total is not None and total > max_size:
+                raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
+
+            downloaded = 0
+            last_report = time.monotonic()
+            if on_progress is not None:
+                on_progress(downloaded, total)
+            with open(file_path, "wb") as f:
+                async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+                    await asyncio.sleep(0)
                     f.write(chunk)
                     downloaded += len(chunk)
                     if downloaded > max_size:

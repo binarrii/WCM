@@ -54,6 +54,7 @@ async def test_one_failed_frame_preserves_siblings_and_later_frames(monkeypatch,
     cap = Capture(3)
     monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
     monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     seen = {stage: [] for stage in ("face", "visual", "ocr")}
 
     def visit(stage, index):
@@ -350,6 +351,7 @@ async def test_video_decode_failure_is_still_fatal_and_cleans_up_workers(monkeyp
     cap = Capture(100, fail_at=4)
     monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
     monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())
     monkeypatch.setattr(handlers, "_face_task", AsyncMock(return_value=[]))
     monkeypatch.setattr(handlers, "_call_nsfw_analysis", AsyncMock(return_value="scene"))

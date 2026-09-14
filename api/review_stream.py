@@ -115,8 +115,12 @@ async def push_review_progress(websocket, task_id):
                 if event["type"] == "resync":
                     await websocket.close(code=1013)
                     return
-                if event["type"] == "heartbeat" or (
-                    event["type"] == "progress" and event["task_id"] == task_id
+                if (
+                    event["type"] == "heartbeat"
+                    or (event["type"] == "progress" and event["task_id"] == task_id)
+                    or (
+                        event.get("reason") == "cancelling" and task_id in event.get("task_ids", [])
+                    )
                 ):
                     await send(websocket, event)
                     heartbeat_at = asyncio.get_running_loop().time() + HEARTBEAT_SECONDS

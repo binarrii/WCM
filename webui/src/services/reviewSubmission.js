@@ -12,13 +12,14 @@ export const submitReview = (url, payload, onTaskAccepted, socketFactory = addre
   let heartbeatTimer;
   const abort = () => fail('审核页面已关闭');
   const keepAlive = () => { clearTimeout(heartbeatTimer); heartbeatTimer = setTimeout(() => fail('审核连接超时'), 45000); };
-  const fail = message => {
+  const fail = (message, cancelled = false) => {
     if (settled) return;
     settled = true;
     clearTimeout(heartbeatTimer);
     signal?.removeEventListener('abort', abort);
     const error = new Error(message);
     error.taskId = taskId;
+    error.cancelled = cancelled;
     reject(error);
     socket.close();
   };
@@ -29,7 +30,7 @@ export const submitReview = (url, payload, onTaskAccepted, socketFactory = addre
     keepAlive();
     let data;
     try { data = JSON.parse(event.data); } catch { fail('审核服务返回了无效响应'); return; }
-    if (data.type === 'progress') {
+    if (data.type === 'progress' || data.type === 'changed') {
       onTaskEvent(data);
     } else if (data.status === 'accepted') {
       taskId = data.taskId;
@@ -41,6 +42,9 @@ export const submitReview = (url, payload, onTaskAccepted, socketFactory = addre
       if (data.task) onTaskEvent({ type: 'completed', task: data.task });
       resolve(data.results);
       socket.close();
+    } else if (data.status === 'cancelled') {
+      onTaskEvent({ type: 'cancelled', task: { id: data.taskId || taskId, status: 'cancelled' } });
+      fail('审核任务已取消', true);
     } else if (data.status === 'error') {
       fail(data.error || '视频分析失败');
     }

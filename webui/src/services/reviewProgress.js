@@ -22,12 +22,13 @@ export const downloadSize = bytes => {
 
 export const taskProgress = task => {
   const progress = task?.progress || {};
-  const finished = task?.status !== 'processing' && (
+  const finished = !['processing', 'cancelling', 'cancelled'].includes(task?.status) && (
     progress.phase === 'finished' || ['completed', 'partial'].includes(task?.status)
   );
-  const phase = finished ? 'finished' : task?.status === 'failed' ? 'failed' : progress.phase;
+  const phase = ['cancelling', 'cancelled'].includes(task?.status) ? task.status
+    : finished ? 'finished' : task?.status === 'failed' ? 'failed' : progress.phase;
   const percent = finished ? 100 : finite(progress.percent) ? Math.max(0, Math.min(99, progress.percent)) : null;
-  const label = { queued: '排队中', downloading: '下载中', reviewing: '审核中', resampling: '审核收尾', saving: '保存结果', finished: '处理结束', failed: '已停止' }[phase] || '等待进度';
+  const label = { queued: '排队中', downloading: '下载中', reviewing: '审核中', resampling: '审核收尾', saving: '保存结果', finished: '处理结束', failed: '已停止', cancelling: '取消中…', cancelled: '已取消' }[phase] || '等待进度';
   const details = [];
   if (!['queued', 'downloading'].includes(phase)) {
     if (finite(progress.completed_windows)) details.push(`窗口 ${progress.completed_windows}${finite(progress.total_windows) ? ` / ${progress.total_windows}` : ''}`);
@@ -35,7 +36,7 @@ export const taskProgress = task => {
   }
   if (finite(progress.elapsed_seconds)) details.push(`用时 ${elapsedTime(progress.elapsed_seconds)}`);
   const stageLabels = { visual: '视觉', ocr: '文字', face: '人脸' };
-  const windows = (Array.isArray(progress.active_windows) ? progress.active_windows : []).map(window => ({
+  const windows = (phase !== 'cancelled' && Array.isArray(progress.active_windows) ? progress.active_windows : []).map(window => ({
     title: `窗口 #${window.index} · ${sampleTime(window.start_seconds)}～${sampleTime(window.end_seconds)}`,
     samples: `采样点 ${window.sample_timestamps.map(sampleTime).join('、')}`,
     stages: Object.entries(window.stages || {}).map(([stage, samples]) => `${stageLabels[stage] || stage}：${samples.map(sampleTime).join('、')}`).join('；')
@@ -63,5 +64,5 @@ export const taskProgress = task => {
       details: total ? `${downloadSize(completed)} / ${downloadSize(total)}` : `已下载 ${downloadSize(completed)} · 总大小未知`
     };
   }
-  return { label, percent, details: details.join(' · '), windows, subProgress, active: task?.status === 'processing' };
+  return { label, percent, details: details.join(' · '), windows, subProgress, active: ['processing', 'cancelling'].includes(task?.status) };
 };

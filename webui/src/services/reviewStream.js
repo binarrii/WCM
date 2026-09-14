@@ -1,3 +1,5 @@
+import { reviewTaskActive } from './reviewStatus.js';
+
 export const reviewStreamUrl = (apiBase, pageUrl) => {
   const url = new URL(`${apiBase.replace(/\/$/, '')}/ws/analyze_media`, pageUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -6,7 +8,8 @@ export const reviewStreamUrl = (apiBase, pageUrl) => {
 
 export const mergeReviewTask = (current, next) => {
   if (!current) return next;
-  if (current.status !== 'processing' && next.status === 'processing') return current;
+  if (!reviewTaskActive(current) && reviewTaskActive(next)) return current;
+  if (current.status === 'cancelling' && next.status === 'processing') return current;
   const merged = { ...current, ...next };
   if (next.status === 'processing' && (current.progress?.sequence ?? -1) > (next.progress?.sequence ?? -1)) {
     merged.progress = current.progress;

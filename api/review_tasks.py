@@ -12,7 +12,7 @@ from . import review_task_store
 from .review_results import consolidate_results
 
 review_tasks_bp = APIRouter()
-_STATUSES = {"processing", "completed", "partial", "failed"}
+_STATUSES = {"processing", "cancelling", "cancelled", "completed", "partial", "failed"}
 
 
 class ReviewTaskDeleteRequest(BaseModel):
@@ -28,7 +28,9 @@ def _task_ids(ids: list[str]) -> list[str]:
 
 
 def _result_bytes(task: dict) -> bytes:
-    if task["status"] == "processing" or not isinstance(task.get("results"), list):
+    if task["status"] in {"processing", "cancelling", "cancelled"} or not isinstance(
+        task.get("results"), list
+    ):
         raise HTTPException(status_code=409, detail=f"审核任务 {task['id']} 的分析结果尚未就绪")
     return json.dumps(consolidate_results(task["results"]), ensure_ascii=False, indent=2).encode(
         "utf-8"
@@ -109,12 +111,27 @@ async def get_review_task(task_id: str):
     return task
 
 
+@review_tasks_bp.post("/review_tasks/{task_id}/cancel")
+async def cancel_review_task(task_id: str):
+    try:
+        task = await review_task_store.request_cancel(task_id)
+    except review_task_store.ReviewTaskStoreUnavailable as exc:
+        raise _storage_error(exc) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="审核任务不存在")
+    if task["status"] not in {"cancelling", "cancelled"}:
+        raise HTTPException(status_code=409, detail="任务已结束，无法取消")
+    return task
+
+
 @review_tasks_bp.delete("/review_tasks/{task_id}")
 async def delete_review_task(task_id: str):
     try:
         deleted = await review_task_store.delete_many([task_id])
     except review_task_store.ReviewTaskStoreUnavailable as exc:
         raise _storage_error(exc) from exc
+    except review_task_store.ReviewTaskConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="审核任务不存在")
     return {"deleted": deleted}
@@ -129,4 +146,6 @@ async def delete_review_tasks(body: ReviewTaskDeleteRequest):
         deleted = await review_task_store.delete_many(task_ids)
     except review_task_store.ReviewTaskStoreUnavailable as exc:
         raise _storage_error(exc) from exc
+    except review_task_store.ReviewTaskConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"deleted": deleted, "requested": len(task_ids)}

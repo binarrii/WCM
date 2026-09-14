@@ -156,7 +156,7 @@ async def create(video_url: str, parameters: dict, task_id: str | None = None) -
     return resolved_id
 
 
-def _complete_sync(task_id: str, results: list[dict], summary: dict | None = None) -> None:
+def _complete_sync(task_id: str, results: list[dict], summary: dict | None = None) -> bool:
     incomplete = [
         item for item in flatten_findings(results) if item.get("review_status") == "incomplete"
     ]
@@ -175,7 +175,7 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
             UPDATE review_tasks
             SET status = %s, results = %s, result_count = %s, error = %s, review_summary = %s
                 , progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'finished', '$.percent', 100)
-            WHERE id = %s
+            WHERE id = %s AND status = 'processing'
             """,
             (
                 status,
@@ -186,32 +186,87 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
                 task_id,
             ),
         )
+        return bool(cursor.rowcount)
 
 
-async def complete(task_id: str | None, results: list[dict], summary: dict | None = None) -> None:
+async def complete(task_id: str | None, results: list[dict], summary: dict | None = None) -> bool:
     if task_id and is_enabled():
-        await _run(_complete_sync, task_id, results, summary)
+        if not await _run(_complete_sync, task_id, results, summary):
+            return False
         await review_events.publish(
             {"type": "changed", "task_ids": [task_id], "reason": "completed"}
         )
+    return True
 
 
-def _fail_sync(task_id: str, error: str) -> None:
+def _fail_sync(task_id: str, error: str) -> bool:
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(
             """
             UPDATE review_tasks SET status = 'failed', error = %s,
                 progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'failed')
-            WHERE id = %s
+            WHERE id = %s AND status = 'processing'
             """,
             (error[:65535], task_id),
         )
+        return bool(cursor.rowcount)
 
 
-async def fail(task_id: str | None, error: str) -> None:
+async def fail(task_id: str | None, error: str) -> bool:
     if task_id and is_enabled():
-        await _run(_fail_sync, task_id, error)
+        if not await _run(_fail_sync, task_id, error):
+            return False
         await review_events.publish({"type": "changed", "task_ids": [task_id], "reason": "failed"})
+    return True
+
+
+def _request_cancel_sync(task_id: str) -> None:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE review_tasks SET status = 'cancelling', "
+            "progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'cancelling') "
+            "WHERE id = %s AND status = 'processing'",
+            (task_id,),
+        )
+
+
+async def request_cancel(task_id: str) -> dict | None:
+    await _run(_request_cancel_sync, task_id)
+    tasks = await get_summaries([task_id])
+    task = tasks[0] if tasks else None
+    if task and task["status"] == "cancelling":
+        await review_events.publish(
+            {"type": "changed", "task_ids": [task_id], "reason": "cancelling"}
+        )
+    return task
+
+
+def _cancellation_requested_sync(task_id: str) -> bool:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT status FROM review_tasks WHERE id = %s", (task_id,))
+        row = cursor.fetchone()
+        return bool(row and row["status"] in {"cancelling", "cancelled"})
+
+
+async def cancellation_requested(task_id: str) -> bool:
+    return bool(task_id and is_enabled() and await _run(_cancellation_requested_sync, task_id))
+
+
+def _cancelled_sync(task_id: str, progress: dict) -> None:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE review_tasks SET status = 'cancelled', error = NULL, progress = %s "
+            "WHERE id = %s AND status = 'cancelling'",
+            (_json_dump({**progress, "phase": "cancelled", "active_windows": []}), task_id),
+        )
+
+
+async def cancelled(task_id: str, progress: dict) -> None:
+    if task_id and is_enabled():
+        await _run(_cancelled_sync, task_id, progress)
+        await review_events.publish(
+            {"type": "changed", "task_ids": [task_id], "reason": "cancelled"}
+        )
 
 
 def _update_progress_sync(task_id: str, progress: dict) -> bool:
@@ -277,10 +332,23 @@ async def get_summaries(task_ids: list[str]) -> list[dict]:
     return await _run(_get_summaries_sync, task_ids) if task_ids else []
 
 
+class ReviewTaskConflict(RuntimeError):
+    """An active review must be cancelled before its record can be deleted."""
+
+
 def _delete_many_sync(task_ids: list[str]) -> int:
     placeholders = ", ".join(["%s"] * len(task_ids))
     with _connect() as connection, connection.cursor() as cursor:
-        return cursor.execute(f"DELETE FROM review_tasks WHERE id IN ({placeholders})", task_ids)
+        connection.begin()
+        cursor.execute(
+            f"SELECT status FROM review_tasks WHERE id IN ({placeholders}) FOR UPDATE", task_ids
+        )
+        if any(row["status"] in {"processing", "cancelling"} for row in cursor.fetchall()):
+            connection.rollback()
+            raise ReviewTaskConflict("请先取消正在处理的任务，待任务停止后再删除")
+        deleted = cursor.execute(f"DELETE FROM review_tasks WHERE id IN ({placeholders})", task_ids)
+        connection.commit()
+        return deleted
 
 
 async def delete_many(task_ids: list[str]) -> int:

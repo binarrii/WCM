@@ -79,6 +79,7 @@ async def test_controversial_visual_and_ocr_findings_are_not_dropped(monkeypatch
         monkeypatch, "Safety: Controversial\nCategories: Sexual Content or Sexual Acts"
     )
     monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *args: None)
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "_extract_video_windows", lambda *args: [((75.0, "frame"),)])
     monkeypatch.setattr(
         handlers, "_call_nsfw_analysis", AsyncMock(return_value="一名女子裸露上身")

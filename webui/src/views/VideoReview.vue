@@ -5,7 +5,8 @@ import { mediaService } from '../services/mediaService';
 import { saveJson } from '../services/downloads';
 import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
 import { reviewTaskService } from '../services/reviewTaskService';
-import { reviewResultsReady } from '../services/reviewStatus';
+import { reviewTaskActive, reviewResultsReady } from '../services/reviewStatus';
+import CancelReviewButton from '../components/CancelReviewButton.vue';
 import ReviewProgress from '../components/ReviewProgress.vue';
 import { mergeReviewTask } from '../services/reviewStream';
 import {
@@ -189,25 +190,33 @@ const streamState = ref('stopped');
 let refreshingTask;
 let submissionController;
 const refreshCurrentTask = id => {
-  if (refreshingTask?.id === id) return refreshingTask.promise;
+  if (refreshingTask?.id === id) { refreshingTask.again = true; return refreshingTask.promise; }
+  const refresh = { id, again: false };
   const promise = reviewTaskService.get(id).then(task => {
     if (disposed || currentTask.value?.id !== id) return;
     currentTask.value = mergeReviewTask(currentTask.value, task);
-    if (task.status === 'processing') return;
+    task = currentTask.value;
+    if (reviewTaskActive(currentTask.value)) { loading.value = true; return; }
     taskStream.stop();
     loading.value = false;
     if (reviewResultsReady(task)) loadResults(task.results || [], { collapseSetup: true });
+    else if (task.status === 'cancelled') error.value = '';
     else error.value = `任务执行失败：${task.error || '未记录失败原因'}`;
   }).catch(reason => {
     if (!disposed && currentTask.value?.id === id) error.value = reason.response?.data?.detail || reason.message;
-  }).finally(() => { if (refreshingTask?.promise === promise) refreshingTask = null; });
-  refreshingTask = { id, promise };
+  }).finally(() => {
+    if (refreshingTask !== refresh) return;
+    refreshingTask = null;
+    if (refresh.again && !disposed && currentTask.value?.id === id) return refreshCurrentTask(id);
+  });
+  refresh.promise = promise;
+  refreshingTask = refresh;
   return promise;
 };
 const handleTaskEvent = event => {
     const id = currentTask.value?.id;
     if (disposed || !id) return;
-    if (event.type === 'completed' && event.task?.id === id) { currentTask.value = mergeReviewTask(currentTask.value, event.task); loading.value = false; streamState.value = 'stopped'; return; }
+    if (['completed', 'cancelled'].includes(event.type) && event.task?.id === id) { currentTask.value = mergeReviewTask(currentTask.value, event.task); loading.value = false; streamState.value = 'stopped'; return; }
     if (event.type === 'changed') {
       if (event.reason === 'deleted') { taskStream.stop(); loading.value = false; error.value = '该审核任务已删除'; return; }
       return refreshCurrentTask(id);
@@ -250,16 +259,17 @@ const loadReviewTask = async () => {
       loadResults(task.results || [], { collapseSetup: true });
     } else if (task.status === 'failed') {
       error.value = `任务执行失败：${task.error || '未记录失败原因'}`;
-    } else {
+    } else if (reviewTaskActive(task)) {
       taskStream.start([task.id]);
     }
   } catch (reason) {
     error.value = reason.response?.data?.detail || reason.message || '审核任务加载失败';
   } finally {
-    loading.value = currentTask.value?.status === 'processing';
+    loading.value = reviewTaskActive(currentTask.value);
   }
 };
 const analyze = async () => {
+  if (loading.value || reviewTaskActive(currentTask.value)) return;
   submissionController?.abort();
   submissionController = new AbortController();
   taskStream.stop();
@@ -293,16 +303,23 @@ const analyze = async () => {
       signal: submissionController.signal
     });
     if (disposed) return;
-    if (currentTask.value?.status === 'processing') await refreshCurrentTask(currentTask.value.id);
+    if (reviewTaskActive(currentTask.value)) await refreshCurrentTask(currentTask.value.id);
     loadResults(payload, { collapseSetup: true });
   } catch (reason) {
     if (!disposed) {
-      if (reason.taskId) taskStream.start([reason.taskId]);
+      if (reason.cancelled) await refreshCurrentTask(reason.taskId);
+      else if (reason.taskId) taskStream.start([reason.taskId]);
       else error.value = reason.response?.data?.detail || reason.message || '视频分析失败';
     }
   } finally {
-    if (!disposed) loading.value = currentTask.value?.status === 'processing';
+    if (!disposed) loading.value = reviewTaskActive(currentTask.value);
   }
+};
+const updateCancelledTask = task => {
+  if (currentTask.value?.id !== task.id) return;
+  currentTask.value = mergeReviewTask(currentTask.value, task);
+  loading.value = reviewTaskActive(currentTask.value);
+  if (loading.value) taskStream.start([task.id]);
 };
 const importResults = async (event) => {
   const file = event.target.files?.[0];
@@ -417,6 +434,7 @@ onBeforeUnmount(() => {
       <div class="setup-heading">
         <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
         <div class="setup-heading-actions">
+          <CancelReviewButton :task="currentTask" @updated="updateCancelledTask" @error="error = $event" @settled="refreshCurrentTask" />
           <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
           <button class="setup-toggle" type="button" :aria-expanded="setupExpanded" aria-controls="review-setup-content" @click="setupExpanded = !setupExpanded">
             <ChevronUp v-if="setupExpanded" />

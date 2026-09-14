@@ -60,6 +60,7 @@ async def test_model_failure_records_every_unaudited_frame_and_releases_capture(
     monkeypatch.setattr(
         handlers, "_download_video_safe_sync", lambda url, path, *a, **kw: path.touch()
     )
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())
     monkeypatch.setattr(handlers, "_face_task", AsyncMock(return_value=[]))
     monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value=""))
@@ -86,6 +87,7 @@ async def test_cancellation_releases_capture_and_consumers(monkeypatch):
     monkeypatch.setattr(
         handlers, "_download_video_safe_sync", lambda url, path, *a, **kw: path.touch()
     )
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())
     monkeypatch.setattr(handlers, "_face_task", AsyncMock(return_value=[]))
     monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value=""))
@@ -174,6 +176,7 @@ async def test_combined_and_standalone_tasks_use_identical_windows(monkeypatch, 
     monkeypatch.setattr(
         handlers, "_download_video_safe_sync", lambda url, path, *a, **kw: path.touch()
     )
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     nsfw_calls, ocr_calls, face_calls = [], [], []
 
     async def nsfw(images, times):

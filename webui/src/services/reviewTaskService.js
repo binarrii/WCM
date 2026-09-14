@@ -31,6 +31,11 @@ export const reviewTaskService = {
     return response.data;
   },
 
+  async cancel(taskId) {
+    const response = await api.post(`/review_tasks/${encodeURIComponent(taskId)}/cancel`);
+    return response.data;
+  },
+
   async deleteOne(taskId) {
     const response = await api.delete(`/review_tasks/${encodeURIComponent(taskId)}`);
     return response.data;

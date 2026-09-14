@@ -56,6 +56,7 @@ async def test_only_verified_target_description_reaches_guard(monkeypatch):
     monkeypatch.setattr(handlers.settings, "nsfw_verify_target", True)
     calls = install_client(monkeypatch, [caption("后续画面发生暴力"), caption("目标帧为普通街景")])
     monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(
         handlers, "_extract_video_windows", lambda *a: [((99.6, image(60)), (100.6, image(220)))]
     )
@@ -122,6 +123,7 @@ async def test_truncated_caption_reaches_guard_without_retry(monkeypatch, caplog
         replies.insert(0, caption("参考画面描述"))
     calls = install_client(monkeypatch, replies)
     monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(
         handlers,
         "_extract_video_windows",

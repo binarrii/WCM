@@ -23,6 +23,7 @@ from .handlers import (
     _process_detect_sensitive,
     _search_video_frames,
 )
+from .review_cancellation import ReviewTaskCancelled, run_cancellable_review
 from .review_coverage import ReviewCoverage
 from .review_progress import ReviewProgress
 from .review_results import consolidate_results
@@ -549,33 +550,52 @@ async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
     coverage = ReviewCoverage()
     progress = ReviewProgress(task_id)
     progress.phase = "queued"
+
+    async def review():
+        async with review_task_slot():
+            await progress.set_phase("downloading")
+            return await _process_analyze_media(
+                url, sample_interval, top_k, threshold, coverage=coverage, progress=progress
+            )
+
+    async def record_cancellation():
+        await review_task_store.cancelled(task_id, progress.snapshot())
+        await progress.set_phase("cancelled", persist=False)
+
     async with progress:
         try:
-            async with review_task_slot():
-                await progress.set_phase("downloading")
-                result = await _process_analyze_media(
-                    url, sample_interval, top_k, threshold, coverage=coverage, progress=progress
-                )
-                result = (
-                    consolidate_results(result)
-                    if isinstance(result, list)
-                    else {**result, "results": consolidate_results(result.get("results", []))}
-                )
-                stored_results = result.get("results", []) if isinstance(result, dict) else result
-                await progress.set_phase("saving")
-                await review_task_store.complete(
-                    task_id, stored_results, coverage.summarize(stored_results)
-                )
-                await progress.set_phase("finished", persist=False)
-                return result
+            result = await run_cancellable_review(task_id, review)
+            result = (
+                consolidate_results(result)
+                if isinstance(result, list)
+                else {**result, "results": consolidate_results(result.get("results", []))}
+            )
+            stored_results = result.get("results", []) if isinstance(result, dict) else result
+            await progress.set_phase("saving")
+            # The conditional DB write arbitrates cancellation racing with completion.
+            completed = await review_task_store.complete(
+                task_id, stored_results, coverage.summarize(stored_results)
+            )
+            if completed is False:
+                raise ReviewTaskCancelled("审核任务已取消")
+            await progress.set_phase("finished", persist=False)
+            return result
+        except ReviewTaskCancelled:
+            await record_cancellation()
+            raise
         except asyncio.CancelledError:
             with contextlib.suppress(Exception):
+                await review_task_store.cancelled(task_id, progress.snapshot())
                 await review_task_store.fail(task_id, "审核任务被中断。")
             await progress.set_phase("failed", persist=False)
             raise
         except Exception as exc:
+            failed = None
             with contextlib.suppress(Exception):
-                await review_task_store.fail(task_id, str(exc))
+                failed = await review_task_store.fail(task_id, str(exc))
+            if failed is False and await review_task_store.cancellation_requested(task_id):
+                await record_cancellation()
+                raise ReviewTaskCancelled("审核任务已取消") from exc
             await progress.set_phase("failed", persist=False)
             raise
 
@@ -609,6 +629,10 @@ async def analyze_media(request: Request, response: Response):
 
     try:
         result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+    except ReviewTaskCancelled as exc:
+        raise HTTPException(
+            status_code=409, detail="审核任务已取消", headers={"X-Review-Task-ID": task_id}
+        ) from exc
     except review_task_store.ReviewTaskStoreUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -662,6 +686,10 @@ async def websocket_analyze_media(websocket: WebSocket):
             try:
                 async with push_review_progress(websocket, task_id):
                     result = await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+            except ReviewTaskCancelled:
+                with contextlib.suppress(Exception):
+                    await websocket.send_json({"status": "cancelled", "taskId": task_id})
+                continue
             except Exception as e:
                 with contextlib.suppress(Exception):
                     await websocket.send_json(

@@ -1,6 +1,5 @@
 import asyncio
 import gzip
-import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,8 +12,9 @@ from api.review_progress import ReviewProgress
 
 def install_download(monkeypatch, chunks, headers=None):
     original_client = httpx.Client
+    original_async_client = httpx.AsyncClient
 
-    class Stream(httpx.SyncByteStream):
+    class Stream(httpx.SyncByteStream, httpx.AsyncByteStream):
         closed = False
 
         def __iter__(self):
@@ -22,6 +22,13 @@ def install_download(monkeypatch, chunks, headers=None):
                 if isinstance(chunk, Exception):
                     raise chunk
                 yield chunk
+
+        async def __aiter__(self):
+            for chunk in self:
+                yield chunk
+
+        async def aclose(self):
+            self.close()
 
         def close(self):
             self.closed = True
@@ -32,6 +39,9 @@ def install_download(monkeypatch, chunks, headers=None):
     )
     monkeypatch.setattr(
         utils.httpx, "Client", lambda **kw: original_client(transport=transport, **kw)
+    )
+    monkeypatch.setattr(
+        utils.httpx, "AsyncClient", lambda **kw: original_async_client(transport=transport, **kw)
     )
     ticks = iter(range(100))
     monkeypatch.setattr(utils, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
@@ -76,7 +86,7 @@ def test_compressed_download_does_not_compare_decoded_bytes_to_wire_size(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_thread_callbacks_reach_progress_without_completing_the_review(monkeypatch, tmp_path):
+async def test_stream_updates_progress_without_completing_the_review(monkeypatch, tmp_path):
     writes = []
 
     async def write(task_id, data):
@@ -84,23 +94,23 @@ async def test_thread_callbacks_reach_progress_without_completing_the_review(mon
 
     monkeypatch.setattr(review_progress.review_task_store, "update_progress", write)
     progress = ReviewProgress("task", interval=0)
-    paused = threading.Event()
-    release = threading.Event()
+    paused = asyncio.Event()
+    release = asyncio.Event()
 
-    def download(*args, on_progress, **kwargs):
+    async def download(*args, on_progress, **kwargs):
         on_progress(50, 100)
         paused.set()
-        assert release.wait(2)
+        await asyncio.wait_for(release.wait(), 2)
         on_progress(100, 100)
 
-    monkeypatch.setattr(handlers, "_download_video_safe_sync", download)
+    monkeypatch.setattr(handlers, "_download_video_safe_async", download)
     task = asyncio.create_task(
         handlers._download_review_video(
             "fixture.mp4", tmp_path / "movie.mp4", 100, progress=progress
         )
     )
     try:
-        assert await asyncio.to_thread(paused.wait, 1)
+        await asyncio.wait_for(paused.wait(), 1)
         await progress.report(force=True)
         assert writes[-1]["sub_progress"]["percent"] == 50
         assert writes[-1]["percent"] is None

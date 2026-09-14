@@ -92,6 +92,7 @@ def test_http_video_groups_contained_findings_without_extending_their_scopes(mon
     monkeypatch.setattr(
         handlers, "_download_video_safe_sync", lambda url, path, *a, **k: path.touch()
     )
+    monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "_face_task", faces)
     # Same category/description as a face: provenance, not text matching, controls merging.
     monkeypatch.setattr(handlers, "_call_nsfw_analysis", AsyncMock(return_value="review-subject"))
