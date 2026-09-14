@@ -434,8 +434,8 @@ onBeforeUnmount(() => {
       <div class="setup-heading">
         <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
         <div class="setup-heading-actions">
-          <CancelReviewButton :task="currentTask" @updated="updateCancelledTask" @error="error = $event" @settled="refreshCurrentTask" />
           <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
+          <CancelReviewButton :task="currentTask" @updated="updateCancelledTask" @error="error = $event" @settled="refreshCurrentTask" />
           <button class="setup-toggle" type="button" :aria-expanded="setupExpanded" aria-controls="review-setup-content" @click="setupExpanded = !setupExpanded">
             <ChevronUp v-if="setupExpanded" />
             <ChevronDown v-else />
