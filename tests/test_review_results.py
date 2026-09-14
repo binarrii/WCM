@@ -12,8 +12,9 @@ def test_equal_contained_and_point_findings_share_a_record_without_losing_scope(
     ]
     before = deepcopy(rows)
     grouped = consolidate_results(rows)
-    assert len(grouped) == 1 and grouped[0]["timestamp"] == "55~57"
-    assert grouped[0]["review_status"] == "incomplete"
+    assert len(grouped) == 2 and grouped[0]["timestamp"] == "55~57"
+    assert "review_status" not in grouped[0]
+    assert grouped[1] == rows[-1]
     assert list(flatten_findings(grouped)) == rows
     assert consolidate_results(grouped) == grouped
     assert rows == before
@@ -47,3 +48,20 @@ def test_invalid_legacy_interval_is_retained_with_warning(caplog):
     rows = [{"timestamp": "bad", "description": "保留内容"}]
     assert consolidate_results(rows) == rows
     assert "invalid interval" in caplog.text
+
+
+def test_category_partition_survives_interleaved_intervals_and_legacy_groups():
+    rows = [
+        {"timestamp": "1~10", "category": "A", "description": "外层 A"},
+        {"timestamp": "1~10", "category": "B", "description": "同区间 B"},
+        {"timestamp": "2~3", "category": "A", "description": "内层 A"},
+        {"timestamp": "4~5", "category": "B", "description": "内层 B"},
+        {"timestamp": "6~7", "category": "C", "description": "独立 C"},
+    ]
+    # Historical mixed-category summaries must split using original findings.
+    grouped = consolidate_results([{"timestamp": "1~10", "category": "综合审核", "findings": rows}])
+    assert [row["category"] for row in grouped] == ["A", "B", "C"]
+    assert grouped[0]["findings"] == [rows[0], rows[2]]
+    assert grouped[1]["findings"] == [rows[1], rows[3]]
+    assert grouped[2] == rows[4]
+    assert consolidate_results(grouped) == grouped

@@ -47,8 +47,9 @@ test('partial results retain jumpable gaps alongside successful findings at the 
     { timestamp: '00:01:14.000', category: '审核未完成', description: '视觉审核超时', stage: 'visual', review_status: 'incomplete' },
     { timestamp: '00:01:15.000', category: '审核未完成', description: '文字审核超时', stage: 'ocr', review_status: 'incomplete' }
   ] });
-  assert.deepEqual(markers.map(marker => marker.time_ms), [74000, 75000]);
-  assert.equal(markers[0].findings.length, 2);
+  assert.deepEqual(markers.map(marker => marker.time_ms), [74000, 74000, 75000]);
+  assert.equal(markers[0].findings.length, 1);
+  assert.equal(markers[1].findings[0].category, '审核未完成');
   const gaps = markers.flatMap(marker => marker.findings).filter(finding => finding.review_status === 'incomplete');
   assert.deepEqual(gaps.map(finding => finding.stage), ['visual', 'ocr']);
 });

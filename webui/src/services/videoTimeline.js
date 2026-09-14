@@ -69,12 +69,14 @@ export function normalizeResults(payload) {
     return { start, end, finding };
   }).sort((a, b) => a.start - b.start || b.end - a.end);
   const groups = [];
-  let outer;
+  const outerByCategory = new Map();
   for (const { start, end, finding } of entries) {
-    // Sorting wider intervals first lets all equal/contained rows share a card.
+    // Equal/contained rows share a card only within the same category.
     // Partial overlaps stay separate; never guess shot continuity from a small gap.
+    let outer = outerByCategory.get(finding.category);
     if (!outer || end > outer.end) {
       outer = { start, end, findings: [] };
+      outerByCategory.set(finding.category, outer);
       groups.push(outer);
     }
     const existing = outer.findings.find(value => value.timestamp === finding.timestamp

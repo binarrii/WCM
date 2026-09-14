@@ -22,7 +22,7 @@ test('timestamps round-trip points and ranges', () => {
     { timestamp: '00:00:06.000~00:00:07.000', category: '人物', description: '甲' },
     { timestamp: 6, category: '文本', description: '待复核' }
   ]);
-  assert.equal(markers.length, 1);
+  assert.equal(markers.length, 2);
   assert.equal(markers[0].timestamp, '00:00:06.000~00:00:07.000');
   assert.throws(() => normalizeResults({ status: 'error', results: [] }));
 });
@@ -92,7 +92,7 @@ test('only HTTP video addresses are accepted', () => {
 });
 
 
-test('same and contained intervals retain distinct evidence in one card and JSON', () => {
+test('same-category contained intervals share a card while incomplete findings stay separate', () => {
   const rows = [
     { timestamp: '55~57', category: '复核', source: 'ocr', description: '字幕一' },
     { timestamp: '55~57', category: '复核', source: 'visual', description: '画面' },
@@ -100,11 +100,12 @@ test('same and contained intervals retain distinct evidence in one card and JSON
     { timestamp: 56, category: '审核未完成', review_status: 'incomplete', stage: 'face' }
   ];
   const markers = normalizeResults(rows);
-  assert.equal(markers.length, 1);
-  assert.equal(markers[0].findings.length, 4);
+  assert.equal(markers.length, 2);
+  assert.equal(markers[0].findings.length, 3);
   assert.equal(markers[0].findings[2].timestamp, '00:00:56.000~00:00:57.000');
   const exported = serializeResults(markers);
-  assert.equal(exported[0].review_status, 'incomplete');
+  assert.equal(exported[0].review_status, undefined);
+  assert.equal(exported[1].review_status, 'incomplete');
   assert.deepEqual(normalizeResults(exported), markers);
   const [filtered] = filterMarkers(markers, '审核未完成');
   assert.equal(filtered.timestamp, '00:00:56.000');
@@ -118,7 +119,7 @@ test('nested findings keep precise face PTS and category filtering restores thei
     { timestamp: '1~5', category: '画面', description: '背景' },
     { timestamp: '2~3', category: '人物', description: '甲', face_samples: [sample] }
   ] }]);
-  assert.equal(markers.length, 1);
+  assert.equal(markers.length, 2);
   const filtered = filterMarkers(markers, '人物');
   assert.equal(filtered[0].timestamp, '00:00:02.000~00:00:03.000');
   assert.equal(filtered[0].findings[0].face_samples[0].pts_seconds, sample.pts_seconds);
@@ -126,4 +127,20 @@ test('nested findings keep precise face PTS and category filtering restores thei
 
 test('legacy one-second gaps are not guessed to belong to one shot', () => {
   assert.equal(normalizeResults([{ timestamp: '15~17' }, { timestamp: '18~19' }]).length, 2);
+});
+
+test('category partition survives interleaved intervals and legacy mixed groups', () => {
+  const rows = [
+    { timestamp: '1~10', category: 'A', description: '外层 A' },
+    { timestamp: '1~10', category: 'B', description: '同区间 B' },
+    { timestamp: '2~3', category: 'A', description: '内层 A' },
+    { timestamp: '4~5', category: 'B', description: '内层 B' },
+    { timestamp: '6~7', category: 'C', description: '独立 C' }
+  ];
+  const markers = normalizeResults([{ timestamp: '1~10', category: '综合审核', findings: rows }]);
+  assert.deepEqual(markers.map(marker => marker.findings.map(f => f.description)), [
+    ['外层 A', '内层 A'], ['同区间 B', '内层 B'], ['独立 C']
+  ]);
+  assert.deepEqual(serializeResults(markers).map(row => row.category), ['A', 'B', 'C']);
+  assert.deepEqual(normalizeResults(serializeResults(markers)), markers);
 });

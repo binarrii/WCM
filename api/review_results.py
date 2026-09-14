@@ -23,7 +23,7 @@ def _seconds(value):
 
 
 def consolidate_results(rows):
-    """Equal/contained intervals share one record; partial overlaps remain separate.
+    """Equal/contained intervals of the same category share one record.
 
     The nested findings keep their own timestamps, sources, evidence and face PTS.
     Legacy summary fields remain available to consumers of flat records.
@@ -46,10 +46,13 @@ def consolidate_results(rows):
             invalid.append(row)
             continue
         entries.append((start, end, row))
-    groups, outer = [], None
+    groups, outer_by_category = [], {}
     for _start, end, row in sorted(entries, key=lambda entry: (entry[0], -entry[1])):
+        category = row.get("category") or "未分类"
+        outer = outer_by_category.get(category)
         if outer is None or end > outer["end"]:
-            outer = {"end": end, "rows": []}
+            outer = {"end": end, "category": category, "rows": []}
+            outer_by_category[category] = outer
             groups.append(outer)
         if row not in outer["rows"]:
             outer["rows"].append(row)
@@ -59,11 +62,10 @@ def consolidate_results(rows):
         if len(findings) == 1:
             output.append(findings[0])
             continue
-        categories = list(dict.fromkeys(row.get("category", "未分类") for row in findings))
         sources = list(dict.fromkeys(row.get("source", "unknown") for row in findings))
         combined = {
             "timestamp": findings[0]["timestamp"],
-            "category": categories[0] if len(categories) == 1 else "综合审核",
+            "category": group["category"],
             "source": sources[0] if len(sources) == 1 else "mixed",
             "description": "\n\n".join(
                 dict.fromkeys(
