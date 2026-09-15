@@ -76,19 +76,22 @@ onMounted(() => perform(load));
       <div class="security-actions"><button class="auth-primary" @click="downloadCodes">下载恢复码</button><button class="auth-secondary" @click="recoveryCodes = []">已保存，关闭</button></div>
     </section>
     <div class="security-grid">
-      <section class="security-card">
-        <div class="security-title"><ShieldCheck /><h2>双重验证 · 2FA</h2><span :class="['security-state', { enabled: security.totp_enabled }]">{{ security.totp_enabled ? '已启用' : '未启用' }}</span></div>
-        <p>绑定 Google Authenticator、Microsoft Authenticator 等验证器。使用密码登录时，需要额外输入验证码。</p>
-        <template v-if="!security.totp_enabled">
-          <button v-if="!setup" class="auth-primary" :disabled="busy" @click="beginSetup">绑定验证器</button>
-          <form v-else class="auth-form" @submit.prevent="confirmSetup"><fieldset :disabled="busy">
-            <p>1. 在验证器中扫描二维码，或手动输入密钥。</p><img class="totp-qr" :src="setup.qr_code" alt="验证器绑定二维码" /><code class="totp-secret">{{ setup.secret }}</code>
-            <label>2. 输入 6 位验证码<input v-model="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" required maxlength="6" /></label>
-            <div class="security-actions"><button class="auth-primary" type="submit">验证并启用</button><button type="button" class="auth-secondary" @click="setup = null">取消</button></div>
-          </fieldset></form>
-        </template>
-        <template v-else><p>剩余恢复码：{{ security.recovery_codes_remaining }} 个</p><div class="security-actions"><button class="auth-secondary" :disabled="busy" @click="chooseAction('recovery-codes')">重新生成恢复码</button><button class="auth-secondary danger" :disabled="busy" @click="chooseAction('disable')">关闭 2FA</button></div></template>
-      </section>
+      <div class="security-column">
+        <section class="security-card">
+          <div class="security-title"><ShieldCheck /><h2>双重验证 · 2FA</h2><span :class="['security-state', { enabled: security.totp_enabled }]">{{ security.totp_enabled ? '已启用' : '未启用' }}</span></div>
+          <p>绑定 Google Authenticator、Microsoft Authenticator 等验证器。使用密码登录时，需要额外输入验证码。</p>
+          <template v-if="!security.totp_enabled">
+            <button v-if="!setup" class="auth-primary" :disabled="busy" @click="beginSetup">绑定验证器</button>
+            <form v-else class="auth-form" @submit.prevent="confirmSetup"><fieldset :disabled="busy">
+              <p>1. 在验证器中扫描二维码，或手动输入密钥。</p><img class="totp-qr" :src="setup.qr_code" alt="验证器绑定二维码" /><code class="totp-secret">{{ setup.secret }}</code>
+              <label>2. 输入 6 位验证码<input v-model="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" required maxlength="6" /></label>
+              <div class="security-actions"><button class="auth-primary" type="submit">验证并启用</button><button type="button" class="auth-secondary" @click="setup = null">取消</button></div>
+            </fieldset></form>
+          </template>
+          <template v-else><p>剩余恢复码：{{ security.recovery_codes_remaining }} 个</p><div class="security-actions"><button class="auth-secondary" :disabled="busy" @click="chooseAction('recovery-codes')">重新生成恢复码</button><button class="auth-secondary danger" :disabled="busy" @click="chooseAction('disable')">关闭 2FA</button></div></template>
+        </section>
+        <section class="security-card"><div class="security-title"><KeyRound /><h2>登录密码</h2></div><p>使用至少 12 个字符的长密码。修改后其他设备需要重新登录。</p><button class="auth-secondary" :disabled="busy" @click="chooseAction('password')">修改密码</button></section>
+      </div>
       <section class="security-card">
         <div class="security-title"><Fingerprint /><h2>Passkey</h2><span class="security-state">{{ security.passkeys.length }} 个</span></div>
         <p>使用指纹、面容或设备 PIN 登录。Passkey 已包含设备持有与身份验证，登录时无需再输入动态验证码。</p>
@@ -96,7 +99,6 @@ onMounted(() => perform(load));
         <ul class="passkey-list"><li v-for="key in security.passkeys" :key="key.id"><div><strong>{{ key.name }}</strong><small>{{ new Date(key.created_at * 1000).toLocaleDateString('zh-CN') }}</small></div><button class="auth-link danger" :disabled="busy" @click="pendingKey = key">移除</button></li></ul>
         <form class="auth-form" @submit.prevent="bindPasskey"><fieldset :disabled="busy || !passkeySupported"><label>设备名称<input v-model="passkeyName" maxlength="80" required placeholder="例如：办公电脑" /></label><button class="auth-secondary" type="submit">添加 Passkey</button></fieldset></form>
       </section>
-      <section class="security-card"><div class="security-title"><KeyRound /><h2>登录密码</h2></div><p>使用至少 12 个字符的长密码。修改后其他设备需要重新登录。</p><button class="auth-secondary" :disabled="busy" @click="chooseAction('password')">修改密码</button></section>
     </div>
     <section v-if="action" class="security-card sensitive-panel">
       <h2>{{ action === 'password' ? '修改登录密码' : action === 'disable' ? '确认关闭双重验证' : '重新生成恢复码' }}</h2>
