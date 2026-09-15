@@ -68,12 +68,16 @@ class VerifyCode(Payload):
     code: str = Field(min_length=6, max_length=64)
 
 
-class Reauthenticate(Payload):
-    password: str = Field(min_length=1, max_length=128)
+class SensitiveProof(Payload):
+    password: str = Field(default="", max_length=128)
     code: str = Field(default="", max_length=64)
 
 
-class ChangePassword(Reauthenticate):
+class Reauthenticate(SensitiveProof):
+    method: Literal["password", "totp"] = "password"
+
+
+class ChangePassword(SensitiveProof):
     new_password: str = Field(min_length=12, max_length=128)
 
 
@@ -110,7 +114,9 @@ def current(request, fresh=False, superadmin=False):
     if superadmin and identity["user"]["role"] != "superadmin":
         raise HTTPException(403, "仅超级管理员可管理用户和角色权限")
     if fresh and identity["session"]["verified_at"] < time.time() - 300:
-        raise HTTPException(403, "请先重新验证身份，再进行此操作")
+        raise HTTPException(
+            403, "请先重新验证身份，再进行此操作", headers={"X-WCM-Reauth": "required"}
+        )
     return identity
 
 
@@ -316,22 +322,31 @@ def reauthenticate(payload: Reauthenticate, request: Request, response: Response
     rate(request, "reauth", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
-        if not verify_password(user, payload.password) or not verify_factor(
-            connection, user, payload.code
-        ):
+        if payload.method == "totp":
+            valid = bool(user["totp_secret"]) and verify_factor(connection, user, payload.code)
+        else:
+            # Keep the existing password + second factor path for older clients.
+            valid = (
+                bool(payload.password)
+                and verify_password(user, payload.password)
+                and verify_factor(connection, user, payload.code)
+            )
+        if not valid:
             raise HTTPException(400, "密码或验证码无效；已使用的验证码不能重复使用")
+        log(connection, user["id"], f"reauth.{payload.method}")
         return new_session(connection, user, response, request.cookies.get(store.COOKIE))
 
 
 @router.post("/password")
 def change_password(payload: ChangePassword, request: Request, response: Response):
-    identity = current(request)
+    identity = current(request, fresh=not payload.password)
     rate(request, "password", identity["user"]["id"])
     new_hash = password_hasher.hash(payload.new_password)
     with store.transaction() as connection:
         user = locked_user(connection, identity)
-        if not verify_password(user, payload.password) or not verify_factor(
-            connection, user, payload.code
+        if payload.password and (
+            not verify_password(user, payload.password)
+            or not verify_factor(connection, user, payload.code)
         ):
             raise HTTPException(400, "密码或验证码无效")
         connection.execute(
@@ -436,15 +451,17 @@ def confirm_factor(payload: VerifyCode, request: Request, response: Response):
 
 
 @router.post("/2fa/disable")
-def disable_factor(payload: Reauthenticate, request: Request, response: Response):
-    identity = current(request)
+def disable_factor(payload: SensitiveProof, request: Request, response: Response):
+    identity = current(request, fresh=not payload.password)
     rate(request, "disable-factor", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
-        if (
-            not user["totp_secret"]
-            or not verify_password(user, payload.password)
-            or not verify_factor(connection, user, payload.code)
+        if not user["totp_secret"] or (
+            payload.password
+            and (
+                not verify_password(user, payload.password)
+                or not verify_factor(connection, user, payload.code)
+            )
         ):
             raise HTTPException(400, "密码或验证码无效")
         connection.execute(
@@ -460,15 +477,17 @@ def disable_factor(payload: Reauthenticate, request: Request, response: Response
 
 
 @router.post("/2fa/recovery-codes")
-def regenerate_codes(payload: Reauthenticate, request: Request):
-    identity = current(request)
+def regenerate_codes(payload: SensitiveProof, request: Request):
+    identity = current(request, fresh=not payload.password)
     rate(request, "recovery-codes", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
-        if (
-            not user["totp_secret"]
-            or not verify_password(user, payload.password)
-            or not verify_factor(connection, user, payload.code)
+        if not user["totp_secret"] or (
+            payload.password
+            and (
+                not verify_password(user, payload.password)
+                or not verify_factor(connection, user, payload.code)
+            )
         ):
             raise HTTPException(400, "密码或验证码无效")
         log(connection, user["id"], "recovery-codes.rotated")
@@ -562,6 +581,89 @@ def registration_verify(payload: PasskeyResponse, request: Request):
         )
         log(connection, user["id"], "passkey.added", key_id)
         return {"ok": True}
+
+
+@router.post("/passkeys/reauthenticate/options")
+def reauthentication_options(request: Request):
+    identity = current(request)
+    origin = passkey_origin(request)
+    rate(request, "reauth", identity["user"]["id"])
+    with store.transaction() as connection:
+        user = locked_user(connection, identity)
+        keys = (
+            connection.execute(
+                select(store.credentials.c.credential_id).where(
+                    store.credentials.c.user_id == user["id"]
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not keys:
+            raise HTTPException(400, "当前账户未绑定 Passkey")
+        options = generate_authentication_options(
+            rp_id=store.config.rp_id,
+            allow_credentials=[
+                PublicKeyCredentialDescriptor(id=base64url_to_bytes(key)) for key in keys
+            ],
+            user_verification=UserVerificationRequirement.REQUIRED,
+        )
+        token = store.challenge(
+            connection,
+            "passkey-reauth",
+            user["id"],
+            identity["session"]["id"],
+            {"challenge": bytes_to_base64url(options.challenge), "origin": origin},
+        )
+        return {"challenge_id": token, "options": json.loads(options_to_json(options))}
+
+
+@router.post("/passkeys/reauthenticate/verify")
+def reauthentication_verify(payload: PasskeyResponse, request: Request, response: Response):
+    identity = current(request)
+    origin = passkey_origin(request)
+    rate(request, "reauth", identity["user"]["id"])
+    with store.transaction() as connection:
+        user = locked_user(connection, identity)
+        item = store.consume(
+            connection, payload.challenge_id, "passkey-reauth", identity["session"]["id"]
+        )
+        credential_id = payload.credential.get("id")
+        if not isinstance(credential_id, str) or len(credential_id) > 4096:
+            raise HTTPException(400, "Passkey 验证失败")
+        key = store.row(
+            connection, store.credentials, store.credentials.c.id == store.digest(credential_id)
+        )
+        if (
+            not key
+            or key["user_id"] != user["id"]
+            or item["user_id"] != user["id"]
+            or origin != item["payload"]["origin"]
+        ):
+            raise HTTPException(400, "请使用当前账户绑定的 Passkey")
+        try:
+            verified = verify_authentication_response(
+                credential=payload.credential,
+                expected_challenge=base64url_to_bytes(item["payload"]["challenge"]),
+                expected_rp_id=store.config.rp_id,
+                expected_origin=origin,
+                credential_public_key=base64url_to_bytes(key["public_key"]),
+                credential_current_sign_count=key["sign_count"],
+                require_user_verification=True,
+            )
+            handle = payload.credential.get("response", {}).get("userHandle")
+            # allowCredentials already binds the assertion to this account; a supplied handle must match.
+            if handle is not None and base64url_to_bytes(handle) != user["id"].encode():
+                raise ValueError("User handle mismatch")
+        except (WebAuthnException, ValueError, TypeError, KeyError):
+            raise HTTPException(400, "Passkey 验证失败，请重试")
+        connection.execute(
+            update(store.credentials)
+            .where(store.credentials.c.id == key["id"])
+            .values(sign_count=verified.new_sign_count)
+        )
+        log(connection, user["id"], "reauth.passkey")
+        return new_session(connection, user, response, request.cookies.get(store.COOKIE))
 
 
 @router.post("/passkeys/login/options")

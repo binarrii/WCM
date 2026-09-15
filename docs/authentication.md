@@ -32,13 +32,21 @@
 验证器采用 TOTP（30 秒、6 位、允许前后一个时间步的时钟偏差）。必须验证成功后才启用。
 同一个验证码只能使用一次，刚用于绑定或重新验证的验证码不能再次使用，请等待下一个验证码。
 绑定时返回 10 个一次性恢复码，只显示一次，可下载离线保存；数据库只存恢复码 SHA-256。
-重新生成恢复码或关闭 2FA 必须提供当前密码和有效验证码/恢复码。
-绑定/移除 Passkey、绑定 2FA、修改用户角色/权限要求最近 5 分钟内完成登录或重新验证。
+绑定/移除 Passkey、绑定/关闭 2FA、重新生成恢复码、修改密码及用户角色/权限，
+要求最近 5 分钟内完成登录或重新验证。验证过期时自动弹出身份验证对话框，成功后继续原操作；
+取消验证不会提交该操作。
+
+弹窗优先使用当前账户已绑定且浏览器可用的 **Passkey → 2FA → 密码**。
+已绑定 2FA 时可输入验证码或一次性恢复码，不再重复输入密码；未绑定 2FA 时使用密码。
+Passkey 用户可主动切换至下一个可用方式；验证失败不会自动改用较弱方式。
+旧客户端的密码加验证码验证方式仍受支持，启用 2FA 后不能仅凭密码绕过第二因素。
 
 Passkey 使用 WebAuthn，要求设备持有证明及用户验证（指纹、面容或设备 PIN）。
 使用 Passkey 登录时无需再输入 TOTP；密码登录在启用 2FA 后必须经过第二步验证。
 服务端校验 challenge、Origin、RP ID、用户句柄、用户验证标志、签名及签名计数。
 登录、注册及验证器绑定 challenge 5 分钟过期且只能使用一次，绑定 challenge 与当前会话关联。
+Passkey 重新验证使用独立用途的 challenge，绑定当前用户和当前会话，不能用登录 challenge 或他人的 Passkey 代替。
+重新验证成功后轮换会话 Cookie 和 CSRF 令牌。
 
 **251 当前只有 `http://10.252.25.251:8000`：密码和 2FA 可用，浏览器不允许在此入口使用 Passkey。**
 不要通过关闭浏览器安全检查解决此限制。提供 HTTPS 域名后配置如下：
@@ -83,15 +91,19 @@ Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用
 - 登录返回 `user, csrf_token` 及 Cookie，或 `mfa_required, challenge_id`。
 - `POST /login/2fa`：`challenge_id, code`，完成密码登录的第二步。
 - `GET /me`：当前用户与 CSRF；`POST /logout`：退出当前会话。
-- `POST /reauthenticate`：`password, code?`；`POST /password` 额外传 `new_password`。
+- `POST /reauthenticate`：`method: password, password, code?` 或 `method: totp, code`；省略 `method` 兼容旧的密码加验证码模式。
+- `POST /password`：`new_password`，使用最近验证的会话；`/2fa/disable`、`/2fa/recovery-codes` 可传空对象。也兼容旧客户端同时提交 `password, code?`。
 - `GET /security`；`POST /2fa/setup`、`/2fa/confirm`、`/2fa/disable`、`/2fa/recovery-codes`。
 - `POST /passkeys/register/options`、`/passkeys/register/verify`、`/passkeys/login/options`、`/passkeys/login/verify`。
+- `POST /passkeys/reauthenticate/options`、`/passkeys/reauthenticate/verify`：当前账户的 Passkey 重新验证。
 - `DELETE /passkeys/{id}`；`GET /users?page=1&query=...`；`PUT /users/{id}/role`、`/users/{id}/active`。
 - `GET /roles`；`PUT /roles/{role}`，传 `permissions` 字符串数组。
 
 脚本调用需自行登录并保存 Cookie，公开认证 POST 带 `X-WCM-Client: web`；后续写请求带
 `X-CSRF-Token: <登录响应的 csrf_token>`。浏览器 WebSocket 自动携带 Cookie，Origin 必须受信任。
 健康检查 `/api/v1/health` 保持公开，不需要登录。认证错误和受保护数据响应均禁止缓存。
+敏感操作的验证窗口过期时返回 `403` 和 `X-WCM-Reauth: required`；前端只对这种未执行操作的响应触发弹窗，
+成功后最多重试一次，不自动重试权限不足、CSRF 错误或网络失败。
 
 ## 发布与回滚
 
@@ -123,3 +135,9 @@ Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用
 - 认证专项 27 项通过；使用真实 ES256 签名校验 Passkey，并覆盖跨用户、错误 Origin/RP ID、用户验证标志、句柄与重放拒绝。
 - 251 隔离 MySQL 中启动 2 个独立 API 进程：4 个并发注册仅产生 1 个超级管理员，跨实例会话、角色撤销、权限更新、2FA challenge、恢复码防重放及退出均通过。
 - 浏览器核验登录、退出、账户安全、用户列表和普通用户菜单；实体 Passkey 设备操作待 HTTPS 域名配置后验收。
+
+### 身份验证弹窗更新
+
+- 重新验证按可用 Passkey、2FA、密码的优先级展示；取消不提交，成功后仅重试原操作一次。
+- 后端完整回归 738 项通过、7 项外部服务测试跳过；认证专项 43 项通过；前端 106 项通过。
+- 浏览器核验密码和 2FA 验证后继续操作、错误输入、取消、Passkey 优先及备用方式切换、手机宽度布局。

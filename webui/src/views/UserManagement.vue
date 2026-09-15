@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import api from '../services/api';
 import { roleNames, authError } from '../services/auth';
-import ReauthForm from '../components/ReauthForm.vue';
+import { withReauthentication } from '../services/reauth';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import './auth.css';
 const users = ref([]); const total = ref(0); const page = ref(1); const query = ref('');
@@ -14,8 +14,8 @@ const load = async () => {
 };
 async function perform(operation, message = '') {
   busy.value = true; error.value = ''; notice.value = '';
-  try { await operation(); notice.value = message; }
-  catch (reason) { error.value = authError(reason); }
+  try { await withReauthentication(operation); notice.value = message; }
+  catch (reason) { if (reason.code !== 'REAUTH_CANCELLED') error.value = authError(reason); }
   finally { busy.value = false; }
 }
 async function search() { page.value = 1; await perform(load); }
@@ -31,13 +31,13 @@ function confirmPolicy(role) {
   pending.value = { title: '保存角色权限', message: `${roleNames[role]}的操作权限将立即更新。`, path: `/auth/roles/${role}`, payload: { permissions: [...policy.value.roles[role]] } };
 }
 async function save() {
-  await perform(async () => { await api.put(pending.value.path, pending.value.payload); pending.value = null; await load(); }, '修改已保存。');
+  const change = pending.value; pending.value = null;
+  await perform(async () => { await api.put(change.path, change.payload); await load(); }, '修改已保存。');
 }
 onMounted(() => perform(load));
 </script>
 <template>
   <main class="account-page users-page">
-    <ReauthForm />
     <p v-if="error" class="auth-error" role="alert">{{ error }}</p><p v-if="notice" class="auth-success" role="status">{{ notice }}</p>
     <section class="security-card">
       <div class="users-toolbar"><div><h2>用户账户 <span class="security-state">{{ total }} 人</span></h2><p>用户自行注册；管理员角色仅由超级管理员授予。</p></div><form class="user-search" @submit.prevent="search"><input v-model="query" maxlength="64" placeholder="搜索用户名" aria-label="搜索用户名" /><button class="auth-secondary" :disabled="busy">搜索</button></form></div>

@@ -29,6 +29,6 @@ export function serializeCredential(credential) {
 export async function createPasskey(options) {
   return serializeCredential(await navigator.credentials.create({ publicKey: decodeOptions(options) }));
 }
-export async function usePasskey(options) {
-  return serializeCredential(await navigator.credentials.get({ publicKey: decodeOptions(options) }));
+export async function usePasskey(options, signal) {
+  return serializeCredential(await navigator.credentials.get({ publicKey: decodeOptions(options), ...(signal ? { signal } : {}) }));
 }

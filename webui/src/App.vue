@@ -9,6 +9,7 @@ import VideoReview from './views/VideoReview.vue';
 import AuthPage from './views/AuthPage.vue';
 import AccountSecurity from './views/AccountSecurity.vue';
 import UserManagement from './views/UserManagement.vue';
+import ReauthDialog from './components/ReauthDialog.vue';
 import { auth, can, clearSession, logout, refreshSession, roleNames } from './services/auth';
 import { navigateTo, routeFromHash } from './services/navigation';
 import './app.css';
@@ -144,5 +145,6 @@ onBeforeUnmount(() => {
       <p v-if="auth.error" class="auth-error" role="alert">{{ auth.error }}</p>
       <component v-if="routeAllowed(currentRoute)" :is="page.component" :key="`${auth.user.id}:${currentRoute}`" />
     </section>
+    <ReauthDialog />
   </div>
 </template>

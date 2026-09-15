@@ -4,7 +4,7 @@ import { Fingerprint, KeyRound, ShieldCheck } from '@lucide/vue';
 import api from '../services/api';
 import { auth, roleNames, acceptSession, authError } from '../services/auth';
 import { createPasskey, passkeyAvailable } from '../services/passkeys';
-import ReauthForm from '../components/ReauthForm.vue';
+import { withReauthentication } from '../services/reauth';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import './auth.css';
 
@@ -12,13 +12,13 @@ const security = ref({ passkeys: [], totp_enabled: false, recovery_codes_remaini
 const setup = ref(null); const code = ref(''); const recoveryCodes = ref([]);
 const passkeyName = ref('我的设备'); const passkeySupported = passkeyAvailable();
 const busy = ref(false); const error = ref(''); const notice = ref(''); const pendingKey = ref(null);
-const action = ref(''); const password = ref(''); const factorCode = ref('');
+const action = ref('');
 const newPassword = ref(''); const confirmPassword = ref('');
 const load = async () => { security.value = (await api.get('/auth/security')).data; };
 async function perform(operation, message = '') {
   busy.value = true; error.value = ''; notice.value = '';
-  try { await operation(); await load(); notice.value = message; }
-  catch (reason) { error.value = authError(reason); }
+  try { await withReauthentication(operation); await load(); notice.value = message; }
+  catch (reason) { if (reason.code !== 'REAUTH_CANCELLED') error.value = authError(reason); }
   finally { busy.value = false; }
 }
 async function beginSetup() {
@@ -42,21 +42,22 @@ async function bindPasskey() {
   }, 'Passkey 已绑定，下次可使用指纹、面容或设备 PIN 登录。');
 }
 async function removePasskey() {
-  await perform(async () => { await api.delete(`/auth/passkeys/${pendingKey.value.id}`); pendingKey.value = null; }, 'Passkey 已移除，其他设备的登录已退出。');
+  const key = pendingKey.value; pendingKey.value = null;
+  await perform(async () => { await api.delete(`/auth/passkeys/${key.id}`); }, 'Passkey 已移除，其他设备的登录已退出。');
 }
-function chooseAction(next) { action.value = next; password.value = ''; factorCode.value = ''; newPassword.value = ''; confirmPassword.value = ''; error.value = ''; }
+function chooseAction(next) { action.value = next; newPassword.value = ''; confirmPassword.value = ''; error.value = ''; }
 async function sensitiveAction() {
   if (action.value === 'password' && newPassword.value !== confirmPassword.value) { error.value = '两次输入的新密码不一致'; return; }
   const selected = action.value;
   await perform(async () => {
-    const payload = { password: password.value, code: factorCode.value };
+    const payload = {};
     if (selected === 'password') payload.new_password = newPassword.value;
     const { data } = await api.post(`/auth/${selected === 'password' ? 'password' : `2fa/${selected}`}`, payload);
     if (data.user) acceptSession(data);
     recoveryCodes.value = data.recovery_codes || [];
     chooseAction('');
   }, selected === 'password' ? '密码已更新，其他登录已退出。' : selected === 'disable' ? '双重验证已关闭，其他登录已退出。' : '恢复码已更新，旧恢复码已失效。');
-  password.value = ''; factorCode.value = ''; newPassword.value = ''; confirmPassword.value = '';
+  newPassword.value = ''; confirmPassword.value = '';
 }
 function downloadCodes() {
   const url = URL.createObjectURL(new Blob([`WCM ${auth.user.username} 一次性恢复码\n每个恢复码仅能使用一次，请离线妥善保存。\n\n${recoveryCodes.value.join('\n')}\n`], { type: 'text/plain;charset=utf-8' }));
@@ -68,7 +69,6 @@ onMounted(() => perform(load));
 <template>
   <main class="account-page">
     <div class="account-summary"><div class="account-avatar">{{ auth.user.display_name.slice(0, 1) }}</div><div><h2>{{ auth.user.display_name }}</h2><p>@{{ auth.user.username }} <span class="role-badge">{{ roleNames[auth.user.role] }}</span></p></div></div>
-    <ReauthForm @verified="load" />
     <p v-if="error" class="auth-error" role="alert">{{ error }}</p><p v-if="notice" class="auth-success" role="status">{{ notice }}</p>
     <section v-if="recoveryCodes.length" class="security-card recovery-panel">
       <h2>保存一次性恢复码</h2><p>验证器不可用时，用恢复码完成登录。每个码只能使用一次，关闭后无法再次查看。</p>
@@ -103,7 +103,7 @@ onMounted(() => perform(load));
     <section v-if="action" class="security-card sensitive-panel">
       <h2>{{ action === 'password' ? '修改登录密码' : action === 'disable' ? '确认关闭双重验证' : '重新生成恢复码' }}</h2>
       <p v-if="action === 'disable'">关闭后，密码登录将不再要求验证器验证码。</p><p v-if="action === 'recovery-codes'">生成后，所有旧恢复码立即失效。</p>
-      <form class="auth-form" @submit.prevent="sensitiveAction"><fieldset :disabled="busy"><label>当前密码<input v-model="password" type="password" autocomplete="current-password" required maxlength="128" /></label><label v-if="security.totp_enabled">验证码或恢复码<input v-model="factorCode" autocomplete="one-time-code" required maxlength="64" /></label><template v-if="action === 'password'"><label>新密码<input v-model="newPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128" /></label><label>确认新密码<input v-model="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128" /></label></template><div class="security-actions"><button class="auth-primary" type="submit">{{ busy ? '处理中…' : '确认' }}</button><button class="auth-secondary" type="button" @click="chooseAction('')">取消</button></div></fieldset></form>
+      <form class="auth-form" @submit.prevent="sensitiveAction"><fieldset :disabled="busy"><template v-if="action === 'password'"><label>新密码<input v-model="newPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128" /></label><label>确认新密码<input v-model="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128" /></label></template><div class="security-actions"><button class="auth-primary" type="submit">{{ busy ? '处理中…' : '确认' }}</button><button class="auth-secondary" type="button" @click="chooseAction('')">取消</button></div></fieldset></form>
     </section>
     <ConfirmDialog :open="Boolean(pendingKey)" title="移除 Passkey" :message="`移除后将无法使用 ${pendingKey?.name || ''} 登录，其他设备的会话也会退出。`" :busy="busy" @confirm="removePasskey" @cancel="pendingKey = null" />
   </main>

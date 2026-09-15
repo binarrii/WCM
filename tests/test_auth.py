@@ -630,3 +630,228 @@ def test_user_cannot_remove_another_users_passkey(client):
     signup(other, "member")
     assert other.delete(f"/api/v1/auth/passkeys/{key_id}").status_code == 404
     assert len(client.get("/api/v1/auth/security").json()["passkeys"]) == 1
+
+
+def expire_verification(client):
+    with store.transaction() as connection:
+        connection.execute(
+            update(store.sessions)
+            .where(store.sessions.c.id == store.digest(client.cookies.get(store.COOKIE)))
+            .values(verified_at=time.time() - 301)
+        )
+
+
+def test_totp_reauthentication_requires_enrollment_and_prevents_replay(client):
+    signup(client)
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate", json={"method": "totp", "code": "000000"}
+        ).status_code
+        == 400
+    )
+    secret, codes = setup_totp(client)
+    expire_verification(client)
+    assert (
+        client.post("/api/v1/auth/reauthenticate", json={"password": PASSWORD}).status_code == 400
+    )
+    code = pyotp.TOTP(secret).at((int(time.time() // 30) + 1) * 30)
+    old_cookie = client.cookies.get(store.COOKIE)
+    accept(
+        client, client.post("/api/v1/auth/reauthenticate", json={"method": "totp", "code": code})
+    )
+    assert client.cookies.get(store.COOKIE) != old_cookie
+    assert store.identity(old_cookie) is None
+    assert client.get("/api/v1/auth/security").json()["recently_verified"] is True
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate", json={"method": "totp", "code": code}
+        ).status_code
+        == 400
+    )
+    accept(
+        client,
+        client.post("/api/v1/auth/reauthenticate", json={"method": "totp", "code": codes[0]}),
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate", json={"method": "totp", "code": codes[0]}
+        ).status_code
+        == 400
+    )
+
+
+@pytest.mark.parametrize(
+    "path,payload",
+    [
+        ("/password", {"new_password": "another secure password 2026"}),
+        ("/2fa/disable", {}),
+        ("/2fa/recovery-codes", {}),
+    ],
+)
+def test_sensitive_actions_use_recent_verification_and_reject_stale_session(client, path, payload):
+    signup(client)
+    _, codes = setup_totp(client)
+    expire_verification(client)
+    blocked = client.post("/api/v1/auth" + path, json=payload)
+    assert blocked.status_code == 403
+    assert blocked.headers["X-WCM-Reauth"] == "required"
+    assert client.get("/api/v1/auth/security").json()["totp_enabled"] is True
+    accept(
+        client,
+        client.post("/api/v1/auth/reauthenticate", json={"method": "totp", "code": codes[0]}),
+    )
+    accept(client, client.post("/api/v1/auth" + path, json=payload))
+
+
+def test_reauthentication_rejects_empty_password_and_is_rate_limited(client):
+    signup(client)
+    for _ in range(10):
+        assert (
+            client.post("/api/v1/auth/reauthenticate", json={"method": "password"}).status_code
+            == 400
+        )
+    assert (
+        client.post("/api/v1/auth/reauthenticate", json={"password": PASSWORD}).status_code == 429
+    )
+
+
+@pytest.mark.parametrize("without_handle", [False, True])
+def test_real_passkey_reauthentication_scopes_account_and_rotates_session(client, without_handle):
+    user = signup(client)["user"]
+    authenticator = Authenticator()
+    bind(client, authenticator)
+    expire_verification(client)
+    old_cookie = client.cookies.get(store.COOKIE)
+    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
+    assert pending["options"]["userVerification"] == "required"
+    assert [item["id"] for item in pending["options"]["allowCredentials"]] == [
+        b64(authenticator.id)
+    ]
+    credential = authenticator.authenticate(pending["options"], user["id"])
+    if without_handle:
+        credential["response"].pop("userHandle")
+    assertion = {"challenge_id": pending["challenge_id"], "credential": credential}
+    assert (
+        accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion))[
+            "user"
+        ]["id"]
+        == user["id"]
+    )
+    assert store.identity(old_cookie) is None
+    assert client.get("/api/v1/auth/security").json()["recently_verified"] is True
+    assert (
+        client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code
+        == 400
+    )
+    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
+    assert (
+        client.post(
+            "/api/v1/auth/passkeys/reauthenticate/verify",
+            json={
+                "challenge_id": pending["challenge_id"],
+                "credential": authenticator.authenticate(pending["options"], user["id"]),
+            },
+        ).status_code
+        == 400
+    )  # Reused nonzero authenticator counter.
+
+
+@pytest.mark.parametrize(
+    "invalid", ["origin", "rp", "uv", "signature", "handle", "challenge", "expired"]
+)
+def test_passkey_reauthentication_rejects_invalid_proofs(client, invalid):
+    user = signup(client)["user"]
+    authenticator = Authenticator()
+    bind(client, authenticator)
+    expire_verification(client)
+    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
+    options = dict(pending["options"])
+    if invalid == "challenge":
+        options["challenge"] = b64(b"wrong challenge")
+    credential = authenticator.authenticate(
+        options,
+        "another-user" if invalid == "handle" else user["id"],
+        origin="https://evil.test" if invalid == "origin" else ORIGIN,
+        uv=invalid != "uv",
+        rp="evil.test" if invalid == "rp" else "localhost",
+    )
+    if invalid == "signature":
+        credential["response"]["signature"] = b64(b"invalid signature")
+    if invalid == "expired":
+        with store.transaction() as connection:
+            connection.execute(update(store.challenges).values(expires_at=time.time() - 1))
+    assert (
+        client.post(
+            "/api/v1/auth/passkeys/reauthenticate/verify",
+            json={"challenge_id": pending["challenge_id"], "credential": credential},
+        ).status_code
+        == 400
+    )
+    assert client.get("/api/v1/auth/security").json()["recently_verified"] is False
+
+
+def test_passkey_reauthentication_rejects_other_accounts_sessions_and_login_challenges(client):
+    user = signup(client)["user"]
+    authenticator = Authenticator()
+    bind(client, authenticator)
+    other = sibling(client)
+    other_user = signup(other, "member")["user"]
+    other_authenticator = Authenticator()
+    bind(other, other_authenticator)
+    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
+    assertion = {
+        "challenge_id": pending["challenge_id"],
+        "credential": authenticator.authenticate(pending["options"], user["id"]),
+    }
+    assert (
+        other.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code == 400
+    )
+    same_user = sibling(client)
+    password_login(same_user)
+    assert (
+        same_user.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/passkeys/reauthenticate/verify",
+            json={
+                "challenge_id": pending["challenge_id"],
+                "credential": other_authenticator.authenticate(
+                    pending["options"], other_user["id"]
+                ),
+            },
+        ).status_code
+        == 400
+    )
+    pending_login = client.post("/api/v1/auth/passkeys/login/options").json()
+    assert (
+        client.post(
+            "/api/v1/auth/passkeys/reauthenticate/verify",
+            json={
+                "challenge_id": pending_login["challenge_id"],
+                "credential": authenticator.authenticate(pending_login["options"], user["id"]),
+            },
+        ).status_code
+        == 400
+    )
+
+
+def test_passkey_reauthentication_requires_login_csrf_and_bound_credential(client):
+    assert client.post("/api/v1/auth/passkeys/reauthenticate/options").status_code == 401
+    signup(client)
+    assert client.post("/api/v1/auth/passkeys/reauthenticate/options").status_code == 400
+    assert (
+        client.post(
+            "/api/v1/auth/passkeys/reauthenticate/options", headers={"X-CSRF-Token": "bad"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"password": PASSWORD},
+            headers={"X-CSRF-Token": "bad"},
+        ).status_code
+        == 403
+    )

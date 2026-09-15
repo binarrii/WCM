@@ -50,10 +50,20 @@
 .security-title .security-state { margin-left: auto; }
 .security-state.enabled { color: var(--status-green); }
 .security-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.auth-reauth { padding: 16px 20px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); }
-.auth-reauth summary { font-size: .85rem; cursor: pointer; }
-.auth-reauth summary span { color: var(--text-muted); font-size: .76rem; margin-left: 10px; }
-.auth-reauth .auth-form { max-width: 450px; }
+.reauth-dialog { width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 30px; color: var(--text-primary); background: var(--modal-card-bg); border: 1px solid var(--border-color); border-radius: 20px; box-shadow: var(--shadow-lg); }
+.reauth-dialog::backdrop { background: var(--modal-overlay-bg); backdrop-filter: blur(10px); }
+.reauth-close { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.reauth-close svg { width: 18px; height: 18px; }
+.reauth-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 18px; border-radius: 15px; color: var(--color-primary); background: var(--color-primary-glow); }
+.reauth-icon svg { width: 24px; height: 24px; }
+.reauth-dialog h2 { font-size: 1.25rem; }
+.reauth-description, .reauth-method-description { margin: 12px 0 20px; color: var(--text-secondary); font-size: .85rem; line-height: 1.7; }
+.reauth-method-description { margin: 0; }
+.reauth-alternatives { display: grid; gap: 8px; text-align: center; border-top: 1px solid var(--border-color); padding-top: 18px; margin-top: 4px; }
+.reauth-alternatives > span { font-size: .75rem; color: var(--text-muted); }
+.reauth-alternatives button { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.reauth-alternatives svg { width: 17px; height: 17px; }
+.reauth-cancel { display: block; margin: 16px auto 0; color: var(--text-secondary); }
 .totp-qr { width: 220px; height: 220px; max-width: 100%; background: white; padding: 8px; border-radius: 9px; }
 .totp-secret { overflow-wrap: anywhere; font-size: .82rem; user-select: all; }
 .recovery-panel { border-color: var(--color-primary); }
@@ -88,4 +98,4 @@
 .auth-loading { min-height: 100vh; display: grid; place-content: center; gap: 18px; text-align: center; }
 @media (max-width: 1000px) { .auth-screen { padding: 36px; gap: 40px; } .auth-brand { margin-bottom: 60px; } .header-actions { gap: 10px; } .shell-account .account-entry { max-width: 100px; } }
 @media (max-width: 800px) { .auth-screen { display: block; max-width: 520px; padding: 32px 24px; } .auth-intro { padding: 0; } .auth-brand { margin-bottom: 28px; } .auth-intro > :not(.auth-brand) { display: none; } .auth-card { padding: 26px; } .security-grid { grid-template-columns: 1fr; } .account-page { padding: 24px 20px; } .users-toolbar { display: block; } .user-search { margin-bottom: 20px; } .role-permissions { grid-template-columns: 1fr; } }
-@media (max-width: 520px) { .auth-screen { padding: 24px 16px; } .security-card { padding: 20px; } .recovery-codes { grid-template-columns: 1fr; } .main-menu { display: flex; justify-content: space-around; gap: 2px; } .main-menu .menu-item { min-width: 34px; padding: 12px 4px; } .auth-reauth summary span { display: block; margin: 8px 0 0; } .shell-account .account-entry { max-width: 80px; overflow: hidden; } .workspace-header h1 { font-size: 1.12rem; } }
+@media (max-width: 520px) { .auth-screen { padding: 24px 16px; } .security-card { padding: 20px; } .recovery-codes { grid-template-columns: 1fr; } .main-menu { display: flex; justify-content: space-around; gap: 2px; } .main-menu .menu-item { min-width: 34px; padding: 12px 4px; } .shell-account .account-entry { max-width: 80px; overflow: hidden; } .workspace-header h1 { font-size: 1.12rem; } }
