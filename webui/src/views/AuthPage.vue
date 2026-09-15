@@ -61,7 +61,7 @@ onMounted(async () => {
       <div class="auth-trust"><ShieldCheck /><span>密码 · Passkey · 双重验证</span></div>
     </section>
     <section class="auth-card" aria-label="账户登录与注册">
-      <div class="auth-tabs" v-if="!challenge"><button :class="{ active: mode === 'login' }" :disabled="busy" @click="switchMode('login')">登录</button><button :class="{ active: mode === 'register' }" :disabled="busy" @click="switchMode('register')">创建账户</button></div>
+      <div class="auth-tabs" v-if="!challenge"><button :class="{ active: mode === 'login' }" :disabled="busy" @click="switchMode('login')">登录</button><button :class="{ active: mode === 'register' }" :disabled="busy" @click="switchMode('register')">注册</button></div>
       <h2>{{ challenge ? '双重验证' : mode === 'register' ? '创建你的 WCM 账户' : '欢迎回来' }}</h2>
       <p class="auth-muted">{{ challenge ? '输入验证器中的 6 位验证码，或使用一次性恢复码。' : mode === 'register' ? '注册后即可进入工作台。' : '登录以继续使用内容审核工作台。' }}</p>
       <p v-if="mode === 'register'" class="auth-note">{{ firstRegistration ? '系统尚无用户，首个成功注册的账户将成为超级管理员。' : '新注册账户默认为普通用户，管理员角色由超级管理员授予。' }}</p>
@@ -75,7 +75,7 @@ onMounted(async () => {
           </template>
           <label v-else>验证码或恢复码<input v-model="code" name="code" autocomplete="one-time-code" required minlength="6" maxlength="64" autofocus placeholder="6 位验证码 / 恢复码" /></label>
           <p v-if="error" class="auth-error" role="alert">{{ error }}</p>
-          <button type="submit" class="auth-primary">{{ busy ? '正在验证…' : challenge ? '验证并登录' : mode === 'register' ? '创建账户' : '登录' }}</button>
+          <button type="submit" class="auth-primary">{{ busy ? '正在验证…' : challenge ? '验证并登录' : mode === 'register' ? '注册' : '登录' }}</button>
         </fieldset>
       </form>
       <template v-if="mode === 'login' && !challenge">
