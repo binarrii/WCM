@@ -16,24 +16,12 @@ from wcm_facerec import person_operations
 from wcm_facerec.cluster import cluster_slot, connect, run_sync
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine
-from wcm_facerec.face_replication import apply_snapshot, manifest, node_adapter
-
-
-def baseline_manifest(target, cid, item, hashes):
-    snapshot = manifest(cid, item["id"], item, hashes=hashes, strict=False)
-    if snapshot.get("rebuildable") is False:
-        faces, cursor = [], None
-        while True:
-            page = target._client.list_faces(cid, item["id"], limit=100, cursor=cursor)
-            faces.extend(page.faces)
-            cursor = page.next_cursor
-            if not cursor:
-                break
-        if len(faces) != item["face_count"] or len({f["id"] for f in faces}) != len(faces):
-            raise store.ReplicationUnavailable("历史人物原生人脸清单不完整")
-        # Only identical native snapshot copies can seed these legacy records.
-        snapshot["native_faces_hash"] = store.digest(sorted(faces, key=lambda face: face["id"]))
-    return snapshot
+from wcm_facerec.face_replication import (
+    apply_snapshot,
+    baseline_manifest,
+    canonical_snapshot,
+    node_adapter,
+)
 
 
 def scan(target, hashes):
@@ -58,7 +46,7 @@ def record_seed(name, snapshots):
             if root["initialized"]:
                 c.execute("SELECT identity,payload FROM face_sync_people")
                 existing = {
-                    row["identity"]: json.loads(row["payload"])
+                    row["identity"]: canonical_snapshot(json.loads(row["payload"]))
                     for row in c.fetchall()
                     if json.loads(row["payload"])["person"] is not None
                 }
@@ -185,7 +173,7 @@ async def replay_primary(after):
         with connect() as db, db.cursor() as c:
             c.execute("SELECT identity,payload FROM face_sync_people")
             expected = {
-                row["identity"]: json.loads(row["payload"])
+                row["identity"]: canonical_snapshot(json.loads(row["payload"]))
                 for row in c.fetchall()
                 if json.loads(row["payload"])["person"] is not None
             }

@@ -88,8 +88,8 @@ def _persist_image(
 ) -> str:
     """Save image bytes under ``/tmp/wcm/<category>/<name>_<md5><ext>``.
 
-    Returns the absolute file path. Reuses the existing file if the hash
-    already exists (idempotent).
+    Returns an object Key in S3 mode or an absolute path in local mode.
+    Reuses existing content when the hash already exists (idempotent).
     """
     target_path = _image_target_path(image_bytes, name, category, ext)
     if settings.image_storage == "local":
@@ -98,7 +98,7 @@ def _persist_image(
             target_path.write_bytes(image_bytes)
     elif not image_store.exists(target_path):
         image_store.write_bytes(target_path, image_bytes)
-    return str(target_path)
+    return image_store.reference(target_path)
 
 
 def _to_bytes(img_source: str | Path | bytes | np.ndarray) -> bytes:
@@ -289,7 +289,7 @@ class FaceEngine:
 
         # For each per-face match, fetch the matched face's bbox in IFS
         # (per face — keyed by matched_face_id) and synthesize a category
-        # fallback from the file_path when metadata is empty.
+        # fallback from the image reference when metadata is empty.
         for face in grouped["faces"]:
             for m in face["matches"]:
                 if name and m.get("name") != name:
@@ -306,10 +306,15 @@ class FaceEngine:
                         m["source_y"] = bbox["y"]
                         m["source_w"] = bbox["w"]
                         m["source_h"] = bbox["h"]
-                if not m.get("category") and m.get("file_path"):
-                    parts = m["file_path"].split("/", 4)
-                    if len(parts) > 3:
-                        m["category"] = parts[3]
+                refs = image_store.image_refs(m)
+                if not m.get("category") and refs:
+                    if settings.image_storage == "s3":
+                        key = image_store.object_key(refs[0])
+                        m["category"] = key[len(settings.s3_prefix.strip("/")) + 1 :].split("/")[0]
+                    else:
+                        parts = refs[0].split("/", 4)
+                        if len(parts) > 3:
+                            m["category"] = parts[3]
 
         # Drop filtered matches from the structured view and rebuild the
         # flat list so the legacy shape is identical to the single-face
@@ -331,12 +336,12 @@ class FaceEngine:
     async def compare_gallery(
         self,
         image_bytes: bytes,
-        paths: list[Path | None],
+        paths: list[Path | str | None],
         query_bbox: dict | None,
     ) -> list[float | None]:
         """Compare each displayed original with this result's query face.
 
-        Paths must be resolved within the public image root by the route.
+        References must be validated as public image paths or object Keys by the route.
         These are raw per-image scores, independent of top-k and threshold;
         they do not replace the search score used for person ranking.
         One unreadable image or failed comparison must not fail the search.
@@ -422,7 +427,7 @@ class FaceEngine:
         remarks: str | None = None,
         check_name: bool = False,
     ) -> dict:
-        """Persist bytes to ``/tmp/wcm`` and enroll into InsightFace Server.
+        """Persist image bytes to the configured backend and enroll into InsightFace Server.
 
         Writes into the aggregate collection (``insightface_collection_id``)
         and, when ``category`` is mapped in
@@ -468,6 +473,8 @@ class FaceEngine:
             "remarks": remarks or "",
             "file_path": persisted_path,
         }
+        if settings.image_storage == "s3":
+            metadata = image_store.with_images(metadata, [persisted_path])
 
         # Always enroll into the configured aggregate collection.
         try:
@@ -590,6 +597,7 @@ class FaceEngine:
                 for key in ("category", "occupation", "type", "remarks", "file_path")
             },
             **({"image_paths": item["image_paths"]} if item.get("image_paths") is not None else {}),
+            **{key: item[key] for key in ("image_key", "image_keys") if item.get(key) is not None},
         }
 
     @library_write
@@ -627,6 +635,8 @@ class FaceEngine:
 
         old_metadata = self._item_metadata(current)
         new_metadata = {**old_metadata, **metadata}
+        if settings.image_storage == "s3":
+            new_metadata = image_store.with_images(new_metadata, gallery(current))
         new_category = new_metadata.get("type") or new_metadata.get("category")
         new_metadata["category"] = new_category or settings.default_category
         new_name = name or current.get("name")
@@ -636,7 +646,8 @@ class FaceEngine:
         new_cid = settings.insightface_category_collections.get(new_category)
         old_mirror = await self._find_category_mirror(person_id, old_cid) if old_cid else None
 
-        file_path = current.get("file_path")
+        refs = gallery(current)
+        file_path = refs[0] if refs else None
         image_path = Path(str(file_path)) if file_path else None
         image_bytes: bytes | None = (
             await self._run(image_store.read_bytes, image_path)

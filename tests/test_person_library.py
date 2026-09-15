@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from wcm_facerec import person_library
+from wcm_facerec import image_store, person_library
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine
 from wcm_facerec.person_library import SameNamePeopleError
@@ -71,6 +71,8 @@ class MemoryAdapter:
 
     def update_person(self, pid, *, metadata, collection_id=None, **kwargs):
         key = self.key(pid, collection_id)
+        for field in ("file_path", "image_paths", "image_key", "image_keys"):
+            self.people[key].pop(field, None)
         self.people[key].update(metadata=deepcopy(metadata), **metadata)
         return self.get_person(pid, collection_id=collection_id)
 
@@ -154,6 +156,48 @@ def library(monkeypatch, tmp_path):
         return paths
 
     return engine, seed, tmp_path
+
+
+@pytest.mark.asyncio
+async def test_s3_gallery_append_merge_remove_and_category_move_use_keys(library, monkeypatch):
+    engine, seed, root = library
+    seed("target", "A", [b"first"])
+    seed("source", "B", [b"second"])
+    objects = {}
+    for item in engine._adapter.people.values():
+        path = item["metadata"]["file_path"]
+        key = "wcm/images/" + path.rsplit("/", 1)[-1]
+        objects[key] = __import__("pathlib").Path(path).read_bytes()
+        metadata = {
+            k: v for k, v in item["metadata"].items() if k not in ("file_path", "image_paths")
+        }
+        metadata.update(image_key=key, image_keys=[key])
+        engine._adapter.update_person(
+            item["id"],
+            metadata=metadata,
+            collection_id=next(
+                cid for (cid, pid), value in engine._adapter.people.items() if value is item
+            ),
+        )
+    monkeypatch.setattr(settings, "image_storage", "s3")
+    monkeypatch.setattr(settings, "s3_prefix", "wcm/images")
+    monkeypatch.setattr(image_store, "exists", lambda value, *args: str(value) in objects)
+    monkeypatch.setattr(image_store, "read_bytes", lambda value, *args: objects[str(value)])
+    monkeypatch.setattr(
+        image_store,
+        "write_bytes",
+        lambda value, data, base: objects.__setitem__(image_store.object_key(value, base), data),
+    )
+    appended = await engine.add_person_image("target", b"third")
+    assert appended["record"]["image_keys"][1].startswith("wcm/images/uploads/")
+    assert "file_path" not in appended["record"]["metadata"]
+    merged = await engine.merge_person_records("target", ["source"])
+    assert len(merged["record"]["image_keys"]) == 3
+    removed = await engine.delete_person_images("target", [merged["record"]["image_keys"][1]])
+    assert len(removed["record"]["image_keys"]) == 2
+    moved = await engine.update_person_record("target", name=None, metadata={"type": "B"})
+    assert moved["image_keys"] == removed["record"]["image_keys"]
+    assert engine._adapter.people[("b", "target")]["face_count"] == 2
 
 
 @pytest.mark.asyncio

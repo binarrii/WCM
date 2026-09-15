@@ -64,17 +64,16 @@ def library_write(func):
 
 
 def gallery(item):
-    paths = [item.get("file_path"), *(item.get("image_paths") or [])]
-    return list(dict.fromkeys(path for path in paths if isinstance(path, str) and path))
+    return image_store.image_refs(item)
 
 
 def read_gallery(item):
     images = {}
     for value in gallery(item):
-        path = Path(value).resolve()
-        if not path.is_relative_to(IMAGE_ROOT.resolve()) or not image_store.exists(
-            path, IMAGE_ROOT
-        ):
+        path = value if settings.image_storage == "s3" else Path(value).resolve()
+        if (
+            settings.image_storage == "local" and not path.is_relative_to(IMAGE_ROOT.resolve())
+        ) or not image_store.exists(path, IMAGE_ROOT):
             raise ValueError(f"人物 {item['id']} 的原照片缺失，无法安全合并，请先恢复照片")
         images[value] = image_store.read_bytes(path, IMAGE_ROOT)
     if not images or int(item.get("face_count") or 0) > len(images):
@@ -139,10 +138,11 @@ async def mutate_gallery(engine, target_id, *, source_ids=None, image=None, imag
         path = IMAGE_ROOT / "uploads" / f"{uuid4().hex}{image_ext}"
         await run(image_store.write_bytes, path, image, IMAGE_ROOT)
         new_file = path
-        paths.append(str(path))
-        images[str(path)] = image
+        ref = image_store.reference(path, IMAGE_ROOT)
+        paths.append(ref)
+        images[ref] = image
 
-    metadata = {**engine._item_metadata(target), "image_paths": paths}
+    metadata = image_store.with_images(engine._item_metadata(target), paths)
     operation_id = uuid4().hex
     journal_dir = IMAGE_ROOT / ".person-operations"
     journal_dir.mkdir(parents=True, exist_ok=True)
@@ -269,9 +269,9 @@ async def remove_gallery_images(engine, target_id: str, image_paths: list[str]):
     """Remove selected images while keeping aggregate/category galleries identical.
 
     IFS face ids are collection-local and are not persisted beside the original
-    image paths. Rebuilding each Person from the retained originals avoids
+    image references. Rebuilding each Person from the retained originals avoids
     guessing that the server's face order matches metadata order. Original files
-    stay on disk so historical review results that already reference them remain
+    and objects are retained so historical review results that reference them remain
     renderable.
     """
     adapter = engine._adapter
@@ -282,8 +282,16 @@ async def remove_gallery_images(engine, target_id: str, image_paths: list[str]):
         raise LookupError("人物不存在，请刷新列表")
 
     original_paths = gallery(target)
-    resolved_paths = {str(Path(path).resolve()): path for path in original_paths}
-    requested = list(dict.fromkeys(str(Path(path).resolve()) for path in image_paths))
+
+    def resolve(value):
+        return (
+            image_store.object_key(value)
+            if settings.image_storage == "s3"
+            else str(Path(value).resolve())
+        )
+
+    resolved_paths = {resolve(path): path for path in original_paths}
+    requested = list(dict.fromkeys(resolve(path) for path in image_paths))
     if not requested:
         raise ValueError("请选择需要删除的照片")
     if any(path not in resolved_paths for path in requested):
@@ -333,11 +341,7 @@ async def remove_gallery_images(engine, target_id: str, image_paths: list[str]):
         current = await run(adapter.get_person, pid, collection_id=cid)
         if current:
             await run(adapter.delete_person, pid, collection_id=cid)
-        metadata = {
-            **engine._item_metadata(item),
-            "file_path": paths[0],
-            "image_paths": paths,
-        }
+        metadata = image_store.with_images(engine._item_metadata(item), paths)
         await run(
             adapter.register_person,
             name=item.get("name") or target.get("name") or "",

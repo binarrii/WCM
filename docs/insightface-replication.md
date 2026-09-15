@@ -66,7 +66,8 @@ sudo docker compose run --rm --no-deps api python -m scripts.face_replication st
 未建立基线时，新版本拒绝人物写入；审核任务数据库和旧版 8001 入口保留。
 
 历史记录若缺少完整原照片，只允许从原生一致性备份建立副本，并额外核验完整人脸记录指纹。
-这类记录在基线清单中标记 `rebuildable=false`，保持可读，禁止修改，不能靠剩余照片重建。
+这类记录在基线清单中标记 `rebuildable=false`，保持可读，禁止普通业务修改，不能靠剩余照片重建。
+图片对象 Key 迁移可在核对原生人脸指纹后仅修改元数据，详见 [图片对象 Key 与回滚](image-object-keys.md)。
 必须保留包含它们的原生备份；后续补齐原照片需要单独核验迁移。`seed-all` 输出这类记录的数量。
 
 查看 `GET /api/v1/insightface/replication` 可获得提交序号、每个副本的检查点、落后序号差、心跳、重试次数、

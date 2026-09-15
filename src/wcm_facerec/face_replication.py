@@ -35,13 +35,7 @@ def node_adapter(url):
 
 
 def manifest(cid, pid, item, *, hashes=None, strict=True):
-    paths = list(
-        dict.fromkeys(
-            p
-            for p in ([item.get("file_path"), *(item.get("image_paths") or [])] if item else [])
-            if p
-        )
-    )
+    paths = image_store.image_refs(item)
     incomplete = item is not None and len(paths) != int(item.get("face_count") or 0)
     if incomplete and strict:
         raise store.ReplicationUnavailable(
@@ -57,7 +51,7 @@ def manifest(cid, pid, item, *, hashes=None, strict=True):
                 sha = hashlib.sha256(image_store.read_bytes(path)).hexdigest()
             if hashes is not None:
                 hashes[path] = sha
-        images.append({"path": path, "sha256": sha})
+        images.append({"key" if settings.image_storage == "s3" else "path": path, "sha256": sha})
     person = (
         None
         if item is None
@@ -77,12 +71,66 @@ def manifest(cid, pid, item, *, hashes=None, strict=True):
     return snapshot
 
 
+def native_faces_hash(target, cid, pid, count):
+    faces, cursor = [], None
+    while True:
+        page = target._client.list_faces(cid, pid, limit=100, cursor=cursor)
+        faces.extend(page.faces)
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    if len(faces) != count or len({face["id"] for face in faces}) != len(faces):
+        raise store.ReplicationUnavailable("历史人物原生人脸清单不完整")
+    return store.digest(sorted(faces, key=lambda face: face["id"]))
+
+
+def baseline_manifest(target, cid, item, hashes):
+    snapshot = manifest(cid, item["id"], item, hashes=hashes, strict=False)
+    if snapshot.get("rebuildable") is False:
+        snapshot["native_faces_hash"] = native_faces_hash(
+            target, cid, item["id"], item["face_count"]
+        )
+    return snapshot
+
+
+def canonical_snapshot(snapshot):
+    return {**snapshot, "images": image_store.canonical_images(snapshot["images"])}
+
+
+def image_hashes(images):
+    """Accept checkpoints written before the path-to-key format migration."""
+    canonical = image_store.canonical_images(images)
+    hashes = {store.digest(images), store.digest(canonical)}
+    if settings.image_storage == "s3":
+        prefix = settings.s3_prefix.strip("/") + "/"
+        legacy = [
+            {"path": "/tmp/wcm/" + image["key"][len(prefix) :], "sha256": image["sha256"]}
+            for image in canonical
+        ]
+        hashes.add(store.digest(legacy))
+    return hashes
+
+
 async def capture(engine, entries):
     snapshots = []
     for entry in entries:
         cid, pid = entry["collection"], entry["person_id"]
         item = await run_sync(engine._primary_adapter.get_person, pid, collection_id=cid)
-        snapshots.append(await run_sync(manifest, cid, pid, item))
+        if entry.get("metadata_only"):
+            snapshot = await run_sync(baseline_manifest, engine._primary_adapter, cid, item, {})
+            before = entry["item"]
+            if (
+                snapshot.get("native_faces_hash") != entry.get("native_faces_hash")
+                or image_store.image_refs(item) != image_store.image_refs(before)
+                or any(
+                    item.get(k) != before.get(k)
+                    for k in ("id", "name", "external_id", "face_count")
+                )
+            ):
+                raise store.ReplicationUnavailable("图片 Key 迁移改变了人物或原有人脸，停止提交")
+            snapshots.append(snapshot)
+        else:
+            snapshots.append(await run_sync(manifest, cid, pid, item))
     return snapshots
 
 
@@ -101,22 +149,30 @@ class AmbiguousReplicaWrite(store.ReplicationUnavailable):
 
 async def apply_snapshot(name, owner, target, snapshot):
     """Converge a complete person; never retry an append with an unknown result."""
-    if snapshot.get("rebuildable") is False:
+    native_only = snapshot.get("rebuildable") is False
+    if native_only and not snapshot.get("native_faces_hash"):
         raise store.ReplicationUnavailable("历史人物缺少完整原照片，只能从原生备份恢复")
     cid, pid, person = snapshot["collection"], snapshot["person_id"], snapshot["person"]
     previous = await run_sync(store.applied, name, snapshot)
     current = await run_sync(target.get_person, pid, collection_id=cid)
+    if native_only and (
+        not current
+        or current.get("external_id") != person["external_id"]
+        or await run_sync(native_faces_hash, target, cid, pid, person["face_count"])
+        != snapshot["native_faces_hash"]
+    ):
+        raise store.ReplicationUnavailable("历史人物原生人脸不匹配，必须先恢复原生备份")
     if (
         previous
         and previous["manifest_hash"] == store.digest(snapshot)
         and matches(current, person)
     ):
         return
-    metadata_only = (
+    metadata_only = native_only or (
         person is not None
         and current is not None
         and previous
-        and previous["images_hash"] == store.digest(snapshot["images"])
+        and previous["images_hash"] in image_hashes(snapshot["images"])
         and current.get("face_count") == person["face_count"]
         and current.get("external_id") == person["external_id"]
     )
@@ -124,7 +180,7 @@ async def apply_snapshot(name, owner, target, snapshot):
     images = []
     if person and not metadata_only:
         for image in snapshot["images"]:
-            data = await run_sync(image_store.read_bytes, image["path"])
+            data = await run_sync(image_store.read_bytes, image_store.snapshot_ref(image))
             if hashlib.sha256(data).hexdigest() != image["sha256"]:
                 raise store.ReplicationUnavailable("同步图片 SHA-256 校验失败")
             images.append(data)
@@ -157,6 +213,12 @@ async def apply_snapshot(name, owner, target, snapshot):
         actual = await run_sync(target.get_person, pid, collection_id=cid)
         if not matches(actual, person):
             raise store.ReplicationUnavailable("副本人物写入后校验失败")
+        if (
+            native_only
+            and await run_sync(native_faces_hash, target, cid, pid, person["face_count"])
+            != snapshot["native_faces_hash"]
+        ):
+            raise store.ReplicationUnavailable("历史人物迁移后人脸指纹改变")
     except BaseException as exc:
         # Includes timeout, response loss, process cancellation and index errors
         # after SQLite committed. An ordinary retry cannot fence an old request.

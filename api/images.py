@@ -1,7 +1,6 @@
 """Serve historical image URLs from whichever shared backend is configured."""
 
 import mimetypes
-from pathlib import Path
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -18,7 +17,7 @@ images_bp = APIRouter()
 @images_bp.api_route("/images/{key:path}", methods=["GET", "HEAD"])
 async def get_image(key: str, request: Request):
     try:
-        path = Path("/tmp/wcm") / key
+        path = image_store.validate_key(settings.s3_prefix.strip("/") + "/" + key)
         object_key = image_store.object_key(path)
         metadata = await run_sync(image_store.stat, path)
     except (ValueError, FileNotFoundError):

@@ -5,13 +5,14 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from urllib.parse import unquote
 
 import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, model_validator
 
-from wcm_facerec import person_operations
+from wcm_facerec import image_store, person_operations
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import get_face_engine
 from wcm_facerec.person_library import SameNamePeopleError
@@ -25,6 +26,11 @@ _IMAGE_ROOT = Path("/tmp/wcm")
 def _path_to_image_url(file_path: str | None) -> str | None:
     if not file_path:
         return None
+    if settings.image_storage == "s3":
+        try:
+            return image_store.public_url(file_path)
+        except ValueError:
+            return None
     path = Path(file_path)
     try:
         relative = path.relative_to(_IMAGE_ROOT)
@@ -44,10 +50,10 @@ def _path_to_image_url(file_path: str | None) -> str | None:
 
 def _item_image_urls(item: dict) -> list[str]:
     """Serialize the person's gallery without leaking internal file paths."""
-    paths = [item.get("file_path")]
-    image_paths = item.get("image_paths")
-    if isinstance(image_paths, list):
-        paths.extend(image_paths)
+    try:
+        paths = image_store.image_refs(item)
+    except ValueError:
+        return []
     image_urls: list[str] = []
     for path in paths:
         if not isinstance(path, str):
@@ -58,9 +64,15 @@ def _item_image_urls(item: dict) -> list[str]:
     return image_urls
 
 
-def _image_url_to_path(image_url: str) -> Path | None:
+def _image_url_to_path(image_url: str) -> Path | str | None:
     """Resolve a gallery URL back to a readable file within the image root."""
     try:
+        if settings.image_storage == "s3":
+            if not image_url.startswith("/images/"):
+                return None
+            return image_store.validate_key(
+                settings.s3_prefix.strip("/") + "/" + unquote(image_url[len("/images/") :])
+            )
         relative = Path(image_url).relative_to("/images")
         root = _IMAGE_ROOT.resolve()
         target = (root / relative).resolve()

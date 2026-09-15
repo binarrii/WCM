@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pymysql
 
+from . import image_store
 from .cluster import connect
 from .config import settings
 
@@ -321,7 +322,7 @@ def record_applied(name, owner, snapshot):
                     name,
                     identity(snapshot["collection"], snapshot["person_id"]),
                     digest(snapshot),
-                    digest(snapshot["images"]),
+                    digest(image_store.canonical_images(snapshot["images"])),
                 ),
             )
         db.commit()

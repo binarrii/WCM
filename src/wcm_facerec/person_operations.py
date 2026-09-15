@@ -13,7 +13,7 @@ from uuid import uuid4
 from . import face_sync_store, image_store
 from .cluster import check_locks, connect, model_slot, run_sync
 from .config import settings
-from .face_replication import capture
+from .face_replication import capture, matches, native_faces_hash
 
 _operation = ContextVar("person_operation", default=None)
 request_key = ContextVar("person_request_key", default=None)
@@ -83,6 +83,9 @@ async def call(function, *args, **kwargs):
     data = _operation.get()
     name = getattr(function, "__name__", "")
     if data is not None and name in _MUTATIONS:
+        metadata_only = data.get("operation") == "migrate_person_image_keys"
+        if metadata_only and name != "update_person":
+            raise face_sync_store.ReplicationUnavailable("图片 Key 迁移只允许修改元数据")
         if settings.insightface_replication_enabled and data.get("uncertain"):
             raise face_sync_store.ReplicationUnavailable(
                 "先前写入结果不确定，停止后续写入和在线补偿"
@@ -97,20 +100,26 @@ async def call(function, *args, **kwargs):
         if identity not in data["before"]:
             adapter = function.__self__
             item = await run_sync(adapter.get_person, pid, collection_id=cid)
+            entry = {"collection": cid, "person_id": pid, "item": item}
             if item:
-                paths = list(
-                    dict.fromkeys(
-                        p for p in [item.get("file_path"), *(item.get("image_paths") or [])] if p
-                    )
-                )
+                paths = image_store.image_refs(item)
                 face_count = int(item.get("face_count") or 0)
-                if len(paths) < face_count or (
+                if metadata_only:
+                    entry["metadata_only"] = True
+                    if len(paths) != face_count:
+                        entry["native_faces_hash"] = await run_sync(
+                            native_faces_hash, adapter, cid, pid, face_count
+                        )
+                elif len(paths) < face_count or (
                     settings.insightface_replication_enabled and len(paths) != face_count
                 ):
                     raise ValueError("人物原照片不完整，无法建立可恢复的操作快照")
-                for path in paths:
-                    await run_sync(image_store.read_bytes, path)
-            data["before"][identity] = {"collection": cid, "person_id": pid, "item": item}
+                if not metadata_only:
+                    for path in paths:
+                        await run_sync(image_store.read_bytes, path)
+            elif metadata_only:
+                raise face_sync_store.ReplicationUnavailable("待迁移人物已不存在")
+            data["before"][identity] = entry
             await run_sync(_save, data)
         if settings.insightface_replication_enabled:
             data["inflight"] = {"collection": cid, "person_id": pid, "method": name}
@@ -135,20 +144,44 @@ async def restore(engine, data):
 
 
 async def _restore(engine, data):
-    """Idempotent full-person compensation; repeating after a crash is safe."""
+    """Compensate after fencing; image-key migrations restore only metadata."""
     data.update(status="recovering", uncertain=False, inflight=None)
     await run_sync(_save, data)
     adapter = engine._adapter
     for entry in reversed(list(data["before"].values())):
         check_locks()
         cid, pid, item = entry["collection"], entry["person_id"], entry["item"]
-        paths = list(
-            dict.fromkeys(
-                p
-                for p in ([item.get("file_path"), *(item.get("image_paths") or [])] if item else [])
-                if p
+        if entry.get("metadata_only"):
+            current = await run_sync(adapter.get_person, pid, collection_id=cid)
+            if not current or any(
+                current.get(k) != item.get(k) for k in ("id", "name", "external_id", "face_count")
+            ):
+                raise face_sync_store.ReplicationUnavailable("迁移回滚前人物状态不符，停止恢复")
+            fingerprint = entry.get("native_faces_hash")
+            if (
+                fingerprint
+                and await run_sync(native_faces_hash, adapter, cid, pid, item["face_count"])
+                != fingerprint
+            ):
+                raise face_sync_store.ReplicationUnavailable("迁移回滚前原生人脸不符，停止恢复")
+            await _restore_call(
+                data,
+                adapter.update_person,
+                pid,
+                metadata=engine._item_metadata(item),
+                collection_id=cid,
             )
-        )
+            restored = await run_sync(adapter.get_person, pid, collection_id=cid)
+            if not matches(restored, item):
+                raise face_sync_store.ReplicationUnavailable("图片 Key 迁移回滚校验失败")
+            if (
+                fingerprint
+                and await run_sync(native_faces_hash, adapter, cid, pid, item["face_count"])
+                != fingerprint
+            ):
+                raise face_sync_store.ReplicationUnavailable("图片 Key 迁移回滚后原生人脸不符")
+            continue
+        paths = image_store.image_refs(item)
         # Fetch every byte before deleting anything, so a storage outage is safe.
         images = [await run_sync(image_store.read_bytes, path) for path in paths]
         if item and not images:
@@ -303,6 +336,8 @@ def record_revision(item):
             "remarks",
             "file_path",
             "image_paths",
+            "image_key",
+            "image_keys",
             "face_count",
         )
     }
