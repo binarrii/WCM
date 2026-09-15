@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { AlertCircle, ArrowRight, CheckCircle2, Clock3, RefreshCw, Server, ShieldCheck } from '@lucide/vue';
 import { insightfaceService } from '../services/insightfaceService';
+import { API_BASE } from '../services/api';
+import { createReplicationPull, replicationPullUrl } from '../services/replicationPull';
 import { canTriggerSync, formatSyncTime, manualRequestLabel, replicaPresentation } from '../services/replicationStatus';
 import './system-management.css';
 
@@ -9,41 +11,36 @@ const status = ref(null);
 const loading = ref(false);
 const submitting = ref(null);
 const error = ref('');
+const submissionError = ref('');
 const notice = ref('');
 const updatedAt = ref(null);
+const connectionState = ref('connecting');
+const fresh = ref(false);
+const connectionLabel = computed(() => ({
+  connecting: '连接中', connected: '已连接', reconnecting: '重连中', stopped: '已暂停'
+})[connectionState.value]);
+const canSubmit = computed(() => fresh.value && connectionState.value === 'connected' && !error.value);
 const replicas = computed(() => status.value?.replicas || []);
 const readable = computed(() => replicas.value.filter(node => node.read_eligible).length);
 const eligible = computed(() => replicas.value.filter(node => canTriggerSync(status.value, node)));
 const totalLag = computed(() => replicas.value.reduce((sum, node) => sum + Number(node.lag || 0), 0));
-let timer;
 let disposed = false;
-let generation = 0;
+let pull;
 
 const reasonText = (reason, fallback) => {
   const detail = reason.response?.data?.detail;
   return typeof detail === 'string' ? detail : fallback;
 };
-const loadStatus = async () => {
-  if (loading.value || disposed) return;
-  const current = ++generation;
-  loading.value = true;
-  try {
-    const value = await insightfaceService.status();
-    if (disposed || current !== generation) return;
-    status.value = value;
-    updatedAt.value = new Date().toISOString();
-    error.value = '';
-  } catch (reason) {
-    if (!disposed && current === generation) error.value = reasonText(reason, '同步状态读取失败，当前数据可能已过期，请刷新重试。');
-  } finally {
-    if (current === generation) loading.value = false;
-  }
+const loadStatus = () => {
+  submissionError.value = '';
+  pull?.refresh();
 };
 
 const triggerSync = async (nodeId = null) => {
-  if (submitting.value !== null || error.value || disposed) return;
+  if (submitting.value !== null || !canSubmit.value || disposed) return;
   submitting.value = nodeId ?? '*';
   notice.value = '';
+  submissionError.value = '';
   try {
     const result = await insightfaceService.sync(nodeId);
     if (disposed) return;
@@ -52,26 +49,47 @@ const triggerSync = async (nodeId = null) => {
     notice.value = `已提交 ${names} 的同步请求，由同步进程检查并追赶${skipped}。`;
   } catch (reason) {
     if (!disposed) notice.value = '';
-    if (!disposed) error.value = reasonText(reason, '暂无法确认同步请求是否提交，请刷新查看手动请求状态；重复请求会合并。');
+    if (!disposed) submissionError.value = reasonText(reason, '暂无法确认同步请求是否提交，请刷新查看手动请求状态；重复请求会合并。');
   } finally {
     if (!disposed) {
       submitting.value = null;
-      // Invalidate a GET started before this POST, so it cannot restore stale state.
-      generation += 1;
-      loading.value = false;
-      // Keep submission errors visible until the next explicit or periodic refresh.
-      if (!error.value) await loadStatus();
+      // Drain an older pull without displaying it, then read the committed request.
+      fresh.value = false;
+      pull?.refresh({ discardPending: true });
     }
   }
 };
 
-const poll = async () => {
-  if (disposed) return;
-  if (!document.hidden && submitting.value === null) await loadStatus();
-  if (!disposed) timer = window.setTimeout(poll, 5000);
+const updateVisibility = () => {
+  if (document.hidden) pull?.stop();
+  else pull?.start();
 };
-onMounted(poll);
-onBeforeUnmount(() => { disposed = true; generation += 1; window.clearTimeout(timer); });
+onMounted(() => {
+  pull = createReplicationPull({
+    url: replicationPullUrl(API_BASE, window.location.href),
+    onData: value => {
+      if (submitting.value !== null) return;
+      status.value = value;
+      updatedAt.value = new Date().toISOString();
+      fresh.value = true;
+      error.value = '';
+    },
+    onPending: value => { loading.value = value; },
+    onState: value => {
+      connectionState.value = value;
+      if (value !== 'connected') fresh.value = false;
+      if (value === 'reconnecting') error.value = 'WebSocket 连接中断或查询超时，正在重连；当前显示的是上次查询结果。';
+    },
+    onError: reason => { fresh.value = false; error.value = reason.message; }
+  });
+  document.addEventListener('visibilitychange', updateVisibility);
+  updateVisibility();
+});
+onBeforeUnmount(() => {
+  disposed = true;
+  document.removeEventListener('visibilitychange', updateVisibility);
+  pull?.stop();
+});
 </script>
 
 <template>
@@ -79,13 +97,14 @@ onBeforeUnmount(() => { disposed = true; generation += 1; window.clearTimeout(ti
     <section class="sync-toolbar">
       <div><h2><Server />InsightFace 同步</h2><p>查看副本状态，检查并同步已提交的人物变更。</p></div>
       <div class="sync-toolbar-actions">
-        <span class="sync-updated"><Clock3 />{{ updatedAt ? `更新于 ${formatSyncTime(updatedAt)}` : '正在获取状态' }}<small>每 5 秒刷新</small></span>
+        <span class="sync-updated"><Clock3 />{{ updatedAt ? `更新于 ${formatSyncTime(updatedAt)}` : '正在获取状态' }}<small>WebSocket pull · {{ connectionLabel }} · 每 5 秒查询</small></span>
         <button type="button" class="sync-button" :disabled="loading || submitting !== null" @click="loadStatus"><RefreshCw :class="{ spinner: loading }" />刷新状态</button>
-        <button type="button" class="sync-button primary" :disabled="!eligible.length || submitting !== null || Boolean(error)" @click="triggerSync()"><RefreshCw :class="{ spinner: submitting === '*' }" />{{ submitting === '*' ? '提交中…' : '同步全部可用副本' }}</button>
+        <button type="button" class="sync-button primary" :disabled="!eligible.length || submitting !== null || !canSubmit" @click="triggerSync()"><RefreshCw :class="{ spinner: submitting === '*' }" />{{ submitting === '*' ? '提交中…' : '同步全部可用副本' }}</button>
       </div>
     </section>
 
     <p v-if="error" class="sync-message danger" role="alert"><AlertCircle />{{ error }}</p>
+    <p v-if="submissionError" class="sync-message danger" role="alert"><AlertCircle />{{ submissionError }}</p>
     <p v-if="notice" class="sync-message success" role="status"><CheckCircle2 />{{ notice }}</p>
     <section v-if="!status" class="sync-empty"><RefreshCw :class="{ spinner: loading }" /><h3>{{ loading ? '正在读取同步状态' : '暂时无法读取同步状态' }}</h3><p>请检查服务连接，或点击“刷新状态”重试。</p></section>
     <section v-else-if="!status.enabled" class="sync-empty"><Server /><h3>尚未启用 InsightFace 副本同步</h3><p>启用并初始化副本后，可在这里查看状态和手动触发同步。</p></section>
@@ -118,7 +137,7 @@ onBeforeUnmount(() => { disposed = true; generation += 1; window.clearTimeout(ti
           <p v-else-if="node.state === 'new'" class="sync-node-guidance">先从一致性备份初始化并完成核验，才能开始同步。</p>
           <p v-else-if="!node.heartbeat_fresh" class="sync-node-guidance">当前没有有效心跳，请检查副本及同步进程是否运行。</p>
           <div class="sync-manual-status"><span><Clock3 />最近手动请求</span><strong>{{ manualRequestLabel(node) }}</strong><small v-if="node.manual_request">目标序号 {{ node.manual_request.target_sequence }} · 提交 {{ formatSyncTime(node.manual_request.requested_at) }}<template v-if="node.manual_request.completed_at"> · 完成 {{ formatSyncTime(node.manual_request.completed_at) }}</template></small></div>
-          <footer><span>{{ node.read_eligible ? '允许人脸搜索读取' : '暂不接收新的搜索读取' }}</span><button type="button" class="sync-button" :aria-label="`同步副本 ${node.id}`" :disabled="!canTriggerSync(status, node) || submitting !== null || Boolean(error)" @click="triggerSync(node.id)"><RefreshCw :class="{ spinner: submitting === node.id }" />{{ submitting === node.id ? '提交中…' : '立即同步' }}</button></footer>
+          <footer><span>{{ node.read_eligible ? '允许人脸搜索读取' : '暂不接收新的搜索读取' }}</span><button type="button" class="sync-button" :aria-label="`同步副本 ${node.id}`" :disabled="!canTriggerSync(status, node) || submitting !== null || !canSubmit" @click="triggerSync(node.id)"><RefreshCw :class="{ spinner: submitting === node.id }" />{{ submitting === node.id ? '提交中…' : '立即同步' }}</button></footer>
         </article>
         <div v-if="!replicas.length" class="sync-empty"><Server /><h3>尚未配置副本</h3><p>配置副本并完成基线核验后，状态会显示在这里。</p></div>
       </section>

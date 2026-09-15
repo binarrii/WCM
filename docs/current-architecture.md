@@ -305,7 +305,9 @@ API / Worker 的业务协调已支持多实例，但现有 Compose 的 Docker DN
 
 ### 系统管理入口（后续功能更新）
 
-WebUI 新增“系统管理”菜单（`/#/system`），每 5 秒刷新 InsightFace 提交序号、副本落后数量、心跳、读准入和隔离原因。
+WebUI 的“系统管理”菜单（`/#/system`）使用 WebSocket pull 查询 InsightFace 提交序号、副本落后数量、心跳、读准入和隔离原因。
+浏览器连接 `/api/v1/insightface/replication/ws`，发出 `status` 请求后由 API 查询 MySQL 并返回对应 `request_id` 的快照；
+收到结果 5 秒后发起下一次查询，“刷新状态”也走同一连接。服务端不主动推送或定时查询；断线自动重连，隐藏页面停止查询。
 支持全部可用副本或单个副本的手动同步：API 将请求写入 MySQL `face_sync_requests`，原 face-sync Worker 负责检查、追赶及完成确认。
 同一副本的未完成请求会合并；普通重试可提前触发，隔离或未初始化状态不会被按钮解除。
 该入口没有增加独立执行服务，部署实例数和前述可靠同步链路保持一致；详见[同步运行手册](insightface-replication.md)。
