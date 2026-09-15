@@ -1,4 +1,5 @@
 <script setup>
+import { can } from '../services/auth';
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import Cropper from 'cropperjs';
 import 'cropperjs/dist/cropper.css';
@@ -948,11 +949,11 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <button class="btn-secondary toolbar-action" @click="toggleMergeMode" :disabled="submitting">
+          <button v-if="can('people.write')" class="btn-secondary toolbar-action" @click="toggleMergeMode" :disabled="submitting">
             <Layers class="btn-icon" />
             <span>{{ mergeMode ? '退出合并' : '人物合并' }}</span>
           </button>
-          <button class="add-btn toolbar-action" @click="openCreateModal">
+          <button v-if="can('people.write')" class="add-btn toolbar-action" @click="openCreateModal">
             <UserPlus class="btn-icon" />
             <span>新增人脸</span>
           </button>
@@ -1052,7 +1053,7 @@ onUnmounted(() => {
 
               <div class="card-footer-row">
                 <span class="date-text">时间: {{ new Date(record.created_at).toLocaleDateString() }}</span>
-                <div class="action-buttons">
+                <div v-if="can('people.write')" class="action-buttons">
                   <button class="icon-btn edit" @click="openAppendModal(record)" title="追加照片" aria-label="追加照片">
                     <ImageIcon class="icon-btn-svg" />
                   </button>

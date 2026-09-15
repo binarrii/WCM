@@ -18,6 +18,32 @@ import pytest
 from PIL import Image as PILImage
 
 
+@pytest.fixture(autouse=True)
+def business_test_identity(request, monkeypatch):
+    """Existing business tests run as an authenticated operator.
+
+    test_auth exercises real cookies, crypto, persistence, CSRF and authorization.
+    Business/model tests keep their existing isolated transports and fixtures.
+    """
+    if request.module.__name__.endswith("test_auth"):
+        return
+    from api import auth_guard, auth_store
+
+    monkeypatch.setattr(auth_store, "initialize", lambda: None)
+    monkeypatch.setattr(
+        auth_guard,
+        "authorize",
+        lambda scope: {
+            "user": {
+                "id": "business-test-operator",
+                "role": "superadmin",
+                "permissions": list(auth_store.PERMISSIONS) + ["users.manage"],
+            },
+            "session": {},
+        },
+    )
+
+
 # ----------------------------------------------------------------------
 # Live-vs-unit gate
 # ----------------------------------------------------------------------

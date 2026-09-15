@@ -1,4 +1,5 @@
 <script setup>
+import { can } from '../services/auth';
 import { computed, ref } from 'vue';
 import { LoaderCircle, Square } from '@lucide/vue';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -31,7 +32,7 @@ const cancelTask = async () => {
 </script>
 
 <template>
-  <button v-if="reviewTaskActive(task)" type="button" :class="['cancel-review-button', { compact }]"
+  <button v-if="can('review.manage') && reviewTaskActive(task)" type="button" :class="['cancel-review-button', { compact }]"
     :disabled="disabled || stopping" :title="stopping ? '取消中…' : '取消任务'"
     :aria-label="stopping ? '取消中' : '取消任务'" @click.stop="open = true">
     <LoaderCircle v-if="stopping" class="spinner" /><Square v-else />

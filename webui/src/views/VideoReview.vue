@@ -1,4 +1,5 @@
 <script setup>
+import { can } from '../services/auth';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileJson, Play, Search, Settings, Video } from '@lucide/vue';
 import { mediaService } from '../services/mediaService';
@@ -445,7 +446,7 @@ onBeforeUnmount(() => {
       </div>
       <div :class="['setup-body-shell', { collapsed: !setupExpanded }]">
         <div id="review-setup-content" class="setup-body" :aria-hidden="!setupExpanded">
-          <form class="review-form" @submit.prevent="analyze">
+          <form v-if="can('review.run')" class="review-form" @submit.prevent="analyze">
             <label class="url-field"><span>视频 HTTP(S) 地址</span><input v-model.trim="inputUrl" type="url" placeholder="http://10.252.25.251:18080/videos/example.mp4" required /></label>
             <label><span>采样间隔</span><div class="input-unit"><input v-model.number="sampleInterval" type="number" min="0.1" step="0.1" /><small>秒</small></div></label>
             <label><span>人脸候选数</span><select v-model.number="topK"><option v-for="value in [1, 3, 5, 10]" :key="value" :value="value">{{ value }}</option></select></label>

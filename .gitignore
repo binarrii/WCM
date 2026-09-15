@@ -21,3 +21,7 @@ insightface-replicas/
 
 # Generated video review copies and API analysis reports
 data/media_reviews/
+
+# Local authentication database and encryption key
+data/auth.sqlite3*
+data/auth.key

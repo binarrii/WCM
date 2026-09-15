@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     allowedHosts: ['.trycloudflare.com'],
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': { target: 'http://localhost:8000', ws: true },
       '/images': 'http://localhost:8000',
     },
   },

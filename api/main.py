@@ -14,7 +14,9 @@ from wcm_facerec import __version__, face_sync_store, image_store, person_operat
 from wcm_facerec.cluster import cluster_slot, run_sync
 from wcm_facerec.config import settings
 
-from . import parameter_store, task_queue
+from . import auth_store, parameter_store, task_queue
+from .auth import router as auth_router
+from .auth_guard import AuthGuard
 from .face_records import face_records_bp
 from .images import images_bp
 from .insightface_management import insightface_management_bp
@@ -30,6 +32,7 @@ from .routes import api_bp
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize optional service-owned persistence before accepting traffic."""
+    await run_sync(auth_store.initialize)
     await initialize_review_tasks()
     await task_queue.initialize()
     if settings.cluster_enabled:
@@ -91,15 +94,18 @@ def create_app() -> FastAPI:
             person_operations.request_key.reset(token)
             person_operations.expected_revision.reset(revision)
 
-    # Enable CORS
+    app.add_middleware(AuthGuard)
+    # Only explicitly configured browser origins can use credentialed requests.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=auth_store.config.origins,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
     # Register blueprints
+    app.include_router(auth_router, prefix="/api/v1")
     app.include_router(api_bp, prefix="/api/v1")
     app.include_router(face_records_bp, prefix="/api/v1")
     app.include_router(review_tasks_bp, prefix="/api/v1")

@@ -1,4 +1,5 @@
 <script setup>
+import { can } from '../services/auth';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertCircle, CheckCircle2, Download, ExternalLink, ListVideo, RefreshCw, Search, Trash2 } from '@lucide/vue';
 import CancelReviewButton from '../components/CancelReviewButton.vue';
@@ -202,7 +203,7 @@ onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStr
     <p v-if="streamState === 'reconnecting'" class="task-notice" role="status">进度连接中断，正在重连…</p>
 
     <section class="task-table-card">
-      <header><div class="task-table-title"><h2>任务记录</h2><span>共 {{ total }} 条</span></div><div class="task-table-header-actions"><template v-if="selectedIds.size"><span>已选择 {{ selectedIds.size }} 条</span><button class="download-selected" type="button" :disabled="deleting || batchDownloading || !downloadableSelectedIds.length" :title="downloadableSelectedIds.length ? `下载 ${downloadableSelectedIds.length} 条任务的结果` : '所选任务暂无可下载结果'" @click="downloadSelectedResults"><Download />{{ batchDownloading ? '打包中…' : `批量下载 (${downloadableSelectedIds.length})` }}</button><button type="button" :disabled="deleting || batchDownloading || hasActiveSelection" :title="hasActiveSelection ? '请先取消正在处理的任务' : '批量删除'" @click="requestDeleteSelected"><Trash2 />批量删除</button></template><small v-else>点击任意一行进入视频审核页并自动加载结果</small></div></header>
+      <header><div class="task-table-title"><h2>任务记录</h2><span>共 {{ total }} 条</span></div><div class="task-table-header-actions"><template v-if="selectedIds.size"><span>已选择 {{ selectedIds.size }} 条</span><button class="download-selected" type="button" :disabled="deleting || batchDownloading || !downloadableSelectedIds.length" :title="downloadableSelectedIds.length ? `下载 ${downloadableSelectedIds.length} 条任务的结果` : '所选任务暂无可下载结果'" @click="downloadSelectedResults"><Download />{{ batchDownloading ? '打包中…' : `批量下载 (${downloadableSelectedIds.length})` }}</button><button v-if="can('review.manage')" type="button" :disabled="deleting || batchDownloading || hasActiveSelection" :title="hasActiveSelection ? '请先取消正在处理的任务' : '批量删除'" @click="requestDeleteSelected"><Trash2 />批量删除</button></template><small v-else>点击任意一行进入视频审核页并自动加载结果</small></div></header>
       <div class="task-table-scroll">
         <table>
           <thead><tr><th class="task-select-cell"><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" :disabled="!tasks.length || deleting" aria-label="选择当前页全部任务" @change="toggleAll" /></th><th>状态</th><th>视频地址</th><th>提交参数</th><th>结果</th><th>提交时间</th><th aria-label="操作"></th></tr></thead>
@@ -215,7 +216,7 @@ onBeforeUnmount(() => { requestSequence += 1; clearTimeout(searchTimer); taskStr
               <td class="task-parameters">{{ parameterSummary(task) }}</td>
               <td>{{ task.result_count }} 条</td>
               <td class="task-date">{{ formatTime(task.created_at) }}</td>
-              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="reviewResultsReady(task) ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || !reviewResultsReady(task) || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><CancelReviewButton :task="task" compact :disabled="deleting" @updated="updateCancelledTask" @error="error = $event" @settled="loadTasks({ silent: true })" /><button class="delete-task" type="button" :title="reviewTaskActive(task) ? '请先取消任务，待停止后再删除' : '删除任务'" :disabled="deleting || batchDownloading || reviewTaskActive(task)" @click="requestDeleteTask(task)"><Trash2 /></button></td>
+              <td class="task-actions" @click.stop @keydown.enter.stop><button type="button" title="打开任务" :disabled="deleting" @click="navigateToReviewTask(task.id)"><ExternalLink /></button><button type="button" :title="reviewResultsReady(task) ? '下载分析结果' : '分析结果尚未就绪'" :disabled="deleting || !reviewResultsReady(task) || downloadingIds.has(task.id)" @click="downloadTaskResults(task)"><Download /></button><CancelReviewButton :task="task" compact :disabled="deleting" @updated="updateCancelledTask" @error="error = $event" @settled="loadTasks({ silent: true })" /><button v-if="can('review.manage')" class="delete-task" type="button" :title="reviewTaskActive(task) ? '请先取消任务，待停止后再删除' : '删除任务'" :disabled="deleting || batchDownloading || reviewTaskActive(task)" @click="requestDeleteTask(task)"><Trash2 /></button></td>
             </tr>
             <tr v-if="reviewTaskActive(task)" class="task-progress-row" :class="{ selected: selectedIds.has(task.id) }">
               <td colspan="7"><ReviewProgress :task="task" collapsible /></td>
