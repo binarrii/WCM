@@ -73,6 +73,22 @@ sudo docker compose run --rm --no-deps api python -m scripts.face_replication st
 查看 `GET /api/v1/insightface/replication` 可获得提交序号、每个副本的检查点、落后序号差、心跳、重试次数、
 下次重试时间、隔离原因以及主节点待恢复状态。MySQL 的 `face_sync_changes` 和 `person_operations` 保存审计与恢复记录。
 
+## WebUI 系统管理与手动同步
+
+通过“系统管理”菜单（`/#/system`）查看上述状态，页面每 5 秒刷新；显示的“可读”同时检查状态、提交序号和心跳有效性。
+“立即同步”触发单个副本，“同步全部可用副本”触发处于 `ready/retry` 的副本；同步中、未初始化、已隔离或停用的节点保持原状态。
+
+`POST /api/v1/insightface/replication/sync` 接受 `{"node_id":"a"}`，传 `{"node_id":null}` 请求全部可用副本。
+HTTP 202 仅表示请求已保存到 MySQL `face_sync_requests`，并提前解除普通重试的等待时间。
+同一节点尚未完成的请求会合并；API 不直接调用 InsightFace 写接口，也不会创建第二个同步执行者。
+原 face-sync Worker 继续持有每个副本的唯一执行锁，在后续检查 / 追赶成功后确认请求完成。
+Worker 未运行时请求保持待处理；副本不可达时显示等待重试，不会把“请求提交”当作“同步完成”。
+手动请求记录当前提交序号作为最低目标；持续发生新写入时，仍按正常批次追赶。
+
+手动同步不会清除隔离、覆盖检查点、重建基线或执行强制恢复。主节点恢复期间拒绝新手动请求，
+不确定写入仍须按下方步骤先隔离旧执行者和在途请求，再显式恢复。
+每个副本仅保存最近一次手动请求；可靠业务同步历史仍保留在 `face_sync_changes` 中。
+
 ## 故障恢复
 
 | 故障 | 系统行为 | 恢复方式 |

@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ClipboardList, Database, Monitor, Moon, SlidersHorizontal, Sun, Video } from '@lucide/vue';
+import { ClipboardList, Database, Monitor, Moon, Settings, SlidersHorizontal, Sun, Video } from '@lucide/vue';
 import FaceDashboard from './views/FaceDashboard.vue';
 import ParameterConfig from './views/ParameterConfig.vue';
 import ReviewTasks from './views/ReviewTasks.vue';
+import SystemManagement from './views/SystemManagement.vue';
 import VideoReview from './views/VideoReview.vue';
 import { navigateTo, routeFromHash } from './services/navigation';
 import './app.css';
@@ -32,6 +33,11 @@ const pages = {
     component: ParameterConfig,
     title: '参数配置',
     description: '集中管理系统通用参数，保存后即时刷新运行时内存'
+  },
+  system: {
+    component: SystemManagement,
+    title: '系统管理',
+    description: '查看服务同步状态，管理 InsightFace 副本同步'
   }
 };
 const page = computed(() => pages[currentRoute.value]);
@@ -86,6 +92,9 @@ onBeforeUnmount(() => {
         <button type="button" aria-label="参数配置" :class="['menu-item', { active: currentRoute === 'parameters' }]" @click="navigateTo('parameters')">
           <SlidersHorizontal /><span>参数配置</span>
         </button>
+        <button type="button" aria-label="系统管理" :class="['menu-item', { active: currentRoute === 'system' }]" @click="navigateTo('system')">
+          <Settings /><span>系统管理</span>
+        </button>
       </nav>
     </aside>
 
@@ -98,7 +107,7 @@ onBeforeUnmount(() => {
               <Sun v-if="theme === 'light'" /><Moon v-else-if="theme === 'dark'" /><Monitor v-else />
             </button>
           </div>
-          <div class="shell-status"><span></span>系统服务正常</div>
+          <div v-if="currentRoute !== 'system'" class="shell-status"><span></span>系统服务正常</div>
         </div>
       </header>
 

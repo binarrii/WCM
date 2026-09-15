@@ -4,6 +4,7 @@ import hashlib
 import json
 import random
 from contextvars import ContextVar
+from datetime import timezone
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -103,6 +104,12 @@ def initialize():
             manifest_hash CHAR(64) NOT NULL, images_hash CHAR(64) NOT NULL,
             PRIMARY KEY (node_id, identity)
         )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS face_sync_requests (
+            node_id VARCHAR(64) PRIMARY KEY, request_id CHAR(32) NOT NULL,
+            target_seq BIGINT NOT NULL,
+            requested_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+            completed_at DATETIME(3) NULL
+        )""")
         c.execute(
             "INSERT IGNORE INTO face_sync_control (id, source_url, collections) VALUES (1,%s,%s)",
             (source(), encode(collections())),
@@ -164,19 +171,46 @@ def append(cursor, operation_id, snapshots):
 
 def status():
     with connect() as db, db.cursor() as c:
+        db.begin()
         root = control(c, require_initialized=False)
         c.execute(
-            "SELECT id,state,applied_seq,heartbeat,attempts,next_retry,last_error,updated_at FROM face_sync_nodes ORDER BY id"
+            "SELECT n.id,n.url,n.state,n.applied_seq,n.heartbeat,n.attempts,n.next_retry,"
+            "n.last_error,n.updated_at,UTC_TIMESTAMP(3) AS observed_at,"
+            "(n.heartbeat > DATE_SUB(UTC_TIMESTAMP(3), INTERVAL %s SECOND)) AS heartbeat_fresh,"
+            "r.request_id,r.target_seq,r.requested_at,r.completed_at "
+            "FROM face_sync_nodes n LEFT JOIN face_sync_requests r ON r.node_id=n.id ORDER BY n.id",
+            (settings.insightface_replica_health_ttl_s,),
         )
-        nodes = [
-            dict(row, lag=max(0, root["head"] - row["applied_seq"]))
-            for row in c.fetchall()
-            if row["id"] in settings.insightface_replicas
-        ]
+        nodes = []
+        for row in c.fetchall():
+            if row["id"] not in settings.insightface_replicas:
+                continue
+            for key, value in row.items():
+                if value is not None and (
+                    key.endswith("_at") or key in {"heartbeat", "next_retry"}
+                ):
+                    row[key] = value.replace(tzinfo=timezone.utc)
+            row["lag"] = max(0, root["head"] - row["applied_seq"])
+            row["heartbeat_fresh"] = bool(row["heartbeat_fresh"])
+            row["read_eligible"] = bool(
+                root["initialized"]
+                and row["state"] == "ready"
+                and row["applied_seq"] == root["head"]
+                and row["heartbeat_fresh"]
+            )
+            request = {
+                "id": row.pop("request_id"),
+                "target_sequence": row.pop("target_seq"),
+                "requested_at": row.pop("requested_at"),
+                "completed_at": row.pop("completed_at"),
+            }
+            row["manual_request"] = request if request["id"] else None
+            nodes.append(row)
         c.execute(
             "SELECT COUNT(*) AS n FROM person_operations WHERE status IN ('running','recovering','uncertain') AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.kind'))='transaction'"
         )
         pending = c.fetchone()["n"]
+        db.commit()
     return {
         "enabled": True,
         "initialized": bool(root["initialized"]),
@@ -186,6 +220,85 @@ def status():
         "pending_primary_operations": pending,
         "replicas": nodes,
     }
+
+
+def request_sync(node_id=None):
+    """Persist a coalesced request; only the existing replica owner may execute it."""
+    if not settings.insightface_replication_enabled:
+        raise ReplicationUnavailable("InsightFace 副本同步未启用")
+    if node_id is not None and node_id not in settings.insightface_replicas:
+        raise ValueError("副本不存在")
+    names = [node_id] if node_id is not None else sorted(settings.insightface_replicas)
+    requested, skipped = [], []
+    with connect() as db:
+        db.begin()
+        try:
+            with db.cursor() as c:
+                root = control(c, lock=True)
+                if root["primary_recovering"]:
+                    raise ReplicationUnavailable("主节点正在恢复，请完成恢复后再触发同步")
+                for name in names:
+                    c.execute("SELECT state FROM face_sync_nodes WHERE id=%s FOR UPDATE", (name,))
+                    node = c.fetchone()
+                    state = node["state"] if node else "new"
+                    if state not in {"ready", "retry"}:
+                        skipped.append({"id": name, "state": state})
+                        continue
+                    c.execute(
+                        "SELECT * FROM face_sync_requests WHERE node_id=%s FOR UPDATE", (name,)
+                    )
+                    previous = c.fetchone()
+                    reused = bool(previous and previous["completed_at"] is None)
+                    request_id = previous["request_id"] if reused else uuid4().hex
+                    if not reused:
+                        c.execute(
+                            "INSERT INTO face_sync_requests (node_id,request_id,target_seq) VALUES (%s,%s,%s) "
+                            "ON DUPLICATE KEY UPDATE request_id=VALUES(request_id),target_seq=VALUES(target_seq),"
+                            "requested_at=UTC_TIMESTAMP(3),completed_at=NULL",
+                            (name, request_id, root["head"]),
+                        )
+                    # Do not change state, owner, checkpoint, or quarantine reason.
+                    c.execute("UPDATE face_sync_nodes SET next_retry=NULL WHERE id=%s", (name,))
+                    requested.append(
+                        {
+                            "id": name,
+                            "request_id": request_id,
+                            "target_sequence": previous["target_seq"] if reused else root["head"],
+                            "reused": reused,
+                        }
+                    )
+                if not requested:
+                    raise ReplicationUnavailable(
+                        "没有可触发的副本；请检查同步中、未初始化或隔离状态"
+                    )
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+    return {"requested": requested, "skipped": skipped}
+
+
+def complete_sync_request(name, request_id):
+    """Acknowledge only the request observed before this worker's health check."""
+    if not request_id:
+        return
+    with connect() as db, db.cursor() as c:
+        db.begin()
+        try:
+            c.execute(
+                "SELECT state,applied_seq FROM face_sync_nodes WHERE id=%s FOR UPDATE", (name,)
+            )
+            node = c.fetchone()
+            if node and node["state"] == "ready":
+                c.execute(
+                    "UPDATE face_sync_requests SET completed_at=UTC_TIMESTAMP(3) "
+                    "WHERE node_id=%s AND request_id=%s AND completed_at IS NULL AND target_seq<=%s",
+                    (name, request_id, node["applied_seq"]),
+                )
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
 
 
 def acquire_read():
@@ -245,7 +358,9 @@ def node(name):
     with connect() as db, db.cursor() as c:
         root = control(c)
         c.execute(
-            "SELECT *, (next_retry IS NULL OR next_retry <= UTC_TIMESTAMP(3)) AS due FROM face_sync_nodes WHERE id=%s",
+            "SELECT n.*, (n.next_retry IS NULL OR n.next_retry <= UTC_TIMESTAMP(3)) AS due,"
+            "r.request_id AS sync_request_id FROM face_sync_nodes n "
+            "LEFT JOIN face_sync_requests r ON r.node_id=n.id AND r.completed_at IS NULL WHERE n.id=%s",
             (name,),
         )
         return root, c.fetchone()

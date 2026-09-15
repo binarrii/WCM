@@ -47,6 +47,7 @@ async def sync_once(name, target):
             owner = uuid4().hex
             if await run_sync(store.begin_sync, name, owner):
                 await run_sync(store.ready, name, owner)
+        await run_sync(store.complete_sync_request, name, row.get("sync_request_id"))
         return
     owner = uuid4().hex
     if not await run_sync(store.begin_sync, name, owner):
@@ -68,6 +69,7 @@ async def sync_once(name, target):
             await apply_snapshot(name, owner, target, snapshot)
         await run_sync(store.checkpoint, name, owner, batch[-1]["seq"])
         await run_sync(store.ready, name, owner)
+        await run_sync(store.complete_sync_request, name, row.get("sync_request_id"))
     except AmbiguousReplicaWrite:
         logger.error("Replica %s quarantined after an ambiguous write", name)
     except asyncio.CancelledError:

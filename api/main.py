@@ -17,6 +17,7 @@ from wcm_facerec.config import settings
 from . import parameter_store, task_queue
 from .face_records import face_records_bp
 from .images import images_bp
+from .insightface_management import insightface_management_bp
 from .model_clients import model_client_pool
 from .parameters import parameters_bp
 from .request_identity import person_request_fingerprint
@@ -103,12 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(face_records_bp, prefix="/api/v1")
     app.include_router(review_tasks_bp, prefix="/api/v1")
     app.include_router(parameters_bp, prefix="/api/v1")
-
-    @app.get("/api/v1/insightface/replication")
-    async def replication_status():
-        if not settings.insightface_replication_enabled:
-            return {"enabled": False}
-        return await run_sync(face_sync_store.status)
+    app.include_router(insightface_management_bp, prefix="/api/v1")
 
     # Mount persisted face images before the SPA catch-all.
     if settings.image_storage == "s3":

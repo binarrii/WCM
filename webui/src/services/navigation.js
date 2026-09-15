@@ -1,4 +1,4 @@
-const ROUTES = new Set(['people', 'video', 'tasks', 'parameters']);
+const ROUTES = new Set(['people', 'video', 'tasks', 'parameters', 'system']);
 
 export function routeFromHash(hash) {
   const route = String(hash || '').replace(/^#\/?/, '').split(/[/?]/, 1)[0];
