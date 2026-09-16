@@ -1,4 +1,4 @@
-.video-review { max-width: 1540px; margin: 0 auto; padding: 24px 28px 48px; display: grid; gap: 22px; }
+.video-review { width: 100%; min-width: 0; padding: 24px var(--workspace-page-gutter) 48px; display: grid; gap: 22px; }
 .review-setup-card, .review-player-panel, .review-events-panel, .review-empty-state { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; box-shadow: var(--shadow-sm); }
 .review-setup-card { padding: 22px; }
 .review-setup-card.collapsed { padding-bottom: 16px; }
@@ -91,7 +91,7 @@
   .review-events-panel { height: auto; max-height: 520px; }
 }
 @media (max-width: 680px) {
-  .video-review { padding: 16px 12px 30px; }
+  .video-review { padding: 16px var(--workspace-page-gutter) 30px; }
   .setup-heading { display: grid; }
   .setup-heading-actions { align-items: flex-start; justify-content: space-between; }
   .review-safety-note { white-space: normal; }

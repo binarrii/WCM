@@ -11,7 +11,7 @@
 .menu-item svg { width: 20px; height: 20px; }
 .menu-item:hover { color: var(--text-primary); background: var(--modal-hover-bg); }
 .menu-item.active { color: var(--color-primary); background: var(--color-primary-glow); border-color: var(--border-hover); }
-.workspace { min-width: 0; }
+.workspace { --workspace-page-gutter: 40px; min-width: 0; }
 .workspace-header { min-height: 108px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 40px; background: color-mix(in srgb, var(--bg-primary) 90%, transparent); border-bottom: 1px solid var(--border-color); }
 .workspace-header h1 { font: 700 1.45rem/1.3 var(--font-display); }
 .workspace-header p { margin-top: 4px; color: var(--text-secondary); font-size: .82rem; }
@@ -24,6 +24,7 @@
 .shell-status span { width: 8px; height: 8px; border-radius: 50%; background: var(--status-green); box-shadow: 0 0 8px var(--status-green); }
 
 @media (max-width: 800px) {
+  .workspace { --workspace-page-gutter: 20px; }
   .shell { grid-template-columns: 74px minmax(0, 1fr); }
   .sidebar { padding-inline: 10px; }
   .brand-copy, .menu-heading, .menu-item span { display: none; }
