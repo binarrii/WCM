@@ -40,8 +40,7 @@
 .account-avatar { width: 58px; height: 58px; border-radius: 16px; display: grid; place-items: center; font-size: 1.6rem; background: var(--color-primary-glow); color: var(--color-primary); }
 .role-badge, .security-state { display: inline-block; font-size: .72rem; padding: 4px 8px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); white-space: nowrap; }
 .role-badge { color: var(--color-primary); margin-left: 8px; background: var(--color-primary-glow); }
-.security-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; }
-.security-column { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.security-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; align-items: start; }
 .security-card { min-width: 0; padding: 26px; border-radius: 16px; border: 1px solid var(--border-color); background: var(--bg-card); }
 .security-card h2 { font-size: 1rem; font-weight: 700; }
 .security-card p { margin: 13px 0 20px; color: var(--text-secondary); font-size: .85rem; line-height: 1.7; }
@@ -72,7 +71,6 @@
 .passkey-list { list-style: none; padding: 0; }
 .passkey-list li { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border-color); font-size: .85rem; }
 .passkey-list small { display: block; color: var(--text-secondary); margin-top: 4px; }
-.sensitive-panel { max-width: 600px; }
 .users-toolbar { display: flex; align-items: start; justify-content: space-between; gap: 24px; }
 .user-search { display: flex; gap: 10px; }
 .user-search button { white-space: nowrap; }
@@ -83,7 +81,7 @@
 .users-table small { display: block; margin-top: 5px; color: var(--text-muted); }
 .users-table select { padding: 7px 10px; font-size: .8rem; }
 .users-pagination { display: flex; align-items: center; justify-content: end; gap: 16px; margin-top: 20px; font-size: .83rem; }
-.role-permissions { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.role-permissions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
 .role-permissions fieldset { border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; display: grid; gap: 16px; }
 .role-permissions legend { font-size: .9rem; font-weight: 600; padding: 0 8px; }
 .role-permissions label { display: flex; align-items: center; gap: 10px; font-size: .84rem; }

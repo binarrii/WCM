@@ -34,6 +34,17 @@ def accept(client, response, status=200):
     return data
 
 
+def verification(client, method, path, proof=None, base=None):
+    data = require(client.post((base or "") + "/api/v1/auth/reauthenticate", json={
+        "operation": f"{method} {path}", **(proof or {"password": PASSWORD})
+    }))
+    return {"X-WCM-Verification": data["verification_token"]}
+
+
+def authorized(client, method, path, **kwargs):
+    return client.request(method, path, headers=verification(client, method, path), **kwargs)
+
+
 def main():
     db = store.engine()
     assert db.dialect.name == "mysql" and db.url.database.startswith("wcm_auth_verify_"), "Requires an isolated MySQL verification database"
@@ -69,15 +80,15 @@ def main():
         for base in BASES:
             assert require(root.get(base + "/api/v1/auth/me"))["user"]["id"] == root_user["id"]
             assert member.get(base + "/api/v1/parameters").status_code == 403
-        require(root.put(f"/api/v1/auth/users/{member_user['id']}/role", json={"role": "admin"}))
+        require(authorized(root, "PUT", f"/api/v1/auth/users/{member_user['id']}/role", json={"role": "admin"}))
         for base in BASES:
             assert member.get(base + "/api/v1/auth/me").status_code == 401
         assert accept(member, member.post("/api/v1/auth/login", json={"username": member_user["username"], "password": PASSWORD}))["user"]["role"] == "admin"
         assert member.get("/api/v1/auth/users").status_code == 403
-        require(root.put("/api/v1/auth/roles/admin", json={"permissions": ["review.read"]}))
+        require(authorized(root, "PUT", "/api/v1/auth/roles/admin", json={"permissions": ["review.read"]}))
         assert member.get(BASES[1] + "/api/v1/parameters").status_code == 403
 
-        pending = require(root.post("/api/v1/auth/2fa/setup"))
+        pending = require(authorized(root, "POST", "/api/v1/auth/2fa/setup"))
         enabled = accept(root, root.post("/api/v1/auth/2fa/confirm", json={"challenge_id": pending["challenge_id"], "code": pyotp.TOTP(pending["secret"]).now()}))
         stranger = httpx.Client(base_url=BASES[0], headers=HEADERS, timeout=15)
         clients.append(stranger)
@@ -89,9 +100,25 @@ def main():
         assert stranger.post(BASES[0] + "/api/v1/auth/login/2fa", json=proof).status_code == 400
         require(stranger.post(BASES[0] + "/api/v1/auth/logout"))
         assert stranger.get(BASES[1] + "/api/v1/auth/me").status_code == 401
+        path = "/api/v1/auth/roles/admin"
+        for base in BASES:
+            assert root.put(base + path, json={"permissions": ["review.read"]}).status_code == 403
+        grant = verification(root, "PUT", path, {"method": "totp", "code": enabled["recovery_codes"][1]}, BASES[0])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda base: root.put(base + path, json={"permissions": ["review.read"]}, headers=grant).status_code, BASES))
+        assert sorted(results) == [200, 400], results
+        assert root.put(BASES[1] + path, json={"permissions": []}).status_code == 403
+        assert root.post(BASES[1] + "/api/v1/auth/reauthenticate", json={"operation": "PUT " + path, "method": "totp", "code": enabled["recovery_codes"][1]}).status_code == 400
+        grant = verification(root, "PUT", path, {"method": "totp", "code": enabled["recovery_codes"][2]}, BASES[1])
+        require(root.put(BASES[0] + path, json={"permissions": ["review.read"]}, headers=grant))
+        password_path = "/api/v1/auth/password"
+        grant = verification(root, "POST", password_path, {"method": "totp", "code": enabled["recovery_codes"][3]}, BASES[1])
+        accept(root, root.post(BASES[0] + password_path, json={"new_password": PASSWORD + " changed"}, headers=grant))
+        assert root.post(BASES[1] + password_path, json={"new_password": PASSWORD}).status_code == 403
+        assert require(stranger.post(BASES[1] + "/api/v1/auth/login", json={"username": root_user["username"], "password": PASSWORD + " changed"}))["mfa_required"]
         print(json.dumps({"result": "passed", "database": db.url.database, "api_processes": 2,
                           "concurrent_registrations": 4, "superadmins": 1,
-                          "checks": ["shared-cookie-sessions", "cross-process-role-revocation", "role-permissions", "encrypted-TOTP", "cross-process-MFA-challenge", "recovery-replay-rejected", "cross-process-logout"]}))
+                          "checks": ["shared-cookie-sessions", "cross-process-role-revocation", "role-permissions", "encrypted-TOTP", "cross-process-MFA-challenge", "recovery-replay-rejected", "cross-process-logout", "single-use-grant-race", "every-write-requires-proof", "cross-process-operation-grant", "password-login-keeps-MFA"]}))
     finally:
         for client in clients:
             client.close()

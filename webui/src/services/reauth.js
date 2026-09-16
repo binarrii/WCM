@@ -1,6 +1,6 @@
 import { reactive } from 'vue';
 
-export const reauthState = reactive({ open: false });
+export const reauthState = reactive({ open: false, operation: '' });
 let pending = null;
 let finish = null;
 
@@ -11,37 +11,30 @@ export function reauthMethods(security, passkeySupported) {
   return methods;
 }
 
-export function requestReauthentication() {
-  if (pending) return pending;
+export function requestReauthentication(operation) {
+  if (pending) return Promise.reject(Object.assign(new Error('请先完成当前身份验证'), { code: 'REAUTH_BUSY' }));
   pending = new Promise((resolve, reject) => {
-    finish = verified => {
-      if (verified) resolve();
+    finish = token => {
+      if (typeof token === 'string' && token) resolve(token);
       else reject(Object.assign(new Error('已取消身份验证'), { code: 'REAUTH_CANCELLED' }));
     };
   });
+  reauthState.operation = operation;
   reauthState.open = true;
   return pending;
 }
 
-export function finishReauthentication(verified = false) {
+export function finishReauthentication(token = null) {
   const complete = finish;
   finish = null;
   pending = null;
   reauthState.open = false;
-  complete?.(verified);
+  reauthState.operation = '';
+  complete?.(token);
 }
 
-export async function withReauthentication(operation) {
-  try { return await operation(); }
-  catch (error) {
-    const response = error?.response;
-    const required = response?.status === 403 && (
-      response.headers?.['x-wcm-reauth'] === 'required' ||
-      response.data?.detail === '请先重新验证身份，再进行此操作'
-    );
-    if (!required) throw error;
-    await requestReauthentication();
-    // Only a specific pre-mutation rejection may be retried, and only once.
-    return operation();
-  }
+export async function withReauthentication(operation, submit) {
+  const token = await requestReauthentication(operation);
+  // This grant belongs only to this request; never cache it or automatically retry writes.
+  return submit({ headers: { 'X-WCM-Verification': token } });
 }

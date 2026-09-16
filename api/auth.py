@@ -73,7 +73,14 @@ class SensitiveProof(Payload):
     code: str = Field(default="", max_length=64)
 
 
-class Reauthenticate(SensitiveProof):
+class VerificationOperation(Payload):
+    operation: str = Field(
+        max_length=256,
+        pattern=r"^(POST /api/v1/auth/(password|2fa/(setup|disable|recovery-codes)|passkeys/register/options)|DELETE /api/v1/auth/passkeys/[A-Za-z0-9_-]{1,128}|PUT /api/v1/auth/(users/[A-Za-z0-9_-]{1,128}/(role|active)|roles/(user|admin)))$",
+    )
+
+
+class Reauthenticate(SensitiveProof, VerificationOperation):
     method: Literal["password", "totp"] = "password"
 
 
@@ -107,16 +114,12 @@ def rate(request, action, account="", maximum=10):
         store.limit(f"account:{action}:{account.lower()}", maximum)
 
 
-def current(request, fresh=False, superadmin=False):
+def current(request, superadmin=False):
     identity = store.identity(request.cookies.get(store.COOKIE))
     if not identity:
         raise HTTPException(401, "请先登录")
     if superadmin and identity["user"]["role"] != "superadmin":
         raise HTTPException(403, "仅超级管理员可管理用户和角色权限")
-    if fresh and identity["session"]["verified_at"] < time.time() - 300:
-        raise HTTPException(
-            403, "请先重新验证身份，再进行此操作", headers={"X-WCM-Reauth": "required"}
-        )
     return identity
 
 
@@ -129,6 +132,36 @@ def locked_user(connection, identity):
     if not session or session["expires_at"] <= time.time() or not user or not user["active"]:
         raise HTTPException(401, "登录已失效")
     return user
+
+
+def issue_verification(connection, identity, operation):
+    """Authorize one operation in this session, never a reusable time window."""
+    token = store.challenge(
+        connection,
+        "operation-verification",
+        identity["user"]["id"],
+        identity["session"]["id"],
+        {"operation": operation},
+    )
+    connection.execute(
+        update(store.challenges)
+        .where(store.challenges.c.id == store.digest(token))
+        .values(expires_at=time.time() + 120)
+    )
+    return {"verification_token": token}
+
+
+def consume_verification(connection, identity, request):
+    """Consume atomically with the mutation, including across API replicas."""
+    token = request.headers.get("X-WCM-Verification", "")
+    if not token or len(token) > 128:
+        raise HTTPException(403, "请为本次操作验证身份", headers={"X-WCM-Reauth": "required"})
+    item = store.consume(connection, token, "operation-verification", identity["session"]["id"])
+    if (
+        item["user_id"] != identity["user"]["id"]
+        or item["payload"]["operation"] != f"{request.method} {request.url.path}"
+    ):
+        raise HTTPException(403, "身份验证不适用于本次操作")
 
 
 def log(connection, actor, action, target=None):
@@ -196,7 +229,7 @@ def new_session(connection, user, response, old_token=None):
             user_id=user["id"],
             csrf=csrf,
             expires_at=time.time() + lifetime,
-            verified_at=time.time(),
+            verified_at=0,  # Legacy column; no time-based authorization is granted.
         )
     )
     response.set_cookie(
@@ -317,7 +350,7 @@ def logout(request: Request, response: Response):
 
 
 @router.post("/reauthenticate")
-def reauthenticate(payload: Reauthenticate, request: Request, response: Response):
+def reauthenticate(payload: Reauthenticate, request: Request):
     identity = current(request)
     rate(request, "reauth", identity["user"]["id"])
     with store.transaction() as connection:
@@ -334,21 +367,17 @@ def reauthenticate(payload: Reauthenticate, request: Request, response: Response
         if not valid:
             raise HTTPException(400, "密码或验证码无效；已使用的验证码不能重复使用")
         log(connection, user["id"], f"reauth.{payload.method}")
-        return new_session(connection, user, response, request.cookies.get(store.COOKIE))
+        return issue_verification(connection, identity, payload.operation)
 
 
 @router.post("/password")
 def change_password(payload: ChangePassword, request: Request, response: Response):
-    identity = current(request, fresh=not payload.password)
+    identity = current(request)
     rate(request, "password", identity["user"]["id"])
     new_hash = password_hasher.hash(payload.new_password)
     with store.transaction() as connection:
         user = locked_user(connection, identity)
-        if payload.password and (
-            not verify_password(user, payload.password)
-            or not verify_factor(connection, user, payload.code)
-        ):
-            raise HTTPException(400, "密码或验证码无效")
+        consume_verification(connection, identity, request)
         connection.execute(
             update(store.users).where(store.users.c.id == user["id"]).values(password_hash=new_hash)
         )
@@ -376,16 +405,16 @@ def security(request: Request):
             "passkeys": [dict(item) for item in items],
             "totp_enabled": bool(user["totp_secret"]),
             "recovery_codes_remaining": len(json.loads(user["recovery_hashes"] or "[]")),
-            "recently_verified": identity["session"]["verified_at"] > time.time() - 300,
         }
 
 
 @router.post("/2fa/setup")
 def setup_factor(request: Request):
-    identity = current(request, fresh=True)
+    identity = current(request)
     rate(request, "setup-factor", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
+        consume_verification(connection, identity, request)
         if user["totp_secret"]:
             raise HTTPException(409, "已绑定验证器")
         secret = pyotp.random_base32()
@@ -400,7 +429,10 @@ def setup_factor(request: Request):
             "totp-setup",
             user["id"],
             identity["session"]["id"],
-            {"secret": store.cipher().encrypt(secret.encode()).decode()},
+            {
+                "secret": store.cipher().encrypt(secret.encode()).decode(),
+                "operation_verified": True,
+            },
         )
         uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="WCM")
         buffer = io.BytesIO()
@@ -425,13 +457,15 @@ def recovery_codes(connection, user_id):
 
 @router.post("/2fa/confirm")
 def confirm_factor(payload: VerifyCode, request: Request, response: Response):
-    identity = current(request, fresh=True)
+    identity = current(request)
     rate(request, "confirm-factor", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
         item = store.consume(
             connection, payload.challenge_id, "totp-setup", identity["session"]["id"]
         )
+        if not item["payload"].get("operation_verified"):
+            raise HTTPException(400, "绑定已失效，请重新验证身份并开始绑定")
         if user["totp_secret"]:
             raise HTTPException(409, "已绑定验证器")
         user["totp_secret"] = item["payload"]["secret"]
@@ -452,18 +486,13 @@ def confirm_factor(payload: VerifyCode, request: Request, response: Response):
 
 @router.post("/2fa/disable")
 def disable_factor(payload: SensitiveProof, request: Request, response: Response):
-    identity = current(request, fresh=not payload.password)
+    identity = current(request)
     rate(request, "disable-factor", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
-        if not user["totp_secret"] or (
-            payload.password
-            and (
-                not verify_password(user, payload.password)
-                or not verify_factor(connection, user, payload.code)
-            )
-        ):
-            raise HTTPException(400, "密码或验证码无效")
+        if not user["totp_secret"]:
+            raise HTTPException(409, "尚未绑定验证器")
+        consume_verification(connection, identity, request)
         connection.execute(
             update(store.users)
             .where(store.users.c.id == user["id"])
@@ -478,29 +507,25 @@ def disable_factor(payload: SensitiveProof, request: Request, response: Response
 
 @router.post("/2fa/recovery-codes")
 def regenerate_codes(payload: SensitiveProof, request: Request):
-    identity = current(request, fresh=not payload.password)
+    identity = current(request)
     rate(request, "recovery-codes", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
-        if not user["totp_secret"] or (
-            payload.password
-            and (
-                not verify_password(user, payload.password)
-                or not verify_factor(connection, user, payload.code)
-            )
-        ):
-            raise HTTPException(400, "密码或验证码无效")
+        if not user["totp_secret"]:
+            raise HTTPException(409, "尚未绑定验证器")
+        consume_verification(connection, identity, request)
         log(connection, user["id"], "recovery-codes.rotated")
         return {"recovery_codes": recovery_codes(connection, user["id"])}
 
 
 @router.post("/passkeys/register/options")
 def registration_options(request: Request):
-    identity = current(request, fresh=True)
+    identity = current(request)
     origin = passkey_origin(request)
     rate(request, "passkey-register", identity["user"]["id"])
     with store.transaction() as connection:
         user = locked_user(connection, identity)
+        consume_verification(connection, identity, request)
         existing = (
             connection.execute(
                 select(store.credentials).where(store.credentials.c.user_id == user["id"])
@@ -530,14 +555,18 @@ def registration_options(request: Request):
             "passkey-register",
             user["id"],
             identity["session"]["id"],
-            {"challenge": bytes_to_base64url(options.challenge), "origin": origin},
+            {
+                "challenge": bytes_to_base64url(options.challenge),
+                "origin": origin,
+                "operation_verified": True,
+            },
         )
         return {"challenge_id": token, "options": json.loads(options_to_json(options))}
 
 
 @router.post("/passkeys/register/verify")
 def registration_verify(payload: PasskeyResponse, request: Request):
-    identity = current(request, fresh=True)
+    identity = current(request)
     origin = passkey_origin(request)
     rate(request, "passkey-verify", identity["user"]["id"])
     with store.transaction() as connection:
@@ -545,6 +574,8 @@ def registration_verify(payload: PasskeyResponse, request: Request):
         item = store.consume(
             connection, payload.challenge_id, "passkey-register", identity["session"]["id"]
         )
+        if not item["payload"].get("operation_verified"):
+            raise HTTPException(400, "绑定已失效，请重新验证身份并开始绑定")
         if origin != item["payload"]["origin"]:
             raise HTTPException(400, "验证来源不匹配")
         try:
@@ -584,7 +615,7 @@ def registration_verify(payload: PasskeyResponse, request: Request):
 
 
 @router.post("/passkeys/reauthenticate/options")
-def reauthentication_options(request: Request):
+def reauthentication_options(payload: VerificationOperation, request: Request):
     identity = current(request)
     origin = passkey_origin(request)
     rate(request, "reauth", identity["user"]["id"])
@@ -613,13 +644,17 @@ def reauthentication_options(request: Request):
             "passkey-reauth",
             user["id"],
             identity["session"]["id"],
-            {"challenge": bytes_to_base64url(options.challenge), "origin": origin},
+            {
+                "challenge": bytes_to_base64url(options.challenge),
+                "origin": origin,
+                "operation": payload.operation,
+            },
         )
         return {"challenge_id": token, "options": json.loads(options_to_json(options))}
 
 
 @router.post("/passkeys/reauthenticate/verify")
-def reauthentication_verify(payload: PasskeyResponse, request: Request, response: Response):
+def reauthentication_verify(payload: PasskeyResponse, request: Request):
     identity = current(request)
     origin = passkey_origin(request)
     rate(request, "reauth", identity["user"]["id"])
@@ -628,6 +663,8 @@ def reauthentication_verify(payload: PasskeyResponse, request: Request, response
         item = store.consume(
             connection, payload.challenge_id, "passkey-reauth", identity["session"]["id"]
         )
+        if not item["payload"].get("operation"):
+            raise HTTPException(400, "验证已失效，请重新开始本次操作")
         credential_id = payload.credential.get("id")
         if not isinstance(credential_id, str) or len(credential_id) > 4096:
             raise HTTPException(400, "Passkey 验证失败")
@@ -663,7 +700,7 @@ def reauthentication_verify(payload: PasskeyResponse, request: Request, response
             .values(sign_count=verified.new_sign_count)
         )
         log(connection, user["id"], "reauth.passkey")
-        return new_session(connection, user, response, request.cookies.get(store.COOKIE))
+        return issue_verification(connection, identity, item["payload"]["operation"])
 
 
 @router.post("/passkeys/login/options")
@@ -725,9 +762,10 @@ def authentication_verify(payload: PasskeyResponse, request: Request, response: 
 
 @router.delete("/passkeys/{key_id}")
 def delete_passkey(key_id: str, request: Request):
-    identity = current(request, fresh=True)
+    identity = current(request)
     with store.transaction() as connection:
         user = locked_user(connection, identity)
+        consume_verification(connection, identity, request)
         result = connection.execute(
             delete(store.credentials).where(
                 (store.credentials.c.id == key_id) & (store.credentials.c.user_id == user["id"])
@@ -782,9 +820,10 @@ def admin_target(connection, identity, user_id):
 
 @router.put("/users/{user_id}/role")
 def update_role(user_id: str, payload: RoleChange, request: Request):
-    identity = current(request, fresh=True, superadmin=True)
+    identity = current(request, superadmin=True)
     with store.transaction() as connection:
         admin_target(connection, identity, user_id)
+        consume_verification(connection, identity, request)
         connection.execute(
             update(store.users).where(store.users.c.id == user_id).values(role=payload.role)
         )
@@ -796,9 +835,10 @@ def update_role(user_id: str, payload: RoleChange, request: Request):
 
 @router.put("/users/{user_id}/active")
 def update_active(user_id: str, payload: ActiveChange, request: Request):
-    identity = current(request, fresh=True, superadmin=True)
+    identity = current(request, superadmin=True)
     with store.transaction() as connection:
         admin_target(connection, identity, user_id)
+        consume_verification(connection, identity, request)
         connection.execute(
             update(store.users).where(store.users.c.id == user_id).values(active=payload.active)
         )
@@ -826,7 +866,7 @@ def list_roles(request: Request):
 
 @router.put("/roles/{role}")
 def update_permissions(role: str, payload: PermissionChange, request: Request):
-    identity = current(request, fresh=True, superadmin=True)
+    identity = current(request, superadmin=True)
     allowed = set(payload.permissions)
     if (
         role not in {"admin", "user"}
@@ -842,6 +882,7 @@ def update_permissions(role: str, payload: PermissionChange, request: Request):
         actor = locked_user(connection, identity)
         if actor["role"] != "superadmin":
             raise HTTPException(403, "仅超级管理员可操作")
+        consume_verification(connection, identity, request)
         connection.execute(
             update(store.policies)
             .where(store.policies.c.role == role)

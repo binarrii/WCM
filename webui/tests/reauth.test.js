@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { finishReauthentication, reauthMethods, reauthState, withReauthentication } from '../src/services/reauth.js';
 
-const required = () => Object.assign(new Error('verification required'), { response: { status: 403, headers: { 'x-wcm-reauth': 'required' } } });
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 test('verification prefers usable Passkey, then bound 2FA, then password', () => {
@@ -12,53 +11,67 @@ test('verification prefers usable Passkey, then bound 2FA, then password', () =>
   assert.deepEqual(reauthMethods({ passkeys: [], totp_enabled: false }, false), ['password']);
 });
 
-test('successful verification resumes the original operation once', async () => {
+const operation = 'PUT /api/v1/auth/roles/user';
+
+test('every write verifies first, including back-to-back writes', async () => {
   let calls = 0;
-  const result = withReauthentication(async () => { if (++calls === 1) throw required(); return 'saved'; });
-  await tick();
-  assert.equal(reauthState.open, true);
-  assert.equal(calls, 1);
-  finishReauthentication(true);
-  assert.equal(await result, 'saved');
+  for (const token of ['proof-one', 'proof-two']) {
+    const result = withReauthentication(operation, async config => { calls++; return config.headers['X-WCM-Verification']; });
+    await tick();
+    assert.equal(reauthState.open, true);
+    assert.equal(reauthState.operation, operation);
+    assert.equal(calls, token === 'proof-one' ? 0 : 1);
+    finishReauthentication(token);
+    assert.equal(await result, token);
+    assert.equal(reauthState.open, false);
+  }
   assert.equal(calls, 2);
-  assert.equal(reauthState.open, false);
 });
 
-test('cancel leaves the protected operation unsubmitted', async () => {
+test('cancel never sends the mutation request', async () => {
   let calls = 0;
-  const result = withReauthentication(async () => { calls++; throw required(); });
+  const result = withReauthentication(operation, async () => { calls++; });
   const rejected = assert.rejects(result, { code: 'REAUTH_CANCELLED' });
   await tick();
-  finishReauthentication(false);
+  finishReauthentication();
   await rejected;
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
 });
 
-test('concurrent requests share one dialog and are released together', async () => {
-  const counts = [0, 0];
-  const results = counts.map((_, i) => withReauthentication(async () => { if (++counts[i] === 1) throw required(); return i; }));
+test('concurrent actions cannot share one verification', async () => {
+  let secondCalls = 0;
+  const first = withReauthentication(operation, async () => 'saved');
+  await assert.rejects(withReauthentication('POST /api/v1/auth/password', async () => { secondCalls++; }), { code: 'REAUTH_BUSY' });
+  assert.equal(reauthState.operation, operation);
+  finishReauthentication('first-proof');
+  assert.equal(await first, 'saved');
+  assert.equal(secondCalls, 0);
+  const second = withReauthentication('POST /api/v1/auth/password', async () => { secondCalls++; });
   await tick();
-  finishReauthentication(true);
-  assert.deepEqual(await Promise.all(results), [0, 1]);
-  assert.deepEqual(counts, [2, 2]);
+  assert.equal(reauthState.open, true);
+  finishReauthentication('second-proof');
+  await second;
+  assert.equal(secondCalls, 1);
 });
 
-test('ordinary permission, CSRF and network failures never open the verification dialog', async () => {
-  for (const response of [{ status: 403, data: { detail: '权限不足' } }, { status: 403, data: { detail: 'CSRF 无效' } }, { status: 500 }]) {
+test('write failures never reuse the grant or automatically retry a mutation', async () => {
+  for (const status of [400, 403, 500]) {
     let calls = 0;
-    await assert.rejects(withReauthentication(async () => { calls++; throw Object.assign(new Error('failed'), { response }); }));
+    const result = withReauthentication(operation, async () => { calls++; throw Object.assign(new Error('failed'), { response: { status } }); });
+    const rejected = assert.rejects(result);
+    await tick();
+    finishReauthentication('single-use-proof');
+    await rejected;
     assert.equal(calls, 1);
     assert.equal(reauthState.open, false);
   }
 });
 
-test('a repeated verification rejection does not loop or duplicate further requests', async () => {
-  let calls = 0;
-  const result = withReauthentication(async () => { calls++; throw required(); });
-  const rejected = assert.rejects(result);
-  await tick();
+test('a boolean success signal cannot release a write without a grant', async () => {
+  let called = false;
+  const result = withReauthentication(operation, async () => { called = true; });
+  const rejected = assert.rejects(result, { code: 'REAUTH_CANCELLED' });
   finishReauthentication(true);
   await rejected;
-  assert.equal(calls, 2);
-  assert.equal(reauthState.open, false);
+  assert.equal(called, false);
 });

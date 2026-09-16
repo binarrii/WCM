@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { Fingerprint, KeyRound, ShieldCheck, X } from '@lucide/vue';
 import api from '../services/api';
-import { acceptSession, authError } from '../services/auth';
+import { authError } from '../services/auth';
 import { passkeyAvailable, usePasskey } from '../services/passkeys';
 import { finishReauthentication, reauthMethods, reauthState } from '../services/reauth';
 
@@ -50,18 +50,19 @@ async function submit() {
   try {
     let result;
     const config = { signal: active.signal };
+    const operation = reauthState.operation;
     if (method.value === 'passkey') {
-      const { data } = await api.post('/auth/passkeys/reauthenticate/options', {}, config);
+      const { data } = await api.post('/auth/passkeys/reauthenticate/options', { operation }, config);
       const credential = await usePasskey(data.options, active.signal);
       result = await api.post('/auth/passkeys/reauthenticate/verify', { challenge_id: data.challenge_id, credential }, config);
     } else {
       result = await api.post('/auth/reauthenticate', method.value === 'totp'
-        ? { method: 'totp', code: code.value }
-        : { method: 'password', password: password.value }, config);
+        ? { operation, method: 'totp', code: code.value }
+        : { operation, method: 'password', password: password.value }, config);
     }
     if (active.signal.aborted) return;
-    acceptSession(result.data);
-    finishReauthentication(true);
+    if (!result.data.verification_token) throw new Error('未取得本次操作的验证凭证，请重试');
+    finishReauthentication(result.data.verification_token);
   } catch (reason) {
     if (!active.signal.aborted) error.value = authError(reason);
   } finally {
@@ -92,11 +93,11 @@ onBeforeUnmount(cancel);
       <button class="reauth-close" type="button" aria-label="取消身份验证" @click="cancel"><X /></button>
       <div class="reauth-icon"><component :is="icons[method] || ShieldCheck" /></div>
       <h2 id="reauth-title">验证身份</h2>
-      <p id="reauth-description" class="reauth-description">为保障账户安全，请先完成验证。验证成功后继续当前操作，5 分钟内无需重复验证。</p>
+      <p id="reauth-description" class="reauth-description">为保障账户安全，请先完成验证。验证仅用于当前操作，每次修改都需要重新验证。</p>
       <p v-if="loading" class="auth-muted" role="status">正在加载验证方式…</p>
       <form v-else-if="method" class="auth-form" @submit.prevent="submit"><fieldset :disabled="busy">
         <p v-if="method === 'passkey'" class="reauth-method-description">使用此账户的 Passkey，通过指纹、面容或设备 PIN 验证。</p>
-        <label v-else-if="method === 'totp'">2FA 验证码<input v-model="code" autocomplete="one-time-code" autofocus required minlength="6" maxlength="64" placeholder="输入验证码或一次性恢复码" /><small class="auth-hint">打开已绑定的验证器，输入当前验证码；也可使用一次性恢复码。</small></label>
+        <label v-else-if="method === 'totp'">2FA 验证码<input v-model="code" autocomplete="one-time-code" autofocus required minlength="6" maxlength="64" placeholder="输入验证码或一次性恢复码" /><small class="auth-hint">请输入尚未使用的验证码，或使用一次性恢复码。</small></label>
         <label v-else>当前密码<input v-model="password" type="password" autocomplete="current-password" autofocus required maxlength="128" placeholder="输入当前登录密码" /></label>
         <p v-if="error" class="auth-error" role="alert">{{ error }}</p>
         <button class="auth-primary" type="submit">{{ busy ? '验证中…' : method === 'passkey' ? '使用 Passkey 验证' : '验证并继续' }}</button>

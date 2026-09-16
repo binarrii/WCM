@@ -6,6 +6,7 @@ import { auth, roleNames, acceptSession, authError } from '../services/auth';
 import { createPasskey, passkeyAvailable } from '../services/passkeys';
 import { withReauthentication } from '../services/reauth';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import PasswordDialog from '../components/PasswordDialog.vue';
 import './auth.css';
 
 const security = ref({ passkeys: [], totp_enabled: false, recovery_codes_remaining: 0 });
@@ -13,17 +14,18 @@ const setup = ref(null); const code = ref(''); const recoveryCodes = ref([]);
 const passkeyName = ref('我的设备'); const passkeySupported = passkeyAvailable();
 const busy = ref(false); const error = ref(''); const notice = ref(''); const pendingKey = ref(null);
 const action = ref('');
-const newPassword = ref(''); const confirmPassword = ref('');
 const load = async () => { security.value = (await api.get('/auth/security')).data; };
 async function perform(operation, message = '') {
   busy.value = true; error.value = ''; notice.value = '';
-  try { await withReauthentication(operation); await load(); notice.value = message; }
+  try { await operation(); await load(); notice.value = message; }
   catch (reason) { if (reason.code !== 'REAUTH_CANCELLED') error.value = authError(reason); }
   finally { busy.value = false; }
 }
 async function beginSetup() {
   recoveryCodes.value = []; code.value = '';
-  await perform(async () => { setup.value = (await api.post('/auth/2fa/setup')).data; });
+  await perform(async () => {
+    setup.value = (await withReauthentication('POST /api/v1/auth/2fa/setup', config => api.post('/auth/2fa/setup', {}, config))).data;
+  });
 }
 async function confirmSetup() {
   const pending = setup.value;
@@ -36,28 +38,26 @@ async function confirmSetup() {
 }
 async function bindPasskey() {
   await perform(async () => {
-    const { data } = await api.post('/auth/passkeys/register/options');
+    const { data } = await withReauthentication('POST /api/v1/auth/passkeys/register/options', config => api.post('/auth/passkeys/register/options', {}, config));
     const credential = await createPasskey(data.options);
     await api.post('/auth/passkeys/register/verify', { challenge_id: data.challenge_id, credential, name: passkeyName.value || '我的设备' });
   }, 'Passkey 已绑定，下次可使用指纹、面容或设备 PIN 登录。');
 }
 async function removePasskey() {
   const key = pendingKey.value; pendingKey.value = null;
-  await perform(async () => { await api.delete(`/auth/passkeys/${key.id}`); }, 'Passkey 已移除，其他设备的登录已退出。');
+  await perform(async () => { await withReauthentication(`DELETE /api/v1/auth/passkeys/${key.id}`, config => api.delete(`/auth/passkeys/${key.id}`, config)); }, 'Passkey 已移除，其他设备的登录已退出。');
 }
-function chooseAction(next) { action.value = next; newPassword.value = ''; confirmPassword.value = ''; error.value = ''; }
-async function sensitiveAction() {
-  if (action.value === 'password' && newPassword.value !== confirmPassword.value) { error.value = '两次输入的新密码不一致'; return; }
+function chooseAction(next) { action.value = next; error.value = ''; }
+async function sensitiveAction(newPassword) {
   const selected = action.value;
+  action.value = '';
+  const path = `/auth/${selected === 'password' ? 'password' : `2fa/${selected}`}`;
+  const payload = selected === 'password' ? { new_password: newPassword } : {};
   await perform(async () => {
-    const payload = {};
-    if (selected === 'password') payload.new_password = newPassword.value;
-    const { data } = await api.post(`/auth/${selected === 'password' ? 'password' : `2fa/${selected}`}`, payload);
+    const { data } = await withReauthentication(`POST /api/v1${path}`, config => api.post(path, payload, config));
     if (data.user) acceptSession(data);
     recoveryCodes.value = data.recovery_codes || [];
-    chooseAction('');
   }, selected === 'password' ? '密码已更新，其他登录已退出。' : selected === 'disable' ? '双重验证已关闭，其他登录已退出。' : '恢复码已更新，旧恢复码已失效。');
-  newPassword.value = ''; confirmPassword.value = '';
 }
 function downloadCodes() {
   const url = URL.createObjectURL(new Blob([`WCM ${auth.user.username} 一次性恢复码\n每个恢复码仅能使用一次，请离线妥善保存。\n\n${recoveryCodes.value.join('\n')}\n`], { type: 'text/plain;charset=utf-8' }));
@@ -76,22 +76,19 @@ onMounted(() => perform(load));
       <div class="security-actions"><button class="auth-primary" @click="downloadCodes">下载恢复码</button><button class="auth-secondary" @click="recoveryCodes = []">已保存，关闭</button></div>
     </section>
     <div class="security-grid">
-      <div class="security-column">
-        <section class="security-card">
-          <div class="security-title"><ShieldCheck /><h2>双重验证 · 2FA</h2><span :class="['security-state', { enabled: security.totp_enabled }]">{{ security.totp_enabled ? '已启用' : '未启用' }}</span></div>
-          <p>绑定 Google Authenticator、Microsoft Authenticator 等验证器。使用密码登录时，需要额外输入验证码。</p>
-          <template v-if="!security.totp_enabled">
-            <button v-if="!setup" class="auth-primary" :disabled="busy" @click="beginSetup">绑定验证器</button>
-            <form v-else class="auth-form" @submit.prevent="confirmSetup"><fieldset :disabled="busy">
-              <p>1. 在验证器中扫描二维码，或手动输入密钥。</p><img class="totp-qr" :src="setup.qr_code" alt="验证器绑定二维码" /><code class="totp-secret">{{ setup.secret }}</code>
-              <label>2. 输入 6 位验证码<input v-model="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" required maxlength="6" /></label>
-              <div class="security-actions"><button class="auth-primary" type="submit">验证并启用</button><button type="button" class="auth-secondary" @click="setup = null">取消</button></div>
-            </fieldset></form>
-          </template>
-          <template v-else><p>剩余恢复码：{{ security.recovery_codes_remaining }} 个</p><div class="security-actions"><button class="auth-secondary" :disabled="busy" @click="chooseAction('recovery-codes')">重新生成恢复码</button><button class="auth-secondary danger" :disabled="busy" @click="chooseAction('disable')">关闭 2FA</button></div></template>
-        </section>
-        <section class="security-card"><div class="security-title"><KeyRound /><h2>登录密码</h2></div><p>使用至少 12 个字符的长密码。修改后其他设备需要重新登录。</p><button class="auth-secondary" :disabled="busy" @click="chooseAction('password')">修改密码</button></section>
-      </div>
+      <section class="security-card">
+        <div class="security-title"><ShieldCheck /><h2>双重验证 · 2FA</h2><span :class="['security-state', { enabled: security.totp_enabled }]">{{ security.totp_enabled ? '已启用' : '未启用' }}</span></div>
+        <p>绑定 Google Authenticator、Microsoft Authenticator 等验证器。使用密码登录时，需要额外输入验证码。</p>
+        <template v-if="!security.totp_enabled">
+          <button v-if="!setup" class="auth-primary" :disabled="busy" @click="beginSetup">绑定验证器</button>
+          <form v-else class="auth-form" @submit.prevent="confirmSetup"><fieldset :disabled="busy">
+            <p>1. 在验证器中扫描二维码，或手动输入密钥。</p><img class="totp-qr" :src="setup.qr_code" alt="验证器绑定二维码" /><code class="totp-secret">{{ setup.secret }}</code>
+            <label>2. 输入 6 位验证码<input v-model="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" required maxlength="6" /></label>
+            <div class="security-actions"><button class="auth-primary" type="submit">验证并启用</button><button type="button" class="auth-secondary" @click="setup = null">取消</button></div>
+          </fieldset></form>
+        </template>
+        <template v-else><p>剩余恢复码：{{ security.recovery_codes_remaining }} 个</p><div class="security-actions"><button class="auth-secondary" :disabled="busy" @click="chooseAction('recovery-codes')">重新生成恢复码</button><button class="auth-secondary danger" :disabled="busy" @click="chooseAction('disable')">关闭 2FA</button></div></template>
+      </section>
       <section class="security-card">
         <div class="security-title"><Fingerprint /><h2>Passkey</h2><span class="security-state">{{ security.passkeys.length }} 个</span></div>
         <p>使用指纹、面容或设备 PIN 登录。Passkey 已包含设备持有与身份验证，登录时无需再输入动态验证码。</p>
@@ -99,12 +96,10 @@ onMounted(() => perform(load));
         <ul class="passkey-list"><li v-for="key in security.passkeys" :key="key.id"><div><strong>{{ key.name }}</strong><small>{{ new Date(key.created_at * 1000).toLocaleDateString('zh-CN') }}</small></div><button class="auth-link danger" :disabled="busy" @click="pendingKey = key">移除</button></li></ul>
         <form class="auth-form" @submit.prevent="bindPasskey"><fieldset :disabled="busy || !passkeySupported"><label>设备名称<input v-model="passkeyName" maxlength="80" required placeholder="例如：办公电脑" /></label><button class="auth-secondary" type="submit">添加 Passkey</button></fieldset></form>
       </section>
+      <section class="security-card"><div class="security-title"><KeyRound /><h2>登录密码</h2></div><p>使用至少 12 个字符的长密码。修改后其他设备需要重新登录。</p><button class="auth-secondary" :disabled="busy" @click="chooseAction('password')">修改密码</button></section>
     </div>
-    <section v-if="action" class="security-card sensitive-panel">
-      <h2>{{ action === 'password' ? '修改登录密码' : action === 'disable' ? '确认关闭双重验证' : '重新生成恢复码' }}</h2>
-      <p v-if="action === 'disable'">关闭后，密码登录将不再要求验证器验证码。</p><p v-if="action === 'recovery-codes'">生成后，所有旧恢复码立即失效。</p>
-      <form class="auth-form" @submit.prevent="sensitiveAction"><fieldset :disabled="busy"><template v-if="action === 'password'"><label>新密码<input v-model="newPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128" /></label><label>确认新密码<input v-model="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128" /></label></template><div class="security-actions"><button class="auth-primary" type="submit">{{ busy ? '处理中…' : '确认' }}</button><button class="auth-secondary" type="button" @click="chooseAction('')">取消</button></div></fieldset></form>
-    </section>
+    <PasswordDialog :open="action === 'password'" @confirm="sensitiveAction" @cancel="chooseAction('')" />
+    <ConfirmDialog :open="action === 'disable' || action === 'recovery-codes'" :title="action === 'disable' ? '关闭双重验证' : '重新生成恢复码'" :message="action === 'disable' ? '关闭后，密码登录将不再要求验证器验证码。继续操作前需要验证身份。' : '生成后，所有旧恢复码立即失效。继续操作前需要验证身份。'" :busy="busy" :variant="action === 'disable' ? 'danger' : 'primary'" confirm-label="继续验证身份" @confirm="sensitiveAction()" @cancel="chooseAction('')" />
     <ConfirmDialog :open="Boolean(pendingKey)" title="移除 Passkey" :message="`移除后将无法使用 ${pendingKey?.name || ''} 登录，其他设备的会话也会退出。`" :busy="busy" @confirm="removePasskey" @cancel="pendingKey = null" />
   </main>
 </template>

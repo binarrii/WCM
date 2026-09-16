@@ -82,8 +82,25 @@ def password_login(client, name="root"):
     )
 
 
+def verification(client, method, path, proof=None):
+    data = accept(
+        client,
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"operation": f"{method} {path}", **(proof or {"password": PASSWORD})},
+        ),
+    )
+    return {"X-WCM-Verification": data["verification_token"]}
+
+
+def authorized(client, method, path, *, proof=None, **kwargs):
+    headers = verification(client, method, path, proof)
+    headers.update(kwargs.pop("headers", {}))
+    return client.request(method, path, headers=headers, **kwargs)
+
+
 def setup_totp(client):
-    pending = accept(client, client.post("/api/v1/auth/2fa/setup"))
+    pending = accept(client, authorized(client, "POST", "/api/v1/auth/2fa/setup"))
     code = pyotp.TOTP(pending["secret"]).now()
     payload = accept(
         client,
@@ -184,7 +201,9 @@ def test_readonly_user_can_subscribe_but_not_submit_on_shared_socket(client, mon
     other = sibling(client)
     signup(other, "viewer")
     assert (
-        client.put("/api/v1/auth/roles/user", json={"permissions": ["review.read"]}).status_code
+        authorized(
+            client, "PUT", "/api/v1/auth/roles/user", json={"permissions": ["review.read"]}
+        ).status_code
         == 200
     )
 
@@ -220,7 +239,9 @@ def test_role_permissions_and_revocation(client):
         == 403
     )
     assert (
-        client.put(f"/api/v1/auth/users/{user['id']}/role", json={"role": "admin"}).status_code
+        authorized(
+            client, "PUT", f"/api/v1/auth/users/{user['id']}/role", json={"role": "admin"}
+        ).status_code
         == 200
     )
     assert user_client.get("/api/v1/auth/me").status_code == 401
@@ -234,21 +255,32 @@ def test_role_permissions_and_revocation(client):
     )
     assert user_client.put("/api/v1/auth/roles/user", json={"permissions": []}).status_code == 403
     assert (
-        client.put(f"/api/v1/auth/users/{root['id']}/role", json={"role": "user"}).status_code
+        authorized(
+            client, "PUT", f"/api/v1/auth/users/{root['id']}/role", json={"role": "user"}
+        ).status_code
         == 400
     )
     assert (
-        client.put(f"/api/v1/auth/users/{root['id']}/active", json={"active": False}).status_code
+        authorized(
+            client, "PUT", f"/api/v1/auth/users/{root['id']}/active", json={"active": False}
+        ).status_code
         == 400
     )
     assert (
-        client.put("/api/v1/auth/roles/user", json={"permissions": ["system.manage"]}).status_code
+        authorized(
+            client, "PUT", "/api/v1/auth/roles/user", json={"permissions": ["system.manage"]}
+        ).status_code
         == 400
     )
-    assert client.put("/api/v1/auth/roles/admin", json={"permissions": []}).status_code == 200
+    assert (
+        authorized(client, "PUT", "/api/v1/auth/roles/admin", json={"permissions": []}).status_code
+        == 200
+    )
     assert user_client.get("/api/v1/parameters").status_code == 403
     assert (
-        client.put(f"/api/v1/auth/users/{user['id']}/active", json={"active": False}).status_code
+        authorized(
+            client, "PUT", f"/api/v1/auth/users/{user['id']}/active", json={"active": False}
+        ).status_code
         == 200
     )
     assert user_client.get("/api/v1/auth/me").status_code == 401
@@ -263,8 +295,11 @@ def test_role_permissions_and_revocation(client):
 def test_permission_dependencies_and_protected_system_permissions(client):
     signup(client)
     assert (
-        client.put(
-            "/api/v1/auth/roles/user", json={"permissions": ["review.run", "people.write"]}
+        authorized(
+            client,
+            "PUT",
+            "/api/v1/auth/roles/user",
+            json={"permissions": ["review.run", "people.write"]},
         ).status_code
         == 200
     )
@@ -272,7 +307,9 @@ def test_permission_dependencies_and_protected_system_permissions(client):
     assert set(roles["user"]) == {"review.run", "review.read", "people.write", "people.read"}
     assert client.put("/api/v1/auth/roles/superadmin", json={"permissions": []}).status_code == 400
     assert (
-        client.put("/api/v1/auth/roles/admin", json={"permissions": ["users.manage"]}).status_code
+        authorized(
+            client, "PUT", "/api/v1/auth/roles/admin", json={"permissions": ["users.manage"]}
+        ).status_code
         == 400
     )
 
@@ -300,11 +337,8 @@ def test_csrf_cors_and_stale_sessions(client):
         ).status_code
         == 403
     )
-    with store.transaction() as connection:
-        connection.execute(update(store.sessions).values(verified_at=time.time() - 301))
     assert client.post("/api/v1/auth/2fa/setup").status_code == 403
-    accept(client, client.post("/api/v1/auth/reauthenticate", json={"password": PASSWORD}))
-    assert client.post("/api/v1/auth/2fa/setup").status_code == 200
+    assert authorized(client, "POST", "/api/v1/auth/2fa/setup").status_code == 200
     with store.transaction() as connection:
         connection.execute(update(store.sessions).values(expires_at=time.time() - 1))
     assert client.get("/api/v1/auth/me").status_code == 401
@@ -365,7 +399,13 @@ def test_totp_pending_confirmation_recovery_and_replay(client):
     )
     accept(
         stranger,
-        stranger.post("/api/v1/auth/2fa/disable", json={"password": PASSWORD, "code": codes[1]}),
+        authorized(
+            stranger,
+            "POST",
+            "/api/v1/auth/2fa/disable",
+            proof={"method": "totp", "code": codes[1]},
+            json={},
+        ),
     )
     assert not stranger.get("/api/v1/auth/me").json()["user"]["totp_enabled"]
     assert client.get("/api/v1/auth/me").status_code == 401
@@ -373,7 +413,7 @@ def test_totp_pending_confirmation_recovery_and_replay(client):
 
 def test_setup_challenge_is_session_bound_and_cannot_overwrite_mfa(client):
     signup(client)
-    pending = client.post("/api/v1/auth/2fa/setup").json()
+    pending = authorized(client, "POST", "/api/v1/auth/2fa/setup").json()
     second = sibling(client)
     password_login(second)
     response = second.post(
@@ -384,7 +424,7 @@ def test_setup_challenge_is_session_bound_and_cannot_overwrite_mfa(client):
     assert not second.get("/api/v1/auth/security").json()["totp_enabled"]
     setup_totp(second)
     assert client.get("/api/v1/auth/me").status_code == 401
-    assert second.post("/api/v1/auth/2fa/setup").status_code == 409
+    assert second.post("/api/v1/auth/2fa/setup").status_code == 403
 
 
 def test_password_change_invalidates_sessions_and_pending_logins(client):
@@ -394,9 +434,12 @@ def test_password_change_invalidates_sessions_and_pending_logins(client):
     pending = password_login(second)
     accept(
         client,
-        client.post(
+        authorized(
+            client,
+            "POST",
             "/api/v1/auth/password",
-            json={"password": PASSWORD, "code": codes[0], "new_password": PASSWORD + "changed"},
+            proof={"method": "totp", "code": codes[0]},
+            json={"new_password": PASSWORD + "changed"},
         ),
     )
     assert (
@@ -528,7 +571,7 @@ class Authenticator:
 
 
 def bind(client, authenticator):
-    pending = accept(client, client.post("/api/v1/auth/passkeys/register/options"))
+    pending = accept(client, authorized(client, "POST", "/api/v1/auth/passkeys/register/options"))
     return accept(
         client,
         client.post(
@@ -572,7 +615,7 @@ def test_real_passkey_registration_login_counter_and_removal(client):
         == 400
     )
     key_id = client.get("/api/v1/auth/security").json()["passkeys"][0]["id"]
-    assert client.delete(f"/api/v1/auth/passkeys/{key_id}").status_code == 200
+    assert authorized(client, "DELETE", f"/api/v1/auth/passkeys/{key_id}").status_code == 200
     assert second.get("/api/v1/auth/me").status_code == 401
 
 
@@ -611,7 +654,7 @@ def test_passkey_requires_secure_configured_origin_and_verified_registration(cli
         ).status_code
         == 403
     )
-    pending = client.post("/api/v1/auth/passkeys/register/options").json()
+    pending = authorized(client, "POST", "/api/v1/auth/passkeys/register/options").json()
     bad = Authenticator().register(pending["options"], uv=False)
     assert (
         client.post(
@@ -628,56 +671,122 @@ def test_user_cannot_remove_another_users_passkey(client):
     key_id = client.get("/api/v1/auth/security").json()["passkeys"][0]["id"]
     other = sibling(client)
     signup(other, "member")
-    assert other.delete(f"/api/v1/auth/passkeys/{key_id}").status_code == 404
+    assert authorized(other, "DELETE", f"/api/v1/auth/passkeys/{key_id}").status_code == 404
     assert len(client.get("/api/v1/auth/security").json()["passkeys"]) == 1
 
 
-def expire_verification(client):
+def test_login_and_legacy_verified_time_never_authorize_mutations(client):
+    signup(client)
     with store.transaction() as connection:
-        connection.execute(
-            update(store.sessions)
-            .where(store.sessions.c.id == store.digest(client.cookies.get(store.COOKIE)))
-            .values(verified_at=time.time() - 301)
+        connection.execute(update(store.sessions).values(verified_at=time.time() + 300))
+    assert "recently_verified" not in client.get("/api/v1/auth/security").json()
+    for path, body in [
+        ("/2fa/setup", {}),
+        ("/password", {"new_password": PASSWORD + "new"}),
+        ("/passkeys/register/options", {}),
+    ]:
+        response = client.post("/api/v1/auth" + path, json=body)
+        assert response.status_code == 403
+        assert response.headers["X-WCM-Reauth"] == "required"
+    assert client.put("/api/v1/auth/roles/user", json={"permissions": []}).status_code == 403
+
+
+def test_verification_is_scoped_to_one_request_and_does_not_refresh_session(client):
+    signup(client)
+    path = "/api/v1/auth/roles/user"
+    headers = verification(client, "PUT", path)
+    assert client.put(path, json={"permissions": []}).status_code == 403
+    assert client.put(path, json={"permissions": []}, headers=headers).status_code == 200
+    assert (
+        client.put(path, json={"permissions": ["people.read"]}, headers=headers).status_code == 400
+    )
+    assert client.put(path, json={"permissions": ["people.read"]}).status_code == 403
+    assert authorized(client, "PUT", path, json={"permissions": ["people.read"]}).status_code == 200
+
+
+@pytest.mark.parametrize("other_target", ["/api/v1/auth/roles/admin", "/api/v1/auth/2fa/setup"])
+def test_grant_cannot_authorize_another_operation_or_target(client, other_target):
+    signup(client)
+    headers = verification(client, "PUT", "/api/v1/auth/roles/user")
+    method = "PUT" if "/roles/" in other_target else "POST"
+    assert (
+        client.request(
+            method,
+            other_target,
+            json={"permissions": []} if method == "PUT" else {},
+            headers=headers,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.put("/api/v1/auth/roles/user", json={"permissions": []}, headers=headers).status_code
+        == 400
+    )
+
+
+@pytest.mark.parametrize("other_account", [False, True])
+def test_grant_cannot_cross_sessions_or_accounts(client, other_account):
+    signup(client)
+    path = "/api/v1/auth/2fa/setup"
+    headers = verification(client, "POST", path)
+    other = sibling(client)
+    if other_account:
+        signup(other, "member")
+    else:
+        password_login(other)
+    assert other.post(path, headers=headers).status_code == 400
+    assert client.post(path, headers=headers).status_code == 200
+
+
+def test_one_grant_is_consumed_atomically_by_concurrent_requests(client):
+    signup(client)
+    path = "/api/v1/auth/roles/user"
+    headers = verification(client, "PUT", path)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(
+            pool.map(
+                lambda _: client.put(path, json={"permissions": []}, headers=headers), range(2)
+            )
         )
+    assert sorted(r.status_code for r in responses) == [200, 400]
+
+
+def test_expired_grant_and_changed_session_are_rejected(client):
+    signup(client)
+    path = "/api/v1/auth/2fa/setup"
+    headers = verification(client, "POST", path)
+    with store.transaction() as connection:
+        connection.execute(update(store.challenges).values(expires_at=time.time() - 1))
+    assert client.post(path, headers=headers).status_code == 400
+    headers = verification(client, "POST", path)
+    password_login(client)
+    assert client.post(path, headers=headers).status_code == 400
 
 
 def test_totp_reauthentication_requires_enrollment_and_prevents_replay(client):
     signup(client)
+    operation = "POST /api/v1/auth/2fa/recovery-codes"
     assert (
         client.post(
-            "/api/v1/auth/reauthenticate", json={"method": "totp", "code": "000000"}
+            "/api/v1/auth/reauthenticate",
+            json={"operation": operation, "method": "totp", "code": "000000"},
         ).status_code
         == 400
     )
     secret, codes = setup_totp(client)
-    expire_verification(client)
     assert (
-        client.post("/api/v1/auth/reauthenticate", json={"password": PASSWORD}).status_code == 400
+        client.post(
+            "/api/v1/auth/reauthenticate", json={"operation": operation, "password": PASSWORD}
+        ).status_code
+        == 400
     )
     code = pyotp.TOTP(secret).at((int(time.time() // 30) + 1) * 30)
-    old_cookie = client.cookies.get(store.COOKIE)
-    accept(
-        client, client.post("/api/v1/auth/reauthenticate", json={"method": "totp", "code": code})
-    )
-    assert client.cookies.get(store.COOKIE) != old_cookie
-    assert store.identity(old_cookie) is None
-    assert client.get("/api/v1/auth/security").json()["recently_verified"] is True
-    assert (
-        client.post(
-            "/api/v1/auth/reauthenticate", json={"method": "totp", "code": code}
-        ).status_code
-        == 400
-    )
-    accept(
-        client,
-        client.post("/api/v1/auth/reauthenticate", json={"method": "totp", "code": codes[0]}),
-    )
-    assert (
-        client.post(
-            "/api/v1/auth/reauthenticate", json={"method": "totp", "code": codes[0]}
-        ).status_code
-        == 400
-    )
+    proof = {"operation": operation, "method": "totp", "code": code}
+    accept(client, client.post("/api/v1/auth/reauthenticate", json=proof))
+    assert client.post("/api/v1/auth/reauthenticate", json=proof).status_code == 400
+    proof["code"] = codes[0]
+    accept(client, client.post("/api/v1/auth/reauthenticate", json=proof))
+    assert client.post("/api/v1/auth/reauthenticate", json=proof).status_code == 400
 
 
 @pytest.mark.parametrize(
@@ -688,41 +797,58 @@ def test_totp_reauthentication_requires_enrollment_and_prevents_replay(client):
         ("/2fa/recovery-codes", {}),
     ],
 )
-def test_sensitive_actions_use_recent_verification_and_reject_stale_session(client, path, payload):
+def test_sensitive_actions_always_need_a_new_proof(client, path, payload):
     signup(client)
     _, codes = setup_totp(client)
-    expire_verification(client)
-    blocked = client.post("/api/v1/auth" + path, json=payload)
-    assert blocked.status_code == 403
-    assert blocked.headers["X-WCM-Reauth"] == "required"
-    assert client.get("/api/v1/auth/security").json()["totp_enabled"] is True
+    path = "/api/v1/auth" + path
+    assert client.post(path, json=payload).status_code == 403
     accept(
         client,
-        client.post("/api/v1/auth/reauthenticate", json={"method": "totp", "code": codes[0]}),
+        authorized(client, "POST", path, proof={"method": "totp", "code": codes[0]}, json=payload),
     )
-    accept(client, client.post("/api/v1/auth" + path, json=payload))
+    assert client.post("/api/v1/auth/password", json={"new_password": PASSWORD}).status_code == 403
+
+
+def test_verification_is_required_for_each_admin_write(client):
+    signup(client)
+    other = sibling(client)
+    user = signup(other, "member")["user"]
+    for suffix, payload in [("role", {"role": "admin"}), ("active", {"active": False})]:
+        path = f"/api/v1/auth/users/{user['id']}/{suffix}"
+        assert client.put(path, json=payload).status_code == 403
+        assert authorized(client, "PUT", path, json=payload).status_code == 200
+        assert client.put(path, json=payload).status_code == 403
 
 
 def test_reauthentication_rejects_empty_password_and_is_rate_limited(client):
     signup(client)
     for _ in range(10):
         assert (
-            client.post("/api/v1/auth/reauthenticate", json={"method": "password"}).status_code
+            client.post(
+                "/api/v1/auth/reauthenticate",
+                json={"operation": "POST /api/v1/auth/password", "method": "password"},
+            ).status_code
             == 400
         )
     assert (
-        client.post("/api/v1/auth/reauthenticate", json={"password": PASSWORD}).status_code == 429
+        client.post(
+            "/api/v1/auth/reauthenticate",
+            json={"operation": "POST /api/v1/auth/password", "password": PASSWORD},
+        ).status_code
+        == 429
     )
 
 
 @pytest.mark.parametrize("without_handle", [False, True])
-def test_real_passkey_reauthentication_scopes_account_and_rotates_session(client, without_handle):
+def test_real_passkey_produces_a_single_operation_grant(client, without_handle):
     user = signup(client)["user"]
     authenticator = Authenticator()
     bind(client, authenticator)
-    expire_verification(client)
-    old_cookie = client.cookies.get(store.COOKIE)
-    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
+    operation = "POST /api/v1/auth/password"
+    pending = accept(
+        client,
+        client.post("/api/v1/auth/passkeys/reauthenticate/options", json={"operation": operation}),
+    )
     assert pending["options"]["userVerification"] == "required"
     assert [item["id"] for item in pending["options"]["allowCredentials"]] == [
         b64(authenticator.id)
@@ -731,29 +857,26 @@ def test_real_passkey_reauthentication_scopes_account_and_rotates_session(client
     if without_handle:
         credential["response"].pop("userHandle")
     assertion = {"challenge_id": pending["challenge_id"], "credential": credential}
-    assert (
-        accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion))[
-            "user"
-        ]["id"]
-        == user["id"]
+    grant = accept(
+        client, client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion)
     )
-    assert store.identity(old_cookie) is None
-    assert client.get("/api/v1/auth/security").json()["recently_verified"] is True
     assert (
         client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code
         == 400
     )
-    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
     assert (
+        client.post("/api/v1/auth/password", json={"new_password": PASSWORD + "new"}).status_code
+        == 403
+    )
+    accept(
+        client,
         client.post(
-            "/api/v1/auth/passkeys/reauthenticate/verify",
-            json={
-                "challenge_id": pending["challenge_id"],
-                "credential": authenticator.authenticate(pending["options"], user["id"]),
-            },
-        ).status_code
-        == 400
-    )  # Reused nonzero authenticator counter.
+            "/api/v1/auth/password",
+            json={"new_password": PASSWORD + "new"},
+            headers={"X-WCM-Verification": grant["verification_token"]},
+        ),
+    )
+    assert client.post("/api/v1/auth/password", json={"new_password": PASSWORD}).status_code == 403
 
 
 @pytest.mark.parametrize(
@@ -763,8 +886,13 @@ def test_passkey_reauthentication_rejects_invalid_proofs(client, invalid):
     user = signup(client)["user"]
     authenticator = Authenticator()
     bind(client, authenticator)
-    expire_verification(client)
-    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
+    pending = accept(
+        client,
+        client.post(
+            "/api/v1/auth/passkeys/reauthenticate/options",
+            json={"operation": "POST /api/v1/auth/password"},
+        ),
+    )
     options = dict(pending["options"])
     if invalid == "challenge":
         options["challenge"] = b64(b"wrong challenge")
@@ -787,10 +915,13 @@ def test_passkey_reauthentication_rejects_invalid_proofs(client, invalid):
         ).status_code
         == 400
     )
-    assert client.get("/api/v1/auth/security").json()["recently_verified"] is False
+    assert (
+        client.post("/api/v1/auth/password", json={"new_password": PASSWORD + "new"}).status_code
+        == 403
+    )
 
 
-def test_passkey_reauthentication_rejects_other_accounts_sessions_and_login_challenges(client):
+def test_passkey_proof_cannot_cross_session_user_or_purpose(client):
     user = signup(client)["user"]
     authenticator = Authenticator()
     bind(client, authenticator)
@@ -798,7 +929,13 @@ def test_passkey_reauthentication_rejects_other_accounts_sessions_and_login_chal
     other_user = signup(other, "member")["user"]
     other_authenticator = Authenticator()
     bind(other, other_authenticator)
-    pending = accept(client, client.post("/api/v1/auth/passkeys/reauthenticate/options"))
+    pending = accept(
+        client,
+        client.post(
+            "/api/v1/auth/passkeys/reauthenticate/options",
+            json={"operation": "POST /api/v1/auth/password"},
+        ),
+    )
     assertion = {
         "challenge_id": pending["challenge_id"],
         "credential": authenticator.authenticate(pending["options"], user["id"]),
@@ -806,52 +943,85 @@ def test_passkey_reauthentication_rejects_other_accounts_sessions_and_login_chal
     assert (
         other.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code == 400
     )
-    same_user = sibling(client)
-    password_login(same_user)
+    same = sibling(client)
+    password_login(same)
     assert (
-        same_user.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code
+        same.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code == 400
+    )
+    assertion["credential"] = other_authenticator.authenticate(pending["options"], other_user["id"])
+    assert (
+        client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code
         == 400
     )
+    login = client.post("/api/v1/auth/passkeys/login/options").json()
     assert (
         client.post(
             "/api/v1/auth/passkeys/reauthenticate/verify",
             json={
-                "challenge_id": pending["challenge_id"],
-                "credential": other_authenticator.authenticate(
-                    pending["options"], other_user["id"]
-                ),
-            },
-        ).status_code
-        == 400
-    )
-    pending_login = client.post("/api/v1/auth/passkeys/login/options").json()
-    assert (
-        client.post(
-            "/api/v1/auth/passkeys/reauthenticate/verify",
-            json={
-                "challenge_id": pending_login["challenge_id"],
-                "credential": authenticator.authenticate(pending_login["options"], user["id"]),
+                "challenge_id": login["challenge_id"],
+                "credential": authenticator.authenticate(login["options"], user["id"]),
             },
         ).status_code
         == 400
     )
 
 
-def test_passkey_reauthentication_requires_login_csrf_and_bound_credential(client):
-    assert client.post("/api/v1/auth/passkeys/reauthenticate/options").status_code == 401
+def test_old_enrollment_challenges_without_operation_proof_are_rejected(client):
+    user = signup(client)["user"]
+    identity = store.identity(client.cookies.get(store.COOKIE))
+    secret = pyotp.random_base32()
+    with store.transaction() as connection:
+        pending = store.challenge(
+            connection,
+            "totp-setup",
+            user["id"],
+            identity["session"]["id"],
+            {"secret": store.cipher().encrypt(secret.encode()).decode()},
+        )
+    assert (
+        client.post(
+            "/api/v1/auth/2fa/confirm",
+            json={"challenge_id": pending, "code": pyotp.TOTP(secret).now()},
+        ).status_code
+        == 400
+    )
+    assert client.get("/api/v1/auth/security").json()["totp_enabled"] is False
+
+
+def test_verification_endpoints_require_session_csrf_and_valid_scope(client):
+    operation = {"operation": "POST /api/v1/auth/password"}
+    assert (
+        client.post("/api/v1/auth/passkeys/reauthenticate/options", json=operation).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/reauthenticate", json={**operation, "password": PASSWORD}
+        ).status_code
+        == 401
+    )
     signup(client)
-    assert client.post("/api/v1/auth/passkeys/reauthenticate/options").status_code == 400
+    for path, payload in [
+        ("/passkeys/reauthenticate/options", operation),
+        ("/reauthenticate", {**operation, "password": PASSWORD}),
+    ]:
+        assert (
+            client.post(
+                "/api/v1/auth" + path, json=payload, headers={"X-CSRF-Token": "bad"}
+            ).status_code
+            == 403
+        )
     assert (
-        client.post(
-            "/api/v1/auth/passkeys/reauthenticate/options", headers={"X-CSRF-Token": "bad"}
-        ).status_code
-        == 403
+        client.post("/api/v1/auth/passkeys/reauthenticate/options", json=operation).status_code
+        == 400
+    )
+    assert (
+        client.post("/api/v1/auth/reauthenticate", json={"password": PASSWORD}).status_code == 422
     )
     assert (
         client.post(
             "/api/v1/auth/reauthenticate",
-            json={"password": PASSWORD},
-            headers={"X-CSRF-Token": "bad"},
+            json={"operation": "DELETE /api/v1/auth/users/all", "password": PASSWORD},
         ).status_code
-        == 403
+        == 422
     )

@@ -32,21 +32,30 @@
 验证器采用 TOTP（30 秒、6 位、允许前后一个时间步的时钟偏差）。必须验证成功后才启用。
 同一个验证码只能使用一次，刚用于绑定或重新验证的验证码不能再次使用，请等待下一个验证码。
 绑定时返回 10 个一次性恢复码，只显示一次，可下载离线保存；数据库只存恢复码 SHA-256。
-绑定/移除 Passkey、绑定/关闭 2FA、重新生成恢复码、修改密码及用户角色/权限，
-要求最近 5 分钟内完成登录或重新验证。验证过期时自动弹出身份验证对话框，成功后继续原操作；
-取消验证不会提交该操作。
+「用户与权限」和「账户安全」的每次修改均须单独完成二次身份验证；刚登录和刚完成其他验证也不能跳过。
+覆盖修改密码、启用/关闭 2FA、重新生成恢复码、绑定/移除 Passkey、修改用户角色、启停用户及保存角色权限。
+账户安全使用单列卡片，顺序为 2FA、Passkey、登录密码；修改密码在对话框中输入并确认。
 
 弹窗优先使用当前账户已绑定且浏览器可用的 **Passkey → 2FA → 密码**。
-已绑定 2FA 时可输入验证码或一次性恢复码，不再重复输入密码；未绑定 2FA 时使用密码。
+已绑定 2FA 时输入尚未使用的验证码或一次性恢复码；未绑定 2FA 时使用密码。
 Passkey 用户可主动切换至下一个可用方式；验证失败不会自动改用较弱方式。
-旧客户端的密码加验证码验证方式仍受支持，启用 2FA 后不能仅凭密码绕过第二因素。
+取消验证不会发送修改请求，失败请求也不会自动重试。
+
+验证成功签发一次性操作凭证，绑定当前用户、会话、HTTP 方法和目标资源，在数据库写事务内原子消费。
+该凭证仅授权一次操作，不能复用、跨操作、跨用户或跨会话使用；120 秒过期只限制未使用凭证的寿命，不提供免验证窗口。
+并发请求争用同一凭证时仅允许一个成功。登录及重新验证不再产生任何可复用的“最近已验证”状态。
+验证本身不轮换登录会话，避免破坏正在进行的绑定流程；密码、2FA 等变更仍按原规则撤销其他登录。
+
+绑定 2FA / Passkey 时，开始绑定前消费一次操作凭证，之后仅能用该用户会话中对应的一次性 challenge 完成这次绑定。
+确认步骤仍验证新验证码或 WebAuthn 证明，不能用绑定 challenge 授权其他修改。
+升级前未记录本次验证授权的旧绑定 challenge 会被拒绝，需重新开始绑定。
 
 Passkey 使用 WebAuthn，要求设备持有证明及用户验证（指纹、面容或设备 PIN）。
 使用 Passkey 登录时无需再输入 TOTP；密码登录在启用 2FA 后必须经过第二步验证。
 服务端校验 challenge、Origin、RP ID、用户句柄、用户验证标志、签名及签名计数。
 登录、注册及验证器绑定 challenge 5 分钟过期且只能使用一次，绑定 challenge 与当前会话关联。
 Passkey 重新验证使用独立用途的 challenge，绑定当前用户和当前会话，不能用登录 challenge 或他人的 Passkey 代替。
-重新验证成功后轮换会话 Cookie 和 CSRF 令牌。
+重新验证只返回当前操作的一次性凭证，不返回免验证会话。
 
 **251 当前只有 `http://10.252.25.251:8000`：密码和 2FA 可用，浏览器不允许在此入口使用 Passkey。**
 不要通过关闭浏览器安全检查解决此限制。提供 HTTPS 域名后配置如下：
@@ -91,19 +100,21 @@ Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用
 - 登录返回 `user, csrf_token` 及 Cookie，或 `mfa_required, challenge_id`。
 - `POST /login/2fa`：`challenge_id, code`，完成密码登录的第二步。
 - `GET /me`：当前用户与 CSRF；`POST /logout`：退出当前会话。
-- `POST /reauthenticate`：`method: password, password, code?` 或 `method: totp, code`；省略 `method` 兼容旧的密码加验证码模式。
-- `POST /password`：`new_password`，使用最近验证的会话；`/2fa/disable`、`/2fa/recovery-codes` 可传空对象。也兼容旧客户端同时提交 `password, code?`。
+- `POST /reauthenticate`：`operation, method: password, password, code?` 或 `operation, method: totp, code`，返回 `verification_token`。
+- `operation` 为实际目标，例如 `POST /api/v1/auth/password` 或 `PUT /api/v1/auth/users/{id}/role`；修改请求通过 `X-WCM-Verification` 头提交凭证。
+- `POST /password`：`new_password`；`/2fa/disable`、`/2fa/recovery-codes` 传空对象。均需独立操作凭证，内联密码/验证码不会替代凭证。
 - `GET /security`；`POST /2fa/setup`、`/2fa/confirm`、`/2fa/disable`、`/2fa/recovery-codes`。
 - `POST /passkeys/register/options`、`/passkeys/register/verify`、`/passkeys/login/options`、`/passkeys/login/verify`。
-- `POST /passkeys/reauthenticate/options`、`/passkeys/reauthenticate/verify`：当前账户的 Passkey 重新验证。
+- `POST /passkeys/reauthenticate/options`：传 `operation`；`/passkeys/reauthenticate/verify`：传 `challenge_id, credential`，返回绑定该操作的 `verification_token`。
 - `DELETE /passkeys/{id}`；`GET /users?page=1&query=...`；`PUT /users/{id}/role`、`/users/{id}/active`。
 - `GET /roles`；`PUT /roles/{role}`，传 `permissions` 字符串数组。
 
 脚本调用需自行登录并保存 Cookie，公开认证 POST 带 `X-WCM-Client: web`；后续写请求带
 `X-CSRF-Token: <登录响应的 csrf_token>`。浏览器 WebSocket 自动携带 Cookie，Origin 必须受信任。
 健康检查 `/api/v1/health` 保持公开，不需要登录。认证错误和受保护数据响应均禁止缓存。
-敏感操作的验证窗口过期时返回 `403` 和 `X-WCM-Reauth: required`；前端只对这种未执行操作的响应触发弹窗，
-成功后最多重试一次，不自动重试权限不足、CSRF 错误或网络失败。
+敏感操作缺少凭证时返回 `403` 和 `X-WCM-Reauth: required`；前端在发送每次修改请求前主动验证身份，
+不依赖拒绝后的重试，也不缓存验证成功状态。已消费或过期凭证返回错误，需重新发起操作并验证。
+
 
 ## 发布与回滚
 
@@ -138,6 +149,14 @@ Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用
 
 ### 身份验证弹窗更新
 
-- 重新验证按可用 Passkey、2FA、密码的优先级展示；取消不提交，成功后仅重试原操作一次。
+- 重新验证按可用 Passkey、2FA、密码的优先级展示；该版本的会话时间窗口已由下方逐次验证机制替代。
 - 后端完整回归 738 项通过、7 项外部服务测试跳过；认证专项 43 项通过；前端 106 项通过。
 - 浏览器核验密码和 2FA 验证后继续操作、错误输入、取消、Passkey 优先及备用方式切换、手机宽度布局。
+
+### 2026-09-16 逐次验证更新
+
+- 取消 5 分钟免验证逻辑，两个页面的每次修改均需一次独立验证；一次性凭证在数据库事务中消费。
+- 账户安全按 2FA、Passkey、登录密码单列铺满；修改密码使用独立对话框。
+- 验证覆盖凭证重放、并发争用、目标操作/用户/会话隔离、验证取消以及连续两次修改必须分别验证。
+- 本地后端回归 748 项通过、7 项外部服务测试跳过；前端 106 项通过，生产构建成功。
+- 浏览器核验单列宽度、密码弹窗与焦点恢复；连续修改和跨页面保存均在提交前重新弹出验证。

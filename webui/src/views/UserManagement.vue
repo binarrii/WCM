@@ -14,7 +14,7 @@ const load = async () => {
 };
 async function perform(operation, message = '') {
   busy.value = true; error.value = ''; notice.value = '';
-  try { await withReauthentication(operation); notice.value = message; }
+  try { await operation(); notice.value = message; }
   catch (reason) { if (reason.code !== 'REAUTH_CANCELLED') error.value = authError(reason); }
   finally { busy.value = false; }
 }
@@ -32,7 +32,7 @@ function confirmPolicy(role) {
 }
 async function save() {
   const change = pending.value; pending.value = null;
-  await perform(async () => { await api.put(change.path, change.payload); await load(); }, '修改已保存。');
+  await perform(async () => { await withReauthentication(`PUT /api/v1${change.path}`, config => api.put(change.path, change.payload, config)); await load(); }, '修改已保存。');
 }
 onMounted(() => perform(load));
 </script>
