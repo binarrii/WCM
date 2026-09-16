@@ -55,3 +55,17 @@ sudo docker compose -p wcm-cluster --env-file .env --env-file .env.insightface-r
 - 备份：`/home/aigc/wcm-cluster/backups/auth-picker-20260916-065933Z/`，两份源文件位于其中 `before/webui/src/views/`。
 - 部署前核验全部前端源码与基线一致、无在途审核；仅切换 WebUI，其余服务实例与启动时间未变。
 - 服务健康，九项线上资源与新构建产物逐一校验一致；资源版本为 `index-D02Ugnij.js` / `index-CLrdZcOc.css`。
+
+## 表单毛玻璃（同日）
+
+- 登录和注册卡片使用 80%–88% 不透明度的白色渐变、24px 背景模糊与柔和高光边框；输入区域轻微透明，文字不降低透明度。
+- 不支持背景模糊的浏览器回退到 96% 不透明度白底。效果仅限登录页卡片。
+- 生产构建、深色登录页及浅色注册页视觉检查通过；线上 DOM 已确认背景渐变与模糊生效。
+- 备份：`/home/aigc/wcm-cluster/backups/auth-glass-20260916-071154Z/`；新镜像：`wcm-cluster-webui:glass-20260916-071154z`。
+- 部署前完整核验前端源码及在途任务，仅更新 WebUI，其余容器 ID 和启动时间不变；服务健康，九项线上资源哈希与构建一致。
+- 资源版本：`index-DI5O_Oci.js` / `index-CjIETTvs.css`。
+
+后续按反馈提高通透感：白色渐变不透明度由 80%–88% 降至 74%–82%，模糊强度不变。
+构建及线上视觉检查通过，九项资源校验一致，其余服务实例未变。
+当前镜像：`wcm-cluster-webui:glass-20260916-071317z`；备份：`/home/aigc/wcm-cluster/backups/auth-glass-20260916-071317Z/`。
+当前资源版本：`index-DNGjd5dJ.js` / `index-CmaT-JpU.css`。

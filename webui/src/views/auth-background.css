@@ -39,7 +39,7 @@
 .auth-screen .auth-trust svg { color: var(--auth-accent); }
 .auth-screen .auth-card {
   --bg-card: #fff;
-  --bg-secondary: #f9faff;
+  --bg-secondary: rgb(249 250 255 / .68);
   --text-primary: #172137;
   --text-secondary: #55647a;
   --text-muted: #728098;
@@ -52,7 +52,16 @@
   --status-red-border: #f5caca;
   color: var(--text-primary);
   color-scheme: light;
-  box-shadow: 0 20px 70px #00000018;
+  background: rgb(255 255 255 / .96);
+  border-color: rgb(255 255 255 / .6);
+  box-shadow: 0 20px 70px #00000018, inset 0 1px 0 rgb(255 255 255 / .7);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .auth-screen .auth-card {
+    background: linear-gradient(135deg, rgb(255 255 255 / .82), rgb(255 255 255 / .74));
+    -webkit-backdrop-filter: blur(24px) saturate(120%);
+    backdrop-filter: blur(24px) saturate(120%);
+  }
 }
 @media (min-width: 801px) and (max-height: 820px) {
   .auth-screen { padding-top: 24px; padding-bottom: 24px; }
