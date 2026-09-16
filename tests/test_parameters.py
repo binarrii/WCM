@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from api import parameter_store, parameters
 from api.main import create_app
 from wcm_facerec import runtime_parameters
-from wcm_facerec.config import BUSINESS_PARAMETER_SPECS, settings
+from wcm_facerec.config import BUSINESS_PARAMETER_SPECS, Settings, settings
 
 EXPECTED_BUSINESS_PARAMETERS = {
     "insightface_base_url",
@@ -227,6 +227,35 @@ def test_secret_parameters_are_masked_but_remain_available_to_server_code():
 def test_builtin_parameter_type_group_and_domain_validation(key, value, value_type, group, options):
     with pytest.raises(ValueError):
         parameter_store._encoded_value(key, value, value_type, group, options)
+
+
+@pytest.mark.parametrize(
+    ("key", "default"),
+    [
+        ("face_neighbor_concurrency", 4),
+        ("guard_concurrency", 24),
+        ("insightface_concurrency", 32),
+        ("ocr_concurrency", 32),
+        ("visual_concurrency", 6),
+    ],
+)
+def test_optional_concurrency_defaults_and_parameter_round_trip(key, default):
+    assert Settings.model_fields[key].default == default
+    spec = BUSINESS_PARAMETER_SPECS[key]
+    for value in (0, -1, -10, 1, default):
+        encoded, _ = parameter_store._encoded_value(key, value, "number", spec.group, None)
+        item = parameter_store._cached_parameter(_row(key, encoded, "number", spec.group))
+        assert item.value == value
+    with pytest.raises(ValueError):
+        parameter_store._encoded_value(key, -0.5, "number", spec.group, None)
+
+
+@pytest.mark.parametrize("key", ["review_task_concurrency", "review_window_concurrency"])
+def test_task_and_window_concurrency_still_require_positive_integers(key):
+    assert Settings.model_fields[key].default == 4
+    for value in (0, -1):
+        with pytest.raises(ValueError):
+            parameter_store._encoded_value(key, value, "number", "审核调度", None)
 
 
 def test_builtin_rows_with_manually_changed_groups_are_rejected():

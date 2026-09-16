@@ -184,12 +184,13 @@ async def test_visual_fast_path_encodes_off_loop_once_without_jpeg_decode(monkey
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel", [False, True])
-async def test_auxiliary_decode_overlaps_bounded_face_calls_and_cleans_up(monkeypatch, cancel):
+@pytest.mark.parametrize("limit", [1, 2, 0, -3])
+async def test_auxiliary_decode_respects_optional_limit_and_cleans_up(monkeypatch, cancel, limit):
     from tests.test_window_review import install_video, sample
 
-    install_video(monkeypatch, [sample(i, i * 20) for i in range(6)])
+    install_video(monkeypatch, [sample(i, i * 20) for i in range(9)])
     monkeypatch.setattr(handlers.settings, "face_profile_optimization", True)
-    monkeypatch.setattr(handlers.settings, "face_neighbor_concurrency", 1)
+    monkeypatch.setattr(handlers.settings, "face_neighbor_concurrency", limit)
     monkeypatch.setattr(handlers.settings, "face_max_extra_call_ratio", 0.3)
     monkeypatch.setattr(
         review_windows,
@@ -201,7 +202,12 @@ async def test_auxiliary_decode_overlaps_bounded_face_calls_and_cleans_up(monkey
     )
     started = threading.Event()
     closed = threading.Event()
-    cancelled = asyncio.Event()
+    ready = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+    peak = 0
+    finished = 0
+    expected = min(limit, 3) if limit > 0 else 3
     produced = []
 
     def neighbors(path, targets, **kwargs):
@@ -215,15 +221,18 @@ async def test_auxiliary_decode_overlaps_bounded_face_calls_and_cleans_up(monkey
             closed.set()
 
     async def face(*args, auxiliary=False, **kwargs):
+        nonlocal active, peak, finished
         if auxiliary:
             started.set()
-            if cancel:
-                try:
-                    await asyncio.Event().wait()
-                finally:
-                    cancelled.set()
-            else:
-                await asyncio.sleep(0.01)
+            active += 1
+            peak = max(peak, active)
+            if active == expected:
+                ready.set()
+            try:
+                await release.wait()
+            finally:
+                active -= 1
+                finished += 1
         return handlers.FaceFrameResult([])
 
     monkeypatch.setattr(review_windows, "iter_video_frames_near", neighbors)
@@ -232,14 +241,20 @@ async def test_auxiliary_decode_overlaps_bounded_face_calls_and_cleans_up(monkey
     monkeypatch.setattr(handlers, "_call_nsfw_analysis", AsyncMock(return_value="ordinary"))
     monkeypatch.setattr(handlers, "_call_llm_guard", AsyncMock(return_value={"safe": True}))
     task = asyncio.create_task(handlers._process_analyze_media("fixture.mp4", 1, 10, 0.5))
-    assert await asyncio.to_thread(started.wait, 1)
-    if cancel:
-        assert len(produced) == 1  # Backpressure includes queued/in-flight image memory.
+    try:
+        await asyncio.wait_for(ready.wait(), 2)
+        assert len(produced) == expected
+        assert active == expected
+        if cancel:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 2)
+            assert finished == expected
+        else:
+            release.set()
+            await asyncio.wait_for(task, 2)
+            assert len(produced) == finished == 3  # ceil(9 * 0.3), unchanged budget.
+    finally:
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, 1)
-        assert cancelled.is_set()
-    else:
-        await asyncio.wait_for(task, 1)
-        assert len(produced) == 2  # ceil(6 * 0.3), unchanged global budget.
-    assert closed.is_set()
+        await asyncio.gather(task, return_exceptions=True)
+    assert closed.is_set() and active == 0 and peak == expected

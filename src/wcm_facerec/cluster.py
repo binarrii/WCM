@@ -137,6 +137,9 @@ async def model_slot(model):
         yield
         return
     key = f"{model}_concurrency"
-    limit = runtime_parameters.get_live(key, settings.seed_value(key))
-    async with cluster_slot(f"model:{model}", int(limit)):
+    limit = int(runtime_parameters.get_live(key, settings.seed_value(key)))
+    if limit <= 0:
+        yield
+        return
+    async with cluster_slot(f"model:{model}", limit):
         yield

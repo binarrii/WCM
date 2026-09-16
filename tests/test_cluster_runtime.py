@@ -1,15 +1,81 @@
 import asyncio
 import base64
+from contextlib import asynccontextmanager
 from unittest.mock import Mock
 
 import pytest
 
 from api import review_task_store
 from api.review_evidence import archive_evidence
-from wcm_facerec import image_store, runtime_parameters
+from wcm_facerec import cluster, image_store, runtime_parameters
 from wcm_facerec.cluster import run_sync
 from wcm_facerec.config import settings
 from wcm_facerec.execution import execution_scope
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["insightface", "ocr", "visual", "guard"])
+@pytest.mark.parametrize("limit", [0, -3])
+async def test_unlimited_models_skip_cluster_admission_and_propagate_cancel(
+    monkeypatch, model, limit
+):
+    monkeypatch.setattr(settings, "cluster_enabled", True)
+    admission = Mock(side_effect=AssertionError("unlimited calls must not acquire database slots"))
+    monkeypatch.setattr(cluster, "cluster_slot", admission)
+    before = runtime_parameters.snapshot()
+    key = f"{model}_concurrency"
+    entered = 0
+    ready = asyncio.Event()
+    tasks = []
+
+    async def operation():
+        nonlocal entered
+        # Model admission follows live limits even for an older submitted task.
+        with runtime_parameters.frozen({key: 1}):
+            async with cluster.model_slot(model):
+                entered += 1
+                if entered == 5:
+                    ready.set()
+                await asyncio.Event().wait()
+
+    try:
+        runtime_parameters.install({key: limit})
+        tasks = [asyncio.create_task(operation()) for _ in range(5)]
+        await asyncio.wait_for(ready.wait(), 1)
+        admission.assert_not_called()
+    finally:
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        runtime_parameters.install(before)
+    assert all(isinstance(result, asyncio.CancelledError) for result in results)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["insightface", "ocr", "visual", "guard"])
+async def test_positive_model_limit_uses_live_cluster_admission_and_releases(monkeypatch, model):
+    monkeypatch.setattr(settings, "cluster_enabled", True)
+    calls = []
+
+    @asynccontextmanager
+    async def admission(resource, limit):
+        calls.append((resource, limit))
+        try:
+            yield
+        finally:
+            calls.append("released")
+
+    monkeypatch.setattr(cluster, "cluster_slot", admission)
+    before = runtime_parameters.snapshot()
+    key = f"{model}_concurrency"
+    try:
+        runtime_parameters.install({key: 2})
+        with runtime_parameters.frozen({key: 0}), pytest.raises(RuntimeError, match="upstream"):
+            async with cluster.model_slot(model):
+                raise RuntimeError("upstream")
+    finally:
+        runtime_parameters.install(before)
+    assert calls == [(f"model:{model}", 2), "released"]
 
 
 def test_execution_cannot_write_another_tasks_results(monkeypatch):

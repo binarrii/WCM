@@ -90,7 +90,8 @@ class Settings(BaseSettings):
     face_neighbor_offsets_s: tuple[float, ...] = (-0.4, -0.2, 0.2, 0.4)
     face_max_extra_frames_per_window: int = Field(default=3, ge=0, le=12)
     face_max_extra_call_ratio: float = Field(default=0.30, ge=0.0, le=2.0)
-    face_neighbor_concurrency: int = Field(default=2, ge=1, le=8)
+    # Non-positive values leave concurrency control to the model service.
+    face_neighbor_concurrency: int = Field(default=4, le=8)
     # P4 gallery audit target; the IFS collection itself permits up to 20.
     face_gallery_target_samples: int = Field(default=5, ge=1, le=20)
 
@@ -147,10 +148,11 @@ class Settings(BaseSettings):
     review_retry_seconds: int = Field(default=5, ge=0)
     worker_concurrency: int = Field(default=2, ge=1, le=32)
     worker_shutdown_seconds: int = Field(default=120, ge=1)
-    insightface_concurrency: int = Field(default=4, ge=1)
-    ocr_concurrency: int = Field(default=8, ge=1)
-    visual_concurrency: int = Field(default=4, ge=1)
-    guard_concurrency: int = Field(default=8, ge=1)
+    # Non-positive values bypass only model admission, never task/window limits.
+    insightface_concurrency: int = 32
+    ocr_concurrency: int = 32
+    visual_concurrency: int = 6
+    guard_concurrency: int = 24
     image_storage: Literal["local", "s3"] = "local"
     s3_endpoint: str = ""
     s3_region: str = "us-east-1"

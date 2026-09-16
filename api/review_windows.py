@@ -510,7 +510,7 @@ async def analyze_video(
                         if frame is not None:
                             decoded += 1
                         pending.add(asyncio.create_task(review(frame, by_target[round(target, 6)])))
-                        if len(pending) >= neighbor_concurrency:
+                        if neighbor_concurrency > 0 and len(pending) >= neighbor_concurrency:
                             done, pending = await asyncio.wait(
                                 pending, return_when=asyncio.FIRST_COMPLETED
                             )

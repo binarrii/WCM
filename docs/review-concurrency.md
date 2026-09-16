@@ -7,17 +7,30 @@
 ```text
 review_task_concurrency=4
 review_window_concurrency=4
+face_neighbor_concurrency=4
+insightface_concurrency=32
+ocr_concurrency=32
+visual_concurrency=6
+guard_concurrency=24
 jpeg_quality=95
 ```
 
-任务并发和窗口并发默认均为 4。JPEG 压缩质量默认 95，有效范围为 1～100。
+以上是首次初始化默认值；更新程序不会覆盖数据库中已经保存的参数值。任务并发和窗口并发默认均为 4，必须为正整数。JPEG 压缩质量默认 95，有效范围为 1～100。
 
 - 任务上限覆盖 `/analyze_media` 的 HTTP 与 WebSocket 入口，从下载到结果保存占用一个名额。超出上限的任务显示“排队中”，等待空闲名额后开始下载。
-- 同一个 API 容器的 Gunicorn 进程共享任务名额，不随 worker 数量倍增。使用容器临时目录的文件锁，任务结束、异常、取消或进程退出都会释放名额；不要删除正在使用的锁文件。
+- 集群模式使用 MySQL 任务队列统一控制任务名额，API 和 Worker 副本共享上限；任务由独立 Worker 执行，API 重启不会取消任务。单机模式使用容器临时目录中的文件锁共享名额，不随 Gunicorn 进程数倍增。
 - 窗口上限按每个视频任务计算，`window` 和 `target` 两种综合审核模式都使用此配置。每个窗口内仍并发执行 face、OCR → guard、visual → guard。
 - 默认最多同时审核 4 个任务、16 个窗口。模型服务自身容量仍会影响实际吞吐。
 
-任务等待采用轮询竞争空闲名额，不保证严格 FIFO。等待任务依附当前 API 进程，不是重启后自动续跑的持久队列。单项 `/detect_sensitive`、`/detect_nsfw` 和人脸搜索接口不占综合审核任务名额。多容器副本各自有独立上限；当前部署为单 API 容器。
+单项 `/detect_sensitive`、`/detect_nsfw` 和人脸搜索接口不占综合审核任务名额。251 当前采用集群部署，生命周期与租约恢复见[集群部署](cluster-deployment.md)。
+
+## 可选模型并发限制
+
+`insightface_concurrency`、`ocr_concurrency`、`visual_concurrency`、`guard_concurrency` 为正整数时，在集群内分别限制对应模型的调用并发。设为 **≤ 0 的整数**时跳过该模型的集群名额申请，由模型服务端控制并发；不会关闭人物写锁、超时、重试或失败保护。单机模式本来就不使用这一层集群模型限流。
+
+`face_neighbor_concurrency` 控制单个视频的补帧识别并发，正数范围 1～8，≤ 0 不限制。补帧总量仍受每窗口与全视频补帧预算约束。如果 `insightface_concurrency` 仍为正数，补帧与其他人脸调用继续共享该集群上限。
+
+`review_task_concurrency`、`review_window_concurrency` 保持必须 ≥ 1，Worker 本地任务容量也保持原约束。模型全局限额读取实时配置；窗口和补帧参数使用提交任务时保存的参数快照，因此应在新提交任务上验证修改效果。
 
 ## 模型服务异常提前终止
 
