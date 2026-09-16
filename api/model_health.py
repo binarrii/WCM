@@ -9,6 +9,7 @@ from functools import wraps
 import httpx
 
 from wcm_facerec.config import settings
+from wcm_facerec.model_budget import model_request_budget
 
 from .utils import VIDEO_EXTENSIONS
 
@@ -75,7 +76,8 @@ async def call_model(model, operation):
             raise health.error
         try:
             try:
-                result = await asyncio.wait_for(operation(), timeout=timeout)
+                with model_request_budget(timeout):
+                    result = await asyncio.wait_for(operation(), timeout=timeout)
             except asyncio.TimeoutError as exc:
                 raise httpx.ReadTimeout(f"{model} model exceeded {timeout:g}s deadline") from exc
         except ModelServiceUnavailable:

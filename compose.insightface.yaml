@@ -5,7 +5,6 @@ x-face-replica: &face-replica
   profiles: [face-replication]
   restart: unless-stopped
   init: true
-  cpus: 4
   mem_limit: 4g
   env_file:
     - path: .env.insightface-replicas

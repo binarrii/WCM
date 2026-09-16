@@ -36,7 +36,9 @@ async def test_model_pool_reuses_connections_and_applies_current_timeouts(monkey
         monkeypatch.setattr(handlers.settings, "guard_timeout_s", 3)
         await handlers._request_guard("second")
         assert len(clients) == 1 and not clients[0].is_closed
-        assert [request.extensions["timeout"]["read"] for request in requests] == [10, 3]
+        timeouts = [request.extensions["timeout"]["read"] for request in requests]
+        assert 9 < timeouts[0] <= 10
+        assert 2 < timeouts[1] <= 3
         async with model_clients.model_client("visual", 50) as visual:
             assert visual is not clients[0]
     assert all(client.is_closed for client in clients)

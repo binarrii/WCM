@@ -1,0 +1,13 @@
+# Optional only: append this file to COMPOSE_FILE or the docker compose -f list.
+# The default manifests intentionally impose no CPU hard quotas.
+services:
+  api:
+    cpus: ${WCM_API_CPUS:-2}
+  worker:
+    cpus: ${WCM_WORKER_CPUS:-2}
+  face-sync:
+    cpus: ${WCM_FACE_SYNC_CPUS:-1}
+  insightface-a:
+    cpus: ${WCM_IFS_REPLICA_CPUS:-4}
+  insightface-b:
+    cpus: ${WCM_IFS_REPLICA_CPUS:-4}

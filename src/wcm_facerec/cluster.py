@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 
 import pymysql
@@ -10,6 +10,7 @@ from pymysql.cursors import DictCursor
 
 from . import runtime_parameters
 from .config import settings
+from .model_budget import cancel_model_requests, request_scope
 
 
 def connect():
@@ -29,14 +30,30 @@ def connect():
     )
 
 
-async def run_sync(function, *args, **kwargs):
+async def drain_task(task):
+    """Repeated cancellation must not detach a still-running SDK/cleanup task."""
+    waiter = asyncio.gather(task, return_exceptions=True)
+    while not waiter.done():
+        with suppress(asyncio.CancelledError):
+            await asyncio.shield(waiter)
+    return waiter.result()[0]
+
+
+async def run_sync(function, *args, _on_cancel=None, **kwargs):
     """A cancelled coroutine must not release a lock while its SDK thread runs."""
-    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        await asyncio.gather(task, return_exceptions=True)
-        raise
+    with request_scope():
+        task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Stop follow-up requests, but drain the current HTTP/DB call before
+            # releasing its lock or handing the task slot to another review.
+            cancel_model_requests()
+            await drain_task(task)
+            if _on_cancel is not None and not task.cancelled() and task.exception() is None:
+                cleanup = asyncio.create_task(asyncio.to_thread(_on_cancel, task.result()))
+                await drain_task(cleanup)
+            raise
 
 
 _held: ContextVar[tuple] = ContextVar("cluster_locks", default=())
@@ -96,7 +113,9 @@ async def cluster_slot(resource, limit=1):
     try:
         acquired = None
         while acquired is None:
-            acquired = await run_sync(_try_slot, scope, limit)
+            acquired = await run_sync(
+                _try_slot, scope, limit, _on_cancel=lambda slot: slot[0].close() if slot else None
+            )
             if acquired is None:
                 await asyncio.sleep(0.25)
         connection, name = acquired

@@ -167,7 +167,6 @@ async def test_combined_and_standalone_keep_same_visual_targets_and_fixed_ocr(
         return cap
 
     monkeypatch.setattr(utils.cv2, "VideoCapture", capture)
-    monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
     monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())
     face_times, visual_calls, ocr_values = [], [], []
@@ -217,7 +216,6 @@ async def test_cancellation_in_scene_mode_closes_sampler_and_consumers(monkeypat
     monkeypatch.setattr(handlers.settings, "nsfw_sampling_mode", "scene")
     cap = SceneCapture([solid(100)] * 100, list(range(100)))
     monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
-    monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
     monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())
     monkeypatch.setattr(handlers, "_face_task", AsyncMock(return_value=[]))

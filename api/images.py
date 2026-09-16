@@ -37,7 +37,11 @@ async def get_image(key: str, request: Request):
     if request.headers.get("range"):
         parameters["Range"] = request.headers["range"]
     try:
-        result = await run_sync(image_store.client().get_object, **parameters)
+        result = await run_sync(
+            image_store.client().get_object,
+            _on_cancel=lambda result: result["Body"].close(),
+            **parameters,
+        )
     except ClientError as exc:
         status = exc.response["ResponseMetadata"]["HTTPStatusCode"]
         if status in (404, 416):

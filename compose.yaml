@@ -55,7 +55,6 @@ services:
   api:
     <<: *runtime
     deploy: {replicas: 2}
-    cpus: 2
     mem_limit: 2g
     depends_on:
       mysql: {condition: service_healthy}
@@ -65,7 +64,6 @@ services:
     <<: *runtime
     command: [python, -m, api.worker]
     deploy: {replicas: 2}
-    cpus: 2
     mem_limit: 4g
     stop_grace_period: 150s
     depends_on:
@@ -81,7 +79,6 @@ services:
     <<: *runtime
     profiles: [face-replication]
     command: [python, -m, api.face_sync_worker]
-    cpus: 1
     mem_limit: 1g
     stop_grace_period: 150s
     depends_on:

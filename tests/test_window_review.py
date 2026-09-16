@@ -138,7 +138,6 @@ def install_video(monkeypatch, samples):
             pass
 
     monkeypatch.setattr(review_windows, "VideoFrameSampler", Sampler)
-    monkeypatch.setattr(handlers, "_download_video_safe_sync", lambda *a, **kw: None)
     monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers.settings, "nsfw_review_mode", "window")
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())

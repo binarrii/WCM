@@ -29,6 +29,7 @@ from wcm_facerec.vendor.insightface_server.exceptions import NotFoundError
 from .cluster import check_locks
 from .config import DEFAULT_SIMILARITY_THRESHOLD, settings
 from .face_sync_store import ReplicationUnavailable, read_guard
+from .model_budget import remaining_request_time
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,9 @@ class InsightFaceAdapter:
 
         def guarded_request(*args, **kwargs):
             # Composed SDK calls may issue several HTTP requests in one thread.
+            remaining = remaining_request_time()
+            if remaining is not None:
+                kwargs["timeout"] = min(timeout, remaining)
             check_locks()
             guard = read_guard.get()
             if guard is not None and guard["lost"]:

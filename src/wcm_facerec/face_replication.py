@@ -240,7 +240,10 @@ def replica_read(function):
     async def wrapped(*args, **kwargs):
         if not settings.insightface_replication_enabled or current_adapter.get() is not None:
             return await function(*args, **kwargs)
-        selected = await run_sync(store.acquire_read)
+        selected = await run_sync(
+            store.acquire_read,
+            _on_cancel=lambda row: store.release_read(row["lease"]) if row else None,
+        )
         if selected is None:
             # Read-after-write remains correct while all replicas catch up.
             async with cluster_slot("person-library"):

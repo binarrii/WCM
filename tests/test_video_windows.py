@@ -57,9 +57,6 @@ def test_sampled_frame_uses_configured_jpeg_quality(monkeypatch):
 async def test_model_failure_records_every_unaudited_frame_and_releases_capture(monkeypatch):
     cap = Capture(2)
     monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
-    monkeypatch.setattr(
-        handlers, "_download_video_safe_sync", lambda url, path, *a, **kw: path.touch()
-    )
     monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())
     monkeypatch.setattr(handlers, "_face_task", AsyncMock(return_value=[]))
@@ -84,9 +81,6 @@ async def test_model_failure_records_every_unaudited_frame_and_releases_capture(
 async def test_cancellation_releases_capture_and_consumers(monkeypatch):
     cap = Capture(50)
     monkeypatch.setattr(utils.cv2, "VideoCapture", lambda _: cap)
-    monkeypatch.setattr(
-        handlers, "_download_video_safe_sync", lambda url, path, *a, **kw: path.touch()
-    )
     monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "get_face_engine", lambda: object())
     monkeypatch.setattr(handlers, "_face_task", AsyncMock(return_value=[]))
@@ -173,9 +167,6 @@ async def test_combined_and_standalone_tasks_use_identical_windows(monkeypatch, 
         return cap
 
     monkeypatch.setattr(utils.cv2, "VideoCapture", capture)
-    monkeypatch.setattr(
-        handlers, "_download_video_safe_sync", lambda url, path, *a, **kw: path.touch()
-    )
     monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock(return_value=None))
     nsfw_calls, ocr_calls, face_calls = [], [], []
 

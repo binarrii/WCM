@@ -29,7 +29,6 @@ from .utils import (
     VideoFrameSampler,
     _download_url_safe,
     _download_video_safe_async,
-    _download_video_safe_sync,
     _extract_video_frames_for_ocr,
     _extract_video_windows,
 )
@@ -192,16 +191,16 @@ async def _search_video_frames(
         should_unlink = False
     else:
         video_path = Path(f"/tmp/ws_video_{os.urandom(8).hex()}.mp4")
-        await asyncio.to_thread(
-            _download_video_safe_sync,
-            url,
-            video_path,
-            settings.max_file_size_mb * 100 * 1024 * 1024,
-            timeout=900.0,
-        )
         should_unlink = True
 
     try:
+        if should_unlink:
+            await _download_video_safe_async(
+                url,
+                video_path,
+                settings.max_file_size_mb * 100 * 1024 * 1024,
+                timeout=900.0,
+            )
         all_results = []
         with VideoFrameSampler(video_path, sample_interval) as sampler:
             for window in sampler:
@@ -809,8 +808,7 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
     if is_video:
         video_path = Path(f"/tmp/guard_video_{os.urandom(8).hex()}.mp4")
         try:
-            await asyncio.to_thread(
-                _download_video_safe_sync,
+            await _download_video_safe_async(
                 url,
                 video_path,
                 settings.max_file_size_mb * 100 * 1024 * 1024,
@@ -1346,8 +1344,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
     if is_video:
         video_path = Path(f"/tmp/nsfw_video_{os.urandom(8).hex()}.mp4")
         try:
-            await asyncio.to_thread(
-                _download_video_safe_sync,
+            await _download_video_safe_async(
                 url,
                 video_path,
                 settings.max_file_size_mb * 100 * 1024 * 1024,

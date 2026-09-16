@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -11,6 +10,7 @@ from typing import Any
 import pymysql
 from pymysql.cursors import DictCursor
 
+from wcm_facerec.cluster import run_sync
 from wcm_facerec.config import BUSINESS_PARAMETER_SPECS, settings
 from wcm_facerec.execution import current_execution
 
@@ -52,7 +52,7 @@ def _connect():
 
 async def _run(function, *args):
     try:
-        return await asyncio.to_thread(function, *args)
+        return await run_sync(function, *args)
     except ReviewTaskStoreUnavailable:
         raise
     except pymysql.MySQLError as exc:

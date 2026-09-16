@@ -11,11 +11,12 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from .config import settings
+from .model_budget import remaining_request_time
 
 
 @lru_cache(maxsize=4)
 def _client(endpoint, region, access_key, secret_key):
-    return boto3.client(
+    result = boto3.client(
         "s3",
         endpoint_url=endpoint,
         region_name=region,
@@ -29,6 +30,13 @@ def _client(endpoint, region, access_key, secret_key):
             retries={"max_attempts": 2},
         ),
     )
+    # Runs before every HTTP attempt, including botocore's internal retries.
+    result.meta.events.register("before-send.s3", _before_send)
+    return result
+
+
+def _before_send(**kwargs):
+    remaining_request_time()
 
 
 def client():

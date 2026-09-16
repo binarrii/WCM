@@ -12,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from . import image_store, person_operations
-from .cluster import cluster_slot
+from .cluster import cluster_slot, drain_task
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def library_write(func):
                 try:
                     return await asyncio.shield(task)
                 except asyncio.CancelledError:
-                    await task
+                    await drain_task(task)
                     raise
         IMAGE_ROOT.mkdir(parents=True, exist_ok=True)
         with (IMAGE_ROOT / ".person-library.lock").open("a") as lock:
@@ -55,7 +55,7 @@ def library_write(func):
                 except asyncio.CancelledError:
                     # A disconnected client must not release the lock while an
                     # SDK thread is still writing or compensation is in progress.
-                    await task
+                    await drain_task(task)
                     raise
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)

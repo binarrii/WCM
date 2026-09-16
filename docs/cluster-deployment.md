@@ -76,6 +76,24 @@ WebUI 的 Nginx 使用 Docker DNS 动态发现 API，API 和 Worker 不固定容
 同一个任务队列、Redis、S3 和模型限额配置应被所有节点使用。
 关闭 Worker 时先停止领取新任务，默认等待 120 秒处理当前任务，超时退出后由租约机制接管。
 
+默认 `compose.yaml` 和 `compose.insightface.yaml` **不设置 CPU 配额**，容器可使用主机可用 CPU；
+内存上限、任务与窗口并发限制继续生效。若确需硬限制，显式追加可选文件：
+
+```dotenv
+COMPOSE_FILE=compose.yaml:compose.insightface.yaml:compose.cpu-limits.yaml
+WCM_API_CPUS=2
+WCM_WORKER_CPUS=2
+WCM_FACE_SYNC_CPUS=1
+WCM_IFS_REPLICA_CPUS=4
+```
+
+此示例同时加载副本服务定义，是否启动副本仍由 `face-replication` profile 控制。
+CPU 环境变量仅在加载可选文件后使用；只配置环境变量不会开启配额。
+不要把上述示例默认写入部署环境。硬配额过低会导致 CPU 推理被 CFS 节流，降低实际并发吞吐。
+更新存量部署时应核验容器的 `HostConfig.NanoCpus`：取消配额后的值为 `0`。
+变更 CPU 配额无需重启 InsightFace，可按 Compose 服务标签找到当前容器后使用 `docker update --cpus 0`；
+同步更新 Compose 文件以保证之后重建仍不设置配额。
+
 ## 迁移和验收
 
 迁移命令只复制和核验，不删除旧图片：
