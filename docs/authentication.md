@@ -57,18 +57,31 @@ Passkey 使用 WebAuthn，要求设备持有证明及用户验证（指纹、面
 Passkey 重新验证使用独立用途的 challenge，绑定当前用户和当前会话，不能用登录 challenge 或他人的 Passkey 代替。
 重新验证只返回当前操作的一次性凭证，不返回免验证会话。
 
-**251 当前只有 `http://10.252.25.251:8000`：密码和 2FA 可用，浏览器不允许在此入口使用 Passkey。**
-不要通过关闭浏览器安全检查解决此限制。提供 HTTPS 域名后配置如下：
+251 同时支持内网 HTTP 和反向代理 HTTPS 两个入口，共用用户、权限和账户数据：
+
+- `http://10.252.25.251:8000`：密码和 2FA 可用，浏览器不允许在此入口使用 Passkey。
+- `https://wcmcore.ai-t.wtvdev.com`：密码、2FA 和 Passkey 可用。
+
+双入口配置如下，Origin 不含结尾的 `/`：
 
 ```dotenv
-WCM_AUTH_ORIGINS=["https://wcm.example.com"]
-WCM_AUTH_RP_ID=wcm.example.com
-WCM_AUTH_COOKIE_SECURE=true
+WCM_AUTH_ORIGINS=["http://10.252.25.251:8000","https://wcmcore.ai-t.wtvdev.com"]
+WCM_AUTH_RP_ID=wcmcore.ai-t.wtvdev.com
+WCM_AUTH_COOKIE_SECURE=false
 ```
 
 RP ID 只写域名，不含协议、端口和路径。HTTPS 在可信反向代理终止，代理转发至 8000；
-浏览器访问的完整 Origin 必须显式列入白名单。改变 RP ID 后旧域名的 Passkey 不能直接迁移使用。
+浏览器访问的完整 Origin 必须显式列入白名单，CORS、写请求和 WebSocket 共用此白名单；不允许通配符。
+WebUI 使用同源相对 API 路径，WebSocket 随页面协议选择 `ws` / `wss`。外层反代须转发
+`/api/`、`/images/`，保留浏览器的 `Origin`，并支持 WebSocket Upgrade。
+改变 RP ID 后旧域名的 Passkey 不能直接迁移使用。
 本地开发默认允许 `http://localhost:5173`、`http://localhost:8000`，RP ID 为 `localhost`。
+
+双入口模式保持 `WCM_AUTH_COOKIE_SECURE=false` 以允许内网 HTTP。
+服务端在 HTTPS 请求或白名单中的 HTTPS Origin 下自动设置 Secure Cookie，包括经 HTTP 转发的反代请求；
+注册、各类登录、密码/2FA 会话轮换和退出均采用相同规则，不依赖任意 `X-Forwarded-Proto` 头。
+Cookie 不设置 Domain，两个入口分别登录，不在 IP 与域名之间共享浏览器 Cookie。
+若以后关闭 HTTP 入口，可移除 HTTP Origin 并设 `WCM_AUTH_COOKIE_SECURE=true`，强制所有会话使用 Secure Cookie。
 
 ## 持久化和配置
 
@@ -88,7 +101,7 @@ python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 本地未启用 MySQL 时使用 `data/auth.sqlite3` 和权限为 0600 的 `data/auth.key`（已忽略 Git）。
 集群模式禁止 SQLite；`WCM_AUTH_DATABASE_URL` 可指定独立数据库，留空时复用 MySQL。
 会话默认 12 小时绝对有效期，可用 `WCM_AUTH_SESSION_HOURS` 设置为 1–168 小时。
-Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用 Argon2id。
+Cookie 为 HttpOnly / SameSite=Lax，HTTPS 会话自动启用 Secure。密码采用 Argon2id。
 会话令牌仅存哈希；登录按用户与来源限流；写请求校验 Origin 和会话 CSRF 令牌。
 认证审计表记录注册、登录、安全设置与角色变更，不记录密码、验证码、恢复码或私钥。
 
@@ -115,6 +128,24 @@ Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用
 敏感操作缺少凭证时返回 `403` 和 `X-WCM-Reauth: required`；前端在发送每次修改请求前主动验证身份，
 不依赖拒绝后的重试，也不缓存验证成功状态。已消费或过期凭证返回错误，需重新发起操作并验证。
 
+
+## 用户头像
+
+账户安全页可选择图片、预览、保存或恢复默认头像。右上角账户入口与用户列表同步显示头像，
+未设置或图片加载失败时显示姓名首字。手机顶栏使用头像作为账户入口，保留可访问的账户名称。
+
+- 接受静态 JPG、PNG、WebP，原图不超过 5 MB、2500 万像素。
+- 服务端校正方向、居中裁剪为 256 × 256 JPEG，压缩并移除 EXIF 等附加信息；不保存原图。
+- 新增独立的 `wcm_user_avatars` 表，保存小尺寸图片和内容版本号，使用现有共享账户数据库；无需更改人物图片存储或用户表列结构。
+- `PUT /api/v1/auth/avatar` 使用 multipart 的 `file` 字段，`DELETE /api/v1/auth/avatar` 恢复默认头像。
+  两者只修改当前用户，必须有有效登录会话及 CSRF；头像属于外观资料，不需要敏感操作的再次身份验证。
+- 用户数据新增可空的 `avatar_version`。`GET /api/v1/auth/avatars/{user_id}/{version}` 仅本人或超级管理员可访问，
+  沿用受保护响应的 `private, no-store` 与 `nosniff`。更换后版本变化，旧图片地址失效。
+- 仅头像上传的请求体允许 5 MB 图片及有界 multipart 开销，其余认证写请求继续限制为 64 KiB。
+
+发布时先备份账户表、源文件和旧镜像，再更新全部 API 副本及 WebUI；Worker 和人物识别服务无需重启。
+头像表通过已有数据库初始化锁创建。回滚恢复旧 API/WebUI 镜像及源文件，保留新增头像表，旧代码会忽略该表；
+不要用发布前的账户快照覆盖发布后产生的账户或会话。
 
 ## 发布与回滚
 
@@ -160,6 +191,14 @@ Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用
 - 251 隔离 MySQL 中启动 2 个独立 API 进程：4 个并发注册仅产生 1 个超级管理员，跨实例会话、角色撤销、权限更新、2FA challenge、恢复码防重放及退出均通过。
 - 浏览器核验登录、退出、账户安全、用户列表和普通用户菜单；实体 Passkey 设备操作待 HTTPS 域名配置后验收。
 
+### 2026-09-16 双入口验证
+
+- 认证与头像回归 79 项、前端 WebSocket 相关回归 26 项通过，Ruff 检查通过。
+- 251 两个 API 副本均验证了双 Origin 的 CORS、共享会话、CSRF 和 WebSocket 来源校验。
+- 从客户端经内网 HTTP、反代 HTTPS 两个真实入口验证登录、刷新会话、退出和 `ws` / `wss` 订阅；HTTPS Cookie 带 Secure，HTTP Cookie 保持可用，非法来源被拒绝。
+- RP ID 已配置为 `wcmcore.ai-t.wtvdev.com`；HTTPS Origin 校验通过，实体 Passkey 设备绑定仍需由用户完成。
+- 本次仅更新 API 和认证环境配置，WebUI 资源版本、Worker、face-sync、InsightFace 实例保持不变；测试账户及其会话、审计记录已清理。
+
 ### 身份验证弹窗更新
 
 - 重新验证按可用 Passkey、2FA、密码的优先级展示；该版本的会话时间窗口已由下方逐次验证机制替代。
@@ -173,3 +212,12 @@ Cookie 为 HttpOnly / SameSite=Lax；HTTPS 部署须启用 Secure。密码采用
 - 验证覆盖凭证重放、并发争用、目标操作/用户/会话隔离、验证取消以及连续两次修改必须分别验证。
 - 本地后端回归 748 项通过、7 项外部服务测试跳过；前端 106 项通过，生产构建成功。
 - 浏览器核验单列宽度、密码弹窗与焦点恢复；连续修改和跨页面保存均在提交前重新弹出验证。
+
+### 2026-09-16 用户头像更新
+
+- 认证和图片处理专项 68 项通过，前端 114 项通过，生产构建与 Ruff 检查通过。
+- 浏览器验证选择图片、预览、保存、刷新保留、用户列表显示、恢复默认头像和 390px 手机布局。
+- 251 两个 API 副本均验证上传、更换、交叉读取、移除与未登录访问拒绝；使用的临时测试账户及头像、会话和审计记录已清理。
+- 备份：`/home/aigc/wcm-cluster/backups/user-avatar-20260916-081204Z/`，含权限为 0600 的账户表快照、旧源文件及部署记录。
+- 新镜像：`wcm-cluster-api:avatar-20260916-081204z`、`wcm-cluster-webui:avatar-20260916-081204z`；同时间戳的 `before-avatar-` 标签用于回滚。
+- 仅切换 API/WebUI；其余容器 ID 与启动时间不变。健康检查通过，九项前端资源与本地构建哈希一致。

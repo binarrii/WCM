@@ -19,6 +19,7 @@ from sqlalchemy import (
     Column,
     Double,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -59,6 +60,14 @@ users = Table(
     Column("totp_last_step", Integer, default=-1),
     Column("recovery_hashes", Text, default="[]"),
     Column("created_at", Double, nullable=False),
+)
+avatars = Table(
+    "wcm_user_avatars",
+    metadata,
+    Column("user_id", String(36), primary_key=True),
+    Column("content", LargeBinary, nullable=False),
+    Column("version", String(64), nullable=False),
+    Column("updated_at", Double, nullable=False),
 )
 sessions = Table(
     "wcm_sessions",
@@ -250,11 +259,15 @@ def permissions(connection, role):
 
 
 def public_user(connection, user):
+    avatar_version = connection.execute(
+        select(avatars.c.version).where(avatars.c.user_id == user["id"])
+    ).scalar()
     return {
         key: user[key] for key in ("id", "username", "display_name", "role", "active", "created_at")
     } | {
         "totp_enabled": bool(user["totp_secret"]),
         "permissions": permissions(connection, user["role"]),
+        "avatar_version": avatar_version,
     }
 
 

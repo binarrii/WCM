@@ -11,6 +11,7 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
 from . import auth_store as store
+from .avatar_images import MAX_AVATAR_BYTES
 
 PUBLIC = {
     ("GET", "/api/v1/health"),
@@ -120,15 +121,21 @@ class AuthGuard:
                 "HEAD",
                 "OPTIONS",
             }:
-                # Bound credentials even for chunked requests without Content-Length.
+                # Keep credential requests small; only the avatar upload accepts an image.
+                avatar_upload = (
+                    scope["path"].rstrip("/") == "/api/v1/auth/avatar"
+                    and scope.get("method") == "PUT"
+                )
+                body_limit = MAX_AVATAR_BYTES + 65536 if avatar_upload else 65536
                 body = bytearray()
                 while True:
                     part = await receive()
                     if part["type"] == "http.disconnect":
                         return
                     body.extend(part.get("body", b""))
-                    if len(body) > 65536:
-                        return await JSONResponse({"detail": "认证请求过大"}, status_code=413)(
+                    if len(body) > body_limit:
+                        detail = "头像图片不能超过 5 MB" if avatar_upload else "认证请求过大"
+                        return await JSONResponse({"detail": detail}, status_code=413)(
                             scope, receive, send
                         )
                     if not part.get("more_body", False):

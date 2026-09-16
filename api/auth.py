@@ -1,6 +1,7 @@
 """Password, WebAuthn, TOTP and role administration endpoints."""
 
 import base64
+import hashlib
 import io
 import json
 import secrets
@@ -14,7 +15,7 @@ import qrcode
 import qrcode.image.svg
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import delete, func, insert, select, update
 from webauthn import (
@@ -35,6 +36,7 @@ from webauthn.helpers.structs import (
 )
 
 from . import auth_store as store
+from .avatar_images import MAX_AVATAR_BYTES, normalize_avatar
 
 router = APIRouter(prefix="/auth", tags=["账户与权限"])
 password_hasher = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
@@ -215,7 +217,18 @@ def verify_factor(connection, user, code, *, recovery=True):
     return False
 
 
-def new_session(connection, user, response, old_token=None):
+def session_cookie_secure(request):
+    # TLS may terminate before the WebUI proxy. The browser's allowlisted Origin
+    # still identifies HTTPS without trusting arbitrary forwarded headers.
+    origin = request.headers.get("origin", "")
+    return (
+        store.config.cookie_secure
+        or request.url.scheme == "https"
+        or (origin in store.config.origins and urlsplit(origin).scheme == "https")
+    )
+
+
+def new_session(connection, user, request, response, old_token=None):
     if old_token:
         connection.execute(
             delete(store.sessions).where(store.sessions.c.id == store.digest(old_token))
@@ -237,7 +250,7 @@ def new_session(connection, user, response, old_token=None):
         token,
         max_age=lifetime,
         httponly=True,
-        secure=store.config.cookie_secure,
+        secure=session_cookie_secure(request),
         samesite="lax",
         path="/",
     )
@@ -246,7 +259,7 @@ def new_session(connection, user, response, old_token=None):
 
 def finish_login(connection, user, request, response):
     log(connection, user["id"], "login")
-    return new_session(connection, user, response, request.cookies.get(store.COOKIE))
+    return new_session(connection, user, request, response, request.cookies.get(store.COOKIE))
 
 
 def passkey_origin(request):
@@ -344,9 +357,59 @@ def logout(request: Request, response: Response):
             delete(store.sessions).where(store.sessions.c.id == identity["session"]["id"])
         )
     response.delete_cookie(
-        store.COOKIE, path="/", secure=store.config.cookie_secure, httponly=True, samesite="lax"
+        store.COOKIE, path="/", secure=session_cookie_secure(request), httponly=True, samesite="lax"
     )
     return {"ok": True}
+
+
+@router.put("/avatar")
+def upload_avatar(request: Request, file: UploadFile = File(...)):
+    identity = current(request)
+    rate(request, "avatar", identity["user"]["id"], maximum=20)
+    content = normalize_avatar(file.file.read(MAX_AVATAR_BYTES + 1))
+    version = hashlib.sha256(content).hexdigest()
+    with store.transaction() as connection:
+        user = locked_user(connection, identity)
+        connection.execute(delete(store.avatars).where(store.avatars.c.user_id == user["id"]))
+        connection.execute(
+            insert(store.avatars).values(
+                user_id=user["id"], content=content, version=version, updated_at=time.time()
+            )
+        )
+        log(connection, user["id"], "avatar.updated")
+        return {
+            "user": store.public_user(connection, user),
+            "csrf_token": identity["session"]["csrf"],
+        }
+
+
+@router.delete("/avatar")
+def remove_avatar(request: Request):
+    identity = current(request)
+    with store.transaction() as connection:
+        user = locked_user(connection, identity)
+        connection.execute(delete(store.avatars).where(store.avatars.c.user_id == user["id"]))
+        log(connection, user["id"], "avatar.removed")
+        return {
+            "user": store.public_user(connection, user),
+            "csrf_token": identity["session"]["csrf"],
+        }
+
+
+@router.get("/avatars/{user_id}/{version}")
+def read_avatar(user_id: str, version: str, request: Request):
+    identity = current(request)
+    if user_id != identity["user"]["id"] and identity["user"]["role"] != "superadmin":
+        raise HTTPException(403, "无权查看该用户头像")
+    with store.engine().connect() as connection:
+        avatar = store.row(
+            connection,
+            store.avatars,
+            (store.avatars.c.user_id == user_id) & (store.avatars.c.version == version),
+        )
+    if not avatar:
+        raise HTTPException(404, "头像不存在")
+    return Response(avatar["content"], media_type="image/jpeg")
 
 
 @router.post("/reauthenticate")
@@ -384,7 +447,7 @@ def change_password(payload: ChangePassword, request: Request, response: Respons
         connection.execute(delete(store.sessions).where(store.sessions.c.user_id == user["id"]))
         connection.execute(delete(store.challenges).where(store.challenges.c.user_id == user["id"]))
         log(connection, user["id"], "password.changed")
-        return new_session(connection, user, response)
+        return new_session(connection, user, request, response)
 
 
 @router.get("/security")
@@ -481,7 +544,7 @@ def confirm_factor(payload: VerifyCode, request: Request, response: Response):
         connection.execute(delete(store.sessions).where(store.sessions.c.user_id == user["id"]))
         connection.execute(delete(store.challenges).where(store.challenges.c.user_id == user["id"]))
         log(connection, user["id"], "2fa.enabled")
-        return new_session(connection, user, response) | {"recovery_codes": codes}
+        return new_session(connection, user, request, response) | {"recovery_codes": codes}
 
 
 @router.post("/2fa/disable")
@@ -502,7 +565,7 @@ def disable_factor(payload: SensitiveProof, request: Request, response: Response
         connection.execute(delete(store.challenges).where(store.challenges.c.user_id == user["id"]))
         user["totp_secret"] = None
         log(connection, user["id"], "2fa.disabled")
-        return new_session(connection, user, response)
+        return new_session(connection, user, request, response)
 
 
 @router.post("/2fa/recovery-codes")

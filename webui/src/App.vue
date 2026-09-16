@@ -10,6 +10,7 @@ import AuthPage from './views/AuthPage.vue';
 import AccountSecurity from './views/AccountSecurity.vue';
 import UserManagement from './views/UserManagement.vue';
 import ReauthDialog from './components/ReauthDialog.vue';
+import UserAvatar from './components/UserAvatar.vue';
 import { auth, can, clearSession, logout, refreshSession, roleNames } from './services/auth';
 import { navigateTo, routeFromHash } from './services/navigation';
 import './app.css';
@@ -138,7 +139,7 @@ onBeforeUnmount(() => {
               <Sun v-if="theme === 'light'" /><Moon v-else-if="theme === 'dark'" /><Monitor v-else />
             </button>
           </div>
-          <div class="shell-account"><button class="account-entry" @click="navigateTo('account')"><strong>{{ auth.user.display_name }}</strong><small>{{ roleNames[auth.user.role] }}</small></button><button title="退出登录" aria-label="退出登录" @click="signOut"><LogOut /></button></div>
+          <div class="shell-account"><button class="account-entry" :aria-label="`账户安全：${auth.user.display_name}`" @click="navigateTo('account')"><UserAvatar :user="auth.user" /><span class="account-copy"><strong>{{ auth.user.display_name }}</strong><small>{{ roleNames[auth.user.role] }}</small></span></button><button title="退出登录" aria-label="退出登录" @click="signOut"><LogOut /></button></div>
         </div>
       </header>
 

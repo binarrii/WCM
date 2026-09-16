@@ -1,10 +1,12 @@
 """Exercise the real auth guard, database and cryptographic verifiers end to end."""
 
 import hashlib
+import io
 import json
 import struct
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 
 import cbor2
 import pyotp
@@ -12,8 +14,9 @@ import pytest
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from fastapi import WebSocket
+from fastapi import Request, WebSocket
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlalchemy import delete, select, update
 from starlette.websockets import WebSocketDisconnect
 from webauthn.helpers import bytes_to_base64url as b64
@@ -33,6 +36,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(store.config, "secret_key", Fernet.generate_key().decode())
     monkeypatch.setattr(store.config, "origins", [ORIGIN])
     monkeypatch.setattr(store.config, "rp_id", "localhost")
+    monkeypatch.setattr(store.config, "cookie_secure", False)
     monkeypatch.setattr(store.settings, "cluster_enabled", False)
     store.initialize()
     app = create_app()
@@ -146,6 +150,114 @@ def test_registration_roles_hashes_cookie_and_logout(client):
     client.cookies.set(store.COOKIE, token)
     assert client.get("/api/v1/auth/me").status_code == 401
     assert password_login(client)["user"]["id"] == root["user"]["id"]
+
+
+def avatar_upload(client, color="red", **kwargs):
+    content = io.BytesIO()
+    Image.new("RGB", (300, 180), color).save(content, format="PNG")
+    return client.put(
+        "/api/v1/auth/avatar",
+        files={"file": ("avatar.png", content.getvalue(), "image/png")},
+        **kwargs,
+    )
+
+
+def avatar_url(user):
+    return f"/api/v1/auth/avatars/{user['id']}/{user['avatar_version']}"
+
+
+def test_avatar_lifecycle_is_shared_between_sessions_and_visible_to_superadmin(client):
+    root = signup(client)
+    assert root["user"]["avatar_version"] is None
+    member = sibling(client)
+    other_session = sibling(client)
+    try:
+        original = signup(member, "member")
+        cookie = member.cookies[store.COOKIE]
+        saved = accept(member, avatar_upload(member))
+        assert member.cookies[store.COOKIE] == cookie
+        assert saved["user"]["id"] == original["user"]["id"]
+        assert len(saved["user"]["avatar_version"]) == 64
+        image = member.get(avatar_url(saved["user"]))
+        assert image.status_code == 200
+        assert image.headers["content-type"] == "image/jpeg"
+        assert "no-store" in image.headers["cache-control"]
+        assert image.headers["x-content-type-options"] == "nosniff"
+        with Image.open(io.BytesIO(image.content)) as normalized:
+            assert normalized.size == (256, 256)
+        assert client.get(avatar_url(saved["user"])).content == image.content
+        listed = client.get("/api/v1/auth/users").json()["items"]
+        assert (
+            next(user for user in listed if user["id"] == saved["user"]["id"])["avatar_version"]
+            == saved["user"]["avatar_version"]
+        )
+        assert (
+            password_login(other_session, "member")["user"]["avatar_version"]
+            == saved["user"]["avatar_version"]
+        )
+        replaced = accept(member, avatar_upload(member, "blue"))
+        assert replaced["user"]["avatar_version"] != saved["user"]["avatar_version"]
+        assert (
+            other_session.get("/api/v1/auth/me").json()["user"]["avatar_version"]
+            == replaced["user"]["avatar_version"]
+        )
+        assert other_session.get(avatar_url(replaced["user"])).status_code == 200
+        assert member.get(avatar_url(saved["user"])).status_code == 404
+        store.initialize()
+        assert other_session.get(avatar_url(replaced["user"])).status_code == 200
+        removed = accept(member, member.delete("/api/v1/auth/avatar"))
+        assert removed["user"]["avatar_version"] is None
+        assert other_session.get(avatar_url(replaced["user"])).status_code == 404
+        assert other_session.get("/api/v1/auth/me").json()["user"]["avatar_version"] is None
+    finally:
+        member.close()
+        other_session.close()
+
+
+def test_avatar_requires_session_csrf_and_cannot_target_another_user(client):
+    assert avatar_upload(client).status_code == 401
+    assert client.delete("/api/v1/auth/avatar").status_code == 401
+    root = signup(client)
+    saved_root = accept(client, avatar_upload(client))
+    assert avatar_upload(client, headers={"X-CSRF-Token": "invalid"}).status_code == 403
+    assert (
+        client.delete("/api/v1/auth/avatar", headers={"X-CSRF-Token": "invalid"}).status_code == 403
+    )
+    other = sibling(client)
+    try:
+        assert other.get(avatar_url(saved_root["user"])).status_code == 401
+        member = signup(other, "member")
+        assert other.get(avatar_url(saved_root["user"])).status_code == 403
+        saved = accept(other, avatar_upload(other, "blue", data={"user_id": root["user"]["id"]}))
+        assert saved["user"]["id"] == member["user"]["id"]
+        assert (
+            client.get("/api/v1/auth/me").json()["user"]["avatar_version"]
+            == saved_root["user"]["avatar_version"]
+        )
+        assert (
+            other.delete(
+                f"/api/v1/auth/avatars/{root['user']['id']}/{saved_root['user']['avatar_version']}"
+            ).status_code
+            == 405
+        )
+    finally:
+        other.close()
+
+
+@pytest.mark.parametrize(
+    "content,status",
+    [(b"<svg/>", 422), (b"x" * (5 * 1024 * 1024 + 1), 413), (b"x" * (6 * 1024 * 1024), 413)],
+)
+def test_invalid_avatar_upload_preserves_current_image(client, content, status):
+    signup(client)
+    saved = accept(client, avatar_upload(client))
+    response = client.put("/api/v1/auth/avatar", files={"file": ("bad.png", content, "image/png")})
+    assert response.status_code == status
+    assert (
+        client.get("/api/v1/auth/me").json()["user"]["avatar_version"]
+        == saved["user"]["avatar_version"]
+    )
+    assert client.get(avatar_url(saved["user"])).status_code == 200
 
 
 def test_first_registration_is_atomic(client):
@@ -342,6 +454,111 @@ def test_csrf_cors_and_stale_sessions(client):
     with store.transaction() as connection:
         connection.execute(update(store.sessions).values(expires_at=time.time() - 1))
     assert client.get("/api/v1/auth/me").status_code == 401
+
+
+LAN_ORIGIN = "http://10.252.25.251:8000"
+HTTPS_ORIGIN = "https://wcmcore.ai-t.wtvdev.com"
+
+
+@pytest.mark.parametrize("origin", [LAN_ORIGIN, HTTPS_ORIGIN])
+def test_dual_origins_cors_sessions_csrf_and_websocket(client, monkeypatch, origin):
+    store.config.origins[:] = [LAN_ORIGIN, HTTPS_ORIGIN]
+    monkeypatch.setattr(store.config, "rp_id", "wcmcore.ai-t.wtvdev.com")
+
+    @client.app.middleware("http")
+    async def proxy_terminates_tls(request, call_next):
+        # The API sees HTTP even when the browser used HTTPS at the outer proxy.
+        request.scope["scheme"] = "http"
+        return await call_next(request)
+
+    secure = origin == HTTPS_ORIGIN
+    with closing(
+        TestClient(client.app, base_url=origin, headers={"Origin": origin, "X-WCM-Client": "web"})
+    ) as browser:
+        preflight = browser.options(
+            "/api/v1/auth/login",
+            headers={
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-wcm-client,x-csrf-token,x-wcm-verification",
+            },
+        )
+        assert preflight.status_code == 200
+        assert preflight.headers["access-control-allow-origin"] == origin
+        assert preflight.headers["access-control-allow-credentials"] == "true"
+        assert "Origin" in preflight.headers["vary"]
+        user = signup(browser)["user"]
+        assert next(iter(browser.cookies.jar)).secure is secure
+        assert browser.get("/api/v1/auth/me").json()["user"]["id"] == user["id"]
+        assert (
+            browser.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "bad"}).status_code == 403
+        )
+        socket_url = origin.replace("https:", "wss:").replace("http:", "ws:")
+        with browser.websocket_connect(socket_url + "/api/v1/review_tasks/auth-probe") as socket:
+            socket.send_text("ping")
+            assert socket.receive_text() == "ping"
+        passkey = browser.post("/api/v1/auth/passkeys/login/options")
+        assert passkey.status_code == (200 if secure else 400)
+        if secure:
+            assert passkey.json()["options"]["rpId"] == "wcmcore.ai-t.wtvdev.com"
+        rotated = authorized(
+            browser, "POST", "/api/v1/auth/password", json={"new_password": PASSWORD + " new"}
+        )
+        accept(browser, rotated)
+        assert ("Secure" in rotated.headers["set-cookie"]) is secure
+        assert browser.get("/api/v1/auth/me").status_code == 200
+        logged_out = browser.post("/api/v1/auth/logout")
+        assert logged_out.status_code == 200
+        assert ("Secure" in logged_out.headers["set-cookie"]) is secure
+        assert browser.get("/api/v1/auth/me").status_code == 401
+        login = browser.post(
+            "/api/v1/auth/login", json={"username": "root", "password": PASSWORD + " new"}
+        )
+        accept(browser, login)
+        assert ("Secure" in login.headers["set-cookie"]) is secure
+        assert browser.get("/api/v1/auth/me").status_code == 200
+
+
+@pytest.mark.parametrize("origin", ["https://evil.test", HTTPS_ORIGIN + ".evil.test", "null"])
+def test_dual_origins_reject_unlisted_cors_writes_and_websockets(client, origin):
+    store.config.origins[:] = [LAN_ORIGIN, HTTPS_ORIGIN]
+    headers = {"Origin": origin}
+    response = client.options(
+        "/api/v1/auth/login", headers={**headers, "Access-Control-Request-Method": "POST"}
+    )
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+    assert client.post("/api/v1/auth/login", headers=headers).status_code == 403
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/api/v1/review_tasks/auth-probe", headers=headers):
+            pass
+
+
+@pytest.mark.parametrize(
+    "scheme,origin,forced,expected",
+    [
+        ("http", LAN_ORIGIN, False, False),
+        ("http", HTTPS_ORIGIN, False, True),
+        ("https", "", False, True),
+        ("http", "https://evil.test", False, False),
+        ("http", "", False, False),
+        ("http", LAN_ORIGIN, True, True),
+    ],
+)
+def test_cookie_security_with_tls_termination(monkeypatch, scheme, origin, forced, expected):
+    from api.auth import session_cookie_secure
+
+    monkeypatch.setattr(store.config, "origins", [LAN_ORIGIN, HTTPS_ORIGIN])
+    monkeypatch.setattr(store.config, "cookie_secure", forced)
+    request = Request(
+        {
+            "type": "http",
+            "scheme": scheme,
+            "path": "/api/v1/auth/login",
+            "headers": [(b"origin", origin.encode()), (b"x-forwarded-proto", b"https")],
+            "server": ("api", 8000),
+        }
+    )
+    assert session_cookie_secure(request) is expected
 
 
 def test_totp_pending_confirmation_recovery_and_replay(client):

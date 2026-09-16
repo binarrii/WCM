@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { Fingerprint, KeyRound, ShieldCheck } from '@lucide/vue';
 import api from '../services/api';
 import { auth, roleNames, acceptSession, authError } from '../services/auth';
@@ -7,6 +7,8 @@ import { createPasskey, passkeyAvailable } from '../services/passkeys';
 import { withReauthentication } from '../services/reauth';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import PasswordDialog from '../components/PasswordDialog.vue';
+import UserAvatar from '../components/UserAvatar.vue';
+import { avatarUploadError } from '../services/avatar';
 import './auth.css';
 
 const security = ref({ passkeys: [], totp_enabled: false, recovery_codes_remaining: 0 });
@@ -14,6 +16,40 @@ const setup = ref(null); const code = ref(''); const recoveryCodes = ref([]);
 const passkeyName = ref('我的设备'); const passkeySupported = passkeyAvailable();
 const busy = ref(false); const error = ref(''); const notice = ref(''); const pendingKey = ref(null);
 const action = ref('');
+const avatarInput = ref(null);
+const avatarFile = ref(null);
+const avatarPreview = ref('');
+const avatarBusy = ref(false);
+function clearAvatarPreview() {
+  if (avatarPreview.value) URL.revokeObjectURL(avatarPreview.value);
+  avatarPreview.value = '';
+  avatarFile.value = null;
+}
+function selectAvatar(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  error.value = avatarUploadError(file);
+  notice.value = '';
+  if (error.value) return;
+  clearAvatarPreview();
+  avatarFile.value = file;
+  avatarPreview.value = URL.createObjectURL(file);
+}
+async function saveAvatar(remove = false) {
+  if (avatarBusy.value || (!remove && !avatarFile.value)) return;
+  avatarBusy.value = true; error.value = ''; notice.value = '';
+  try {
+    const form = new FormData();
+    if (!remove) form.append('file', avatarFile.value);
+    const { data } = remove ? await api.delete('/auth/avatar') : await api.put('/auth/avatar', form);
+    acceptSession(data);
+    clearAvatarPreview();
+    notice.value = remove ? '已恢复默认头像。' : '头像已更新。';
+  } catch (reason) { error.value = authError(reason); }
+  finally { avatarBusy.value = false; }
+}
+onBeforeUnmount(clearAvatarPreview);
 const load = async () => { security.value = (await api.get('/auth/security')).data; };
 async function perform(operation, message = '') {
   busy.value = true; error.value = ''; notice.value = '';
@@ -68,7 +104,19 @@ onMounted(() => perform(load));
 
 <template>
   <main class="account-page">
-    <div class="account-summary"><div class="account-avatar">{{ auth.user.display_name.slice(0, 1) }}</div><div><h2>{{ auth.user.display_name }}</h2><p>@{{ auth.user.username }} <span class="role-badge">{{ roleNames[auth.user.role] }}</span></p></div></div>
+    <div class="account-summary">
+      <UserAvatar :user="auth.user" :size="64" :preview="avatarPreview" />
+      <div class="account-profile">
+        <h2>{{ auth.user.display_name }}</h2><p>@{{ auth.user.username }} <span class="role-badge">{{ roleNames[auth.user.role] }}</span></p>
+        <div class="avatar-actions">
+          <input ref="avatarInput" class="avatar-file-input" type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择头像图片" :disabled="avatarBusy" @change="selectAvatar" />
+          <button class="auth-link" type="button" :disabled="avatarBusy" @click="avatarInput?.click()">{{ avatarPreview ? '重新选择' : '更换头像' }}</button>
+          <template v-if="avatarPreview"><button class="auth-primary" type="button" :disabled="avatarBusy" @click="saveAvatar()">{{ avatarBusy ? '保存中…' : '保存头像' }}</button><button class="auth-link" type="button" :disabled="avatarBusy" @click="clearAvatarPreview">取消</button></template>
+          <button v-else-if="auth.user.avatar_version" class="auth-link avatar-reset" type="button" :disabled="avatarBusy" @click="saveAvatar(true)">恢复默认头像</button>
+        </div>
+        <p class="avatar-hint">JPG、PNG 或 WebP，最大 5 MB，自动居中裁剪。</p>
+      </div>
+    </div>
     <p v-if="error" class="auth-error" role="alert">{{ error }}</p><p v-if="notice" class="auth-success" role="status">{{ notice }}</p>
     <section v-if="recoveryCodes.length" class="security-card recovery-panel">
       <h2>保存一次性恢复码</h2><p>验证器不可用时，用恢复码完成登录。每个码只能使用一次，关闭后无法再次查看。</p>

@@ -37,7 +37,13 @@
 .account-summary { display: flex; gap: 18px; align-items: center; }
 .account-summary h2 { font-size: 1.3rem; }
 .account-summary p { color: var(--text-secondary); margin-top: 6px; font-size: .86rem; }
-.account-avatar { width: 58px; height: 58px; border-radius: 16px; display: grid; place-items: center; font-size: 1.6rem; background: var(--color-primary-glow); color: var(--color-primary); }
+.account-profile { min-width: 0; }
+.avatar-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+.avatar-file-input { display: none; }
+.avatar-actions .auth-primary { padding: 6px 12px; font-size: .78rem; }
+.avatar-actions .avatar-reset { color: var(--text-muted); }
+.account-profile .avatar-hint { margin-top: 0; font-size: .72rem; color: var(--text-muted); }
+.user-identity { display: flex; align-items: center; gap: 10px; }
 .role-badge, .security-state { display: inline-block; font-size: .72rem; padding: 4px 8px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); white-space: nowrap; }
 .role-badge { color: var(--color-primary); margin-left: 8px; background: var(--color-primary-glow); }
 .security-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; align-items: start; }
@@ -90,10 +96,12 @@
 .permission-locked { color: var(--text-muted); }
 .shell-account { display: flex; align-items: center; gap: 10px; }
 .shell-account button { border: 0; background: none; color: var(--text-secondary); cursor: pointer; }
-.shell-account .account-entry { display: grid; text-align: right; gap: 3px; font-size: .83rem; }
+.shell-account .account-entry { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: .83rem; }
+.account-copy { display: grid; gap: 3px; min-width: 0; text-align: right; }
+.account-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shell-account small { color: var(--text-muted); font-size: .68rem; }
 .shell-account svg { width: 18px; height: 18px; }
 .auth-loading { min-height: 100vh; display: grid; place-content: center; gap: 18px; text-align: center; }
-@media (max-width: 1000px) { .auth-screen { padding: 36px; gap: 40px; } .auth-brand { margin-bottom: 60px; } .header-actions { gap: 10px; } .shell-account .account-entry { max-width: 100px; } }
+@media (max-width: 1000px) { .auth-screen { padding: 36px; gap: 40px; } .auth-brand { margin-bottom: 60px; } .header-actions { gap: 10px; } .shell-account .account-entry { max-width: 180px; } }
 @media (max-width: 800px) { .auth-screen { display: block; max-width: 520px; padding: 32px 24px; } .auth-intro { padding: 0; } .auth-brand { margin-bottom: 28px; } .auth-intro > :not(.auth-brand) { display: none; } .auth-card { padding: 26px; } .security-grid { grid-template-columns: 1fr; } .account-page { padding: 24px var(--workspace-page-gutter); } .users-toolbar { display: block; } .user-search { margin-bottom: 20px; } .role-permissions { grid-template-columns: 1fr; } }
-@media (max-width: 520px) { .auth-screen { padding: 24px 16px; } .security-card { padding: 20px; } .recovery-codes { grid-template-columns: 1fr; } .main-menu { display: flex; justify-content: space-around; gap: 2px; } .main-menu .menu-item { min-width: 34px; padding: 12px 4px; } .shell-account .account-entry { max-width: 80px; overflow: hidden; } .workspace-header h1 { font-size: 1.12rem; } }
+@media (max-width: 520px) { .auth-screen { padding: 24px 16px; } .security-card { padding: 20px; } .recovery-codes { grid-template-columns: 1fr; } .main-menu { display: flex; justify-content: space-around; gap: 2px; } .main-menu .menu-item { min-width: 34px; padding: 12px 4px; } .shell-account .account-copy { display: none; } .workspace-header h1 { font-size: 1.12rem; } }

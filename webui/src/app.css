@@ -15,7 +15,7 @@
 .workspace-header { min-height: 108px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 40px; background: color-mix(in srgb, var(--bg-primary) 90%, transparent); border-bottom: 1px solid var(--border-color); }
 .workspace-header h1 { font: 700 1.45rem/1.3 var(--font-display); }
 .workspace-header p { margin-top: 4px; color: var(--text-secondary); font-size: .82rem; }
-.header-actions { display: flex; align-items: center; gap: 18px; }
+.header-actions { display: flex; align-items: center; gap: 36px; }
 .shell-theme-switcher { display: flex; padding: 3px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 20px; }
 .shell-theme-switcher button { width: 32px; height: 32px; display: grid; place-items: center; color: var(--text-secondary); background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
 .shell-theme-switcher button.active { color: var(--color-primary); background: var(--bg-card); box-shadow: var(--shadow-sm); }
