@@ -91,8 +91,9 @@ WCM_IFS_REPLICA_CPUS=4
 CPU 环境变量仅在加载可选文件后使用；只配置环境变量不会开启配额。
 不要把上述示例默认写入部署环境。硬配额过低会导致 CPU 推理被 CFS 节流，降低实际并发吞吐。
 更新存量部署时应核验容器的 `HostConfig.NanoCpus`：取消配额后的值为 `0`。
-变更 CPU 配额无需重启 InsightFace，可按 Compose 服务标签找到当前容器后使用 `docker update --cpus 0`；
-同步更新 Compose 文件以保证之后重建仍不设置配额。
+某些 Docker 版本（251 的 28.3.1 已实测）不会通过 `docker update --cpus 0` 清除既有 `NanoCpus`，
+不能只凭命令成功就认定取消限制。需要在无审核、无人物写入时按新配置依次重建副本，
+每个副本健康后再处理下一个，并核验 `NanoCpus=0`、`CpuQuota=0/-1`；模型、SQLite 目录及原主节点保持原状。
 
 ## 迁移和验收
 

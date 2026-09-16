@@ -43,8 +43,10 @@ async def test_timeout_stops_composed_sdk_before_more_requests_and_retry_gets_fr
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("first_cancel", ["manual", "timeout"])
 async def test_cancel_drains_current_sdk_request_before_releasing_scope_but_stops_followups(
     monkeypatch,
+    first_cancel,
 ):
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     calls = []
@@ -57,6 +59,9 @@ async def test_cancel_drains_current_sdk_request_before_releasing_scope_but_stop
         return {}
 
     monkeypatch.setattr("wcm_facerec.ifs_adapter.Client._request", request)
+    monkeypatch.setattr(
+        settings, "insightface_timeout_s", 0.03 if first_cancel == "timeout" else 10
+    )
     target = InsightFaceAdapter("http://example.invalid", "people", timeout=10)
 
     def composed():
@@ -66,8 +71,11 @@ async def test_cancel_drains_current_sdk_request_before_releasing_scope_but_stop
     task = asyncio.create_task(call_model("face", lambda: run_sync(composed)))
     try:
         assert await asyncio.to_thread(started.wait, 1)
-        task.cancel()
+        if first_cancel == "manual":
+            task.cancel()
         assert await asyncio.to_thread(calls[0].cancelled.wait, 1)
+        task.cancel()  # Cancellation can race with the model timeout cleanup.
+        await asyncio.sleep(0.01)
         assert not task.done() and not finished.is_set()
         release.set()
         with pytest.raises(asyncio.CancelledError):

@@ -8,8 +8,9 @@ from functools import wraps
 
 import httpx
 
+from wcm_facerec.cluster import drain_task
 from wcm_facerec.config import settings
-from wcm_facerec.model_budget import model_request_budget
+from wcm_facerec.model_budget import cancel_model_requests, model_request_budget
 
 from .utils import VIDEO_EXTENSIONS
 
@@ -77,7 +78,16 @@ async def call_model(model, operation):
         try:
             try:
                 with model_request_budget(timeout):
-                    result = await asyncio.wait_for(operation(), timeout=timeout)
+                    pending = asyncio.create_task(operation())
+                    try:
+                        result = await asyncio.wait_for(asyncio.shield(pending), timeout=timeout)
+                    finally:
+                        if not pending.done():
+                            cancel_model_requests()
+                            pending.cancel()
+                        # wait_for's own cleanup can be interrupted by another
+                        # cancellation; keep ownership until the operation exits.
+                        await drain_task(pending, propagate_cancel=True)
             except asyncio.TimeoutError as exc:
                 raise httpx.ReadTimeout(f"{model} model exceeded {timeout:g}s deadline") from exc
         except ModelServiceUnavailable:

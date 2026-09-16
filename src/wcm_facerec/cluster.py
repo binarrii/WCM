@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
 import pymysql
@@ -30,12 +30,17 @@ def connect():
     )
 
 
-async def drain_task(task):
+async def drain_task(task, *, propagate_cancel=False):
     """Repeated cancellation must not detach a still-running SDK/cleanup task."""
     waiter = asyncio.gather(task, return_exceptions=True)
+    cancelled = False
     while not waiter.done():
-        with suppress(asyncio.CancelledError):
+        try:
             await asyncio.shield(waiter)
+        except asyncio.CancelledError:
+            cancelled = True
+    if cancelled and propagate_cancel:
+        raise asyncio.CancelledError
     return waiter.result()[0]
 
 
