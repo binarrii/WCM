@@ -7,11 +7,12 @@ import secrets
 import time
 from contextlib import contextmanager
 from functools import lru_cache
+from ipaddress import ip_network
 from pathlib import Path
 
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import (
     BigInteger,
@@ -42,7 +43,13 @@ class AuthSettings(BaseSettings):
     origins: list[str] = ["http://localhost:5173", "http://localhost:8000"]
     rp_id: str = "localhost"
     cookie_secure: bool = False
+    trusted_proxies: list[str] = []
     session_hours: int = Field(default=12, ge=1, le=168)
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def valid_proxy_networks(cls, values):
+        return [str(ip_network(value, strict=False)) for value in values]
 
 
 config = AuthSettings()
@@ -88,6 +95,13 @@ credentials = Table(
     Column("sign_count", BigInteger, nullable=False),
     Column("name", String(80), nullable=False),
     Column("created_at", Double, nullable=False),
+)
+passkey_details = Table(
+    "wcm_passkey_details",
+    metadata,
+    Column("key_id", String(64), primary_key=True),
+    Column("aaguid", String(36), nullable=False),
+    Column("client_ip", String(45)),
 )
 challenges = Table(
     "wcm_auth_challenges",

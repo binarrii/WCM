@@ -37,6 +37,7 @@ from webauthn.helpers.structs import (
 
 from . import auth_store as store
 from .avatar_images import MAX_AVATAR_BYTES, normalize_avatar
+from .passkey_details import client_ip, provider_name
 
 router = APIRouter(prefix="/auth", tags=["账户与权限"])
 password_hasher = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
@@ -458,14 +459,37 @@ def security(request: Request):
         items = (
             connection.execute(
                 select(
-                    store.credentials.c.id, store.credentials.c.name, store.credentials.c.created_at
-                ).where(store.credentials.c.user_id == user["id"])
+                    store.credentials.c.id,
+                    store.credentials.c.name,
+                    store.credentials.c.created_at,
+                    store.passkey_details.c.key_id,
+                    store.passkey_details.c.aaguid,
+                    store.passkey_details.c.client_ip,
+                )
+                .select_from(
+                    store.credentials.outerjoin(
+                        store.passkey_details,
+                        store.credentials.c.id == store.passkey_details.c.key_id,
+                    )
+                )
+                .where(store.credentials.c.user_id == user["id"])
+                .order_by(store.credentials.c.created_at.desc(), store.credentials.c.id)
             )
             .mappings()
             .all()
         )
         return {
-            "passkeys": [dict(item) for item in items],
+            "passkeys": [
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "created_at": item["created_at"],
+                    "provider_name": provider_name(item["aaguid"]),
+                    "client_ip": item["client_ip"],
+                    "details_recorded": item["key_id"] is not None,
+                }
+                for item in items
+            ],
             "totp_enabled": bool(user["totp_secret"]),
             "recovery_codes_remaining": len(json.loads(user["recovery_hashes"] or "[]")),
         }
@@ -673,6 +697,13 @@ def registration_verify(payload: PasskeyResponse, request: Request):
                 created_at=time.time(),
             )
         )
+        connection.execute(
+            insert(store.passkey_details).values(
+                key_id=key_id,
+                aaguid=verified.aaguid,
+                client_ip=client_ip(request, store.config.trusted_proxies),
+            )
+        )
         log(connection, user["id"], "passkey.added", key_id)
         return {"ok": True}
 
@@ -836,6 +867,9 @@ def delete_passkey(key_id: str, request: Request):
         )
         if not result.rowcount:
             raise HTTPException(404, "Passkey 不存在")
+        connection.execute(
+            delete(store.passkey_details).where(store.passkey_details.c.key_id == key_id)
+        )
         connection.execute(
             delete(store.sessions).where(
                 (store.sessions.c.user_id == user["id"])

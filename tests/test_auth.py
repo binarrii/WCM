@@ -5,6 +5,7 @@ import io
 import json
 import struct
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 
@@ -719,8 +720,9 @@ def test_websocket_auth_origin_and_live_revocation(client):
 class Authenticator:
     """A real ES256 test authenticator (no mocked WebAuthn verifier)."""
 
-    def __init__(self):
+    def __init__(self, aaguid="00000000-0000-0000-0000-000000000000"):
         self.key = ec.generate_private_key(ec.SECP256R1())
+        self.aaguid = uuid.UUID(aaguid).bytes
         self.id = b"test-credential-" + self.key.public_key().public_numbers().x.to_bytes(32, "big")
 
     def client_data(self, options, kind, origin=ORIGIN):
@@ -743,10 +745,10 @@ class Authenticator:
             -3: public.y.to_bytes(32, "big"),
         }
         auth_data = (
-            hashlib.sha256(b"localhost").digest()
+            hashlib.sha256(options["rp"]["id"].encode()).digest()
             + bytes([0x45 if uv else 0x41])
             + struct.pack(">I", 0)
-            + b"\x00" * 16
+            + self.aaguid
             + struct.pack(">H", len(self.id))
             + self.id
             + cbor2.dumps(cose)
@@ -834,6 +836,102 @@ def test_real_passkey_registration_login_counter_and_removal(client):
     key_id = client.get("/api/v1/auth/security").json()["passkeys"][0]["id"]
     assert authorized(client, "DELETE", f"/api/v1/auth/passkeys/{key_id}").status_code == 200
     assert second.get("/api/v1/auth/me").status_code == 401
+
+
+@pytest.mark.parametrize(
+    "aaguid,provider",
+    [
+        ("ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4", "Google Password Manager"),
+        ("fbfc3007-154e-4ecc-8c0b-6e020557d7bd", "Apple Passwords"),
+        ("00000000-0000-0000-0000-000000000000", None),
+        ("11111111-1111-1111-1111-111111111111", None),
+    ],
+)
+def test_passkey_details_are_recorded_from_registration_and_scoped_to_owner(
+    client, monkeypatch, aaguid, provider
+):
+    monkeypatch.setattr(store.config, "trusted_proxies", ["172.25.0.0/16", "10.252.25.198/32"])
+    with closing(
+        TestClient(
+            client.app,
+            base_url=ORIGIN,
+            client=("172.25.0.4", 50000),
+            headers={
+                "Origin": ORIGIN,
+                "X-WCM-Client": "web",
+                "X-Forwarded-For": "203.0.113.9, 10.252.25.198",
+            },
+        )
+    ) as browser:
+        signup(browser)
+        authenticator = Authenticator(aaguid)
+        bind(browser, authenticator)
+        key = browser.get("/api/v1/auth/security").json()["passkeys"][0]
+        assert key["provider_name"] == provider
+        assert key["client_ip"] == "203.0.113.9"
+        assert key["details_recorded"] is True
+        with store.engine().connect() as connection:
+            assert (
+                store.row(
+                    connection, store.passkey_details, store.passkey_details.c.key_id == key["id"]
+                )["aaguid"]
+                == aaguid
+            )
+        with store.transaction() as connection:
+            connection.execute(
+                update(store.credentials)
+                .where(store.credentials.c.id == key["id"])
+                .values(created_at=1789534567.125)
+            )
+        store.initialize()
+        assert (
+            browser.get("/api/v1/auth/security").json()["passkeys"][0]["created_at"]
+            == 1789534567.125
+        )
+        # Later sign-ins from a different address must not rewrite the binding IP.
+        browser.headers["X-Forwarded-For"] = "2001:db8::9, 10.252.25.198"
+        password_login(browser)
+        assert (
+            browser.get("/api/v1/auth/security").json()["passkeys"][0]["client_ip"] == "203.0.113.9"
+        )
+        signup(client, "unrelated")
+        assert client.get("/api/v1/auth/security").json()["passkeys"] == []
+        assert authorized(client, "DELETE", f"/api/v1/auth/passkeys/{key['id']}").status_code == 404
+        assert (
+            browser.get("/api/v1/auth/security").json()["passkeys"][0]["provider_name"] == provider
+        )
+        assert (
+            authorized(browser, "DELETE", f"/api/v1/auth/passkeys/{key['id']}").status_code == 200
+        )
+        with store.engine().connect() as connection:
+            assert (
+                store.row(
+                    connection, store.passkey_details, store.passkey_details.c.key_id == key["id"]
+                )
+                is None
+            )
+
+
+def test_legacy_passkey_without_details_still_lists_and_authenticates(client):
+    user = signup(client)["user"]
+    authenticator = Authenticator()
+    bind(client, authenticator)
+    with store.transaction() as connection:
+        connection.execute(delete(store.passkey_details))
+    key = client.get("/api/v1/auth/security").json()["passkeys"][0]
+    assert key["provider_name"] is None and key["client_ip"] is None
+    assert key["details_recorded"] is False
+    pending = client.post("/api/v1/auth/passkeys/login/options").json()
+    assert (
+        client.post(
+            "/api/v1/auth/passkeys/login/verify",
+            json={
+                "challenge_id": pending["challenge_id"],
+                "credential": authenticator.authenticate(pending["options"], user["id"]),
+            },
+        ).status_code
+        == 200
+    )
 
 
 @pytest.mark.parametrize("invalid", ["origin", "rp", "uv", "signature", "handle", "challenge"])

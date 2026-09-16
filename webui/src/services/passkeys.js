@@ -1,6 +1,15 @@
 export function passkeyAvailable() {
   return Boolean(window.isSecureContext && window.PublicKeyCredential && navigator.credentials);
 }
+export function formatPasskeyCreatedAt(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return '未记录';
+  const date = new Date(Number(seconds) * 1000);
+  if (Number.isNaN(date.getTime())) return '未记录';
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(date).replaceAll('/', '-');
+}
 export function decodeBase64Url(value) {
   const encoded = value.replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(encoded + '='.repeat((4 - encoded.length % 4) % 4)), c => c.charCodeAt(0));

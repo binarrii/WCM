@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { Fingerprint, KeyRound, ShieldCheck } from '@lucide/vue';
 import api from '../services/api';
 import { auth, roleNames, acceptSession, authError } from '../services/auth';
-import { createPasskey, passkeyAvailable } from '../services/passkeys';
+import { createPasskey, passkeyAvailable, formatPasskeyCreatedAt } from '../services/passkeys';
 import { withReauthentication } from '../services/reauth';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import PasswordDialog from '../components/PasswordDialog.vue';
@@ -141,7 +141,21 @@ onMounted(() => perform(load));
         <div class="security-title"><Fingerprint /><h2>Passkey</h2><span class="security-state">{{ security.passkeys.length }} 个</span></div>
         <p>使用指纹、面容或设备 PIN 登录。Passkey 已包含设备持有与身份验证，登录时无需再输入动态验证码。</p>
         <p v-if="!passkeySupported" class="auth-note">当前为非安全连接，Passkey 需要通过 HTTPS 域名访问后绑定和使用。</p>
-        <ul class="passkey-list"><li v-for="key in security.passkeys" :key="key.id"><div><strong>{{ key.name }}</strong><small>{{ new Date(key.created_at * 1000).toLocaleDateString('zh-CN') }}</small></div><button class="auth-link danger" :disabled="busy" @click="pendingKey = key">移除</button></li></ul>
+        <ul class="passkey-list">
+          <li v-for="key in security.passkeys" :key="key.id">
+            <div class="passkey-info">
+              <strong>{{ key.name }}</strong>
+              <dl class="passkey-meta">
+                <div><dt>设备 / 管理器</dt><dd>{{ key.provider_name || (key.details_recorded ? '未知设备 / 管理器' : '未记录') }}</dd></div>
+                <div><dt>添加时间</dt><dd class="passkey-timestamp">{{ formatPasskeyCreatedAt(key.created_at) }}</dd></div>
+                <div><dt>绑定 IP</dt><dd class="passkey-ip">{{ key.client_ip || '未记录' }}</dd></div>
+              </dl>
+            </div>
+            <button class="auth-link danger" :disabled="busy" :aria-label="`移除 Passkey：${key.name}`" @click="pendingKey = key">移除</button>
+          </li>
+        </ul>
+        <p v-if="security.passkeys.some(key => !key.details_recorded)" class="auth-hint">历史 Passkey 未采集设备和 IP 信息，重新绑定后可记录。</p>
+        <p v-else-if="security.passkeys.some(key => !key.provider_name)" class="auth-hint">部分设备不会提供可识别的管理器信息，不影响 Passkey 使用。</p>
         <form class="auth-form" @submit.prevent="bindPasskey"><fieldset :disabled="busy || !passkeySupported"><label>设备名称<input v-model="passkeyName" maxlength="80" required placeholder="例如：办公电脑" /></label><button class="auth-secondary" type="submit">添加 Passkey</button></fieldset></form>
       </section>
       <section class="security-card"><div class="security-title"><KeyRound /><h2>登录密码</h2></div><p>使用至少 12 个字符的长密码。修改后其他设备需要重新登录。</p><button class="auth-secondary" :disabled="busy" @click="chooseAction('password')">修改密码</button></section>
