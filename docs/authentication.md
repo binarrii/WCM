@@ -57,16 +57,20 @@ Passkey 使用 WebAuthn，要求设备持有证明及用户验证（指纹、面
 Passkey 重新验证使用独立用途的 challenge，绑定当前用户和当前会话，不能用登录 challenge 或他人的 Passkey 代替。
 重新验证只返回当前操作的一次性凭证，不返回免验证会话。
 
-Passkey 列表显示自定义名称、设备/密码管理器、添加时间（浏览器本地时间，精确到秒）和绑定时的客户端 IP。
+Passkey 列表显示自定义名称、设备/密码管理器、添加时间、上次使用时间、首次绑定 IP 和上次使用 IP。
+时间按浏览器本地时区显示，精确到秒。成功使用 Passkey 登录或完成身份重新验证后，
+在更新签名计数的同一事务中更新 `wcm_passkeys.last_used_at` 和 `last_used_ip`；
+密码登录、仅请求验证选项、验证失败及重放不会更新这两项。新绑定或升级后尚无使用记录时显示“暂无记录”，
+已有凭证下次成功使用即可记录，不以添加时间替代历史使用时间，也不要求重新绑定。
 新注册的 Passkey 在验证成功后，将注册数据中的 AAGUID 和绑定 IP 写入独立的 `wcm_passkey_details` 表；
 信息仅本人可查看，移除 Passkey 时同步删除。后续登录不会覆盖绑定 IP。
 管理器名称使用本地固定版本的 [AAGUID 名称表](https://github.com/passkeydeveloper/passkey-authenticator-aaguids)，
 覆盖 Google Password Manager、Apple Passwords、iCloud Keychain (Managed)、Chrome on Mac 等，不在运行时请求第三方服务。
 名称仅辅助管理，不用于认证或授权决策。[AAGUID 全零表示未知](https://web.dev/articles/webauthn-aaguid)，不能根据浏览器或系统猜成 iCloud Keychain。
-旧记录没有保存 AAGUID 和客户端 IP，显示“未记录”，重新绑定后可采集；已有 Passkey 继续正常登录。
+旧记录没有保存 AAGUID 和首次绑定 IP，显示“未记录”，重新绑定后可采集；已有 Passkey 继续正常登录。
 
 `WCM_AUTH_TRUSTED_PROXIES` 明确列出可信代理的 IP 或 CIDR，默认 `[]`，不信任转发头。
-绑定 IP 从实际连接来源开始，沿 `X-Forwarded-For` 从右向左跳过可信代理，遇到首个非可信地址即停止，
+首次绑定 IP 和上次使用 IP 均从实际连接来源开始，沿 `X-Forwarded-For` 从右向左跳过可信代理，遇到首个非可信地址即停止，
 避免直连客户端伪造最左侧地址。支持 IPv4/IPv6，不进行地理位置查询。
 251 当前代理链配置为 WebUI 所在 Docker 网络和 HTTPS 反代地址：
 
@@ -76,7 +80,9 @@ WCM_AUTH_TRUSTED_PROXIES=["172.25.0.0/16","10.252.25.198/32"]
 
 若反代前还有 NAT，记录的是可信反代实际提供的来源地址；要取得 NAT 前的地址，需由上游保留转发链。
 代理或 Docker 网络变更时同步调整该配置，勿将任意来源或整个内网都加入信任范围。
-发布只新增附属表，不改动旧 Passkey 表；回滚保留附属表并恢复 API/WebUI 镜像与代理配置，避免恢复数据库快照覆盖用户新绑定的凭证。
+启动时在数据库 schema 锁内，为已有 `wcm_passkeys` 表幂等添加可空的 `last_used_at DOUBLE` 和 `last_used_ip VARCHAR(45)` 列，
+保留已有凭证及签名计数。回滚保留新增列和附属表，恢复 API/WebUI 镜像与代理配置即可；
+不要恢复数据库快照覆盖用户新绑定的凭证或已递增的签名计数。
 
 251 同时支持内网 HTTP 和反向代理 HTTPS 两个入口，共用用户、权限和账户数据：
 
@@ -227,6 +233,13 @@ Cookie 为 HttpOnly / SameSite=Lax，HTTPS 会话自动启用 Secure。密码采
 - 251 两个 API 副本读取新旧记录一致；经真实入口用临时测试账户和软件认证器完成注册，管理器名称、时间和 IP 均正确保存，伪造的最左侧转发 IP 被忽略；测试账户和凭证已清理。
 - HTTPS 上游当前提供 `10.42.x.x` 网关来源，应用如实记录；终端原始 IP 需上游保留完整转发链后才能获取。
 - 已备份配置、认证数据及旧镜像，更新 API/WebUI 并核验全部 9 个前端资源；Worker、face-sync、InsightFace 未重启。
+
+### 2026-09-16 Passkey 使用记录验证
+
+- 后端认证、Passkey 信息与头像测试 101 项、前端 115 项通过，Ruff、生产构建与桌面/390 px 排版核验通过。
+- 覆盖旧表原地升级、重复初始化、成功登录及重新验证更新最近时间/IP、IPv6、首次绑定 IP 不变，以及密码登录、错误证明、重放不改写使用记录。
+- 251 两个 API 副本共享新增字段；内网 HTTP 和反代 HTTPS 均以临时账户及真实 ES256 软件认证器验证注册、登录、重新验证和重放拒绝，测试数据已清理。
+- 已核验 HTTPS 新前端资源及服务健康；仅更新 API/WebUI，其他容器未重启。回滚备份：`/home/aigc/wcm-cluster/backups/passkey-usage-20260916-091625Z`。
 
 ### 身份验证弹窗更新
 

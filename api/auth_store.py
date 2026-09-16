@@ -28,6 +28,7 @@ from sqlalchemy import (
     create_engine,
     delete,
     insert,
+    inspect,
     select,
     update,
 )
@@ -95,6 +96,8 @@ credentials = Table(
     Column("sign_count", BigInteger, nullable=False),
     Column("name", String(80), nullable=False),
     Column("created_at", Double, nullable=False),
+    Column("last_used_at", Double),
+    Column("last_used_ip", String(45)),
 )
 passkey_details = Table(
     "wcm_passkey_details",
@@ -218,6 +221,15 @@ def initialize():
             raise RuntimeError("Authentication schema initialization timed out")
         try:
             metadata.create_all(connection)
+            passkey_columns = {
+                column["name"] for column in inspect(connection).get_columns("wcm_passkeys")
+            }
+            # Preserve existing credentials; historical usage cannot be inferred.
+            for name, sql_type in (("last_used_at", "DOUBLE"), ("last_used_ip", "VARCHAR(45)")):
+                if name not in passkey_columns:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE wcm_passkeys ADD COLUMN {name} {sql_type} NULL"
+                    )
             connection.commit()
             if not connection.execute(select(mutex.c.id)).first():
                 connection.execute(insert(mutex).values(id=1))

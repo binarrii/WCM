@@ -148,13 +148,15 @@ onMounted(() => perform(load));
               <dl class="passkey-meta">
                 <div><dt>设备 / 管理器</dt><dd>{{ key.provider_name || (key.details_recorded ? '未知设备 / 管理器' : '未记录') }}</dd></div>
                 <div><dt>添加时间</dt><dd class="passkey-timestamp">{{ formatPasskeyCreatedAt(key.created_at) }}</dd></div>
-                <div><dt>绑定 IP</dt><dd class="passkey-ip">{{ key.client_ip || '未记录' }}</dd></div>
+                <div><dt>上次使用时间</dt><dd class="passkey-timestamp">{{ key.last_used_at == null ? '暂无记录' : formatPasskeyCreatedAt(key.last_used_at) }}</dd></div>
+                <div><dt>首次绑定 IP</dt><dd class="passkey-ip">{{ key.client_ip || '未记录' }}</dd></div>
+                <div><dt>上次使用 IP</dt><dd class="passkey-ip">{{ key.last_used_at == null ? '暂无记录' : (key.last_used_ip || '未记录') }}</dd></div>
               </dl>
             </div>
             <button class="auth-link danger" :disabled="busy" :aria-label="`移除 Passkey：${key.name}`" @click="pendingKey = key">移除</button>
           </li>
         </ul>
-        <p v-if="security.passkeys.some(key => !key.details_recorded)" class="auth-hint">历史 Passkey 未采集设备和 IP 信息，重新绑定后可记录。</p>
+        <p v-if="security.passkeys.some(key => !key.details_recorded)" class="auth-hint">历史 Passkey 未采集设备和首次绑定 IP，重新绑定后可记录。</p>
         <p v-else-if="security.passkeys.some(key => !key.provider_name)" class="auth-hint">部分设备不会提供可识别的管理器信息，不影响 Passkey 使用。</p>
         <form class="auth-form" @submit.prevent="bindPasskey"><fieldset :disabled="busy || !passkeySupported"><label>设备名称<input v-model="passkeyName" maxlength="80" required placeholder="例如：办公电脑" /></label><button class="auth-secondary" type="submit">添加 Passkey</button></fieldset></form>
       </section>

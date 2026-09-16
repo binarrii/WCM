@@ -462,6 +462,8 @@ def security(request: Request):
                     store.credentials.c.id,
                     store.credentials.c.name,
                     store.credentials.c.created_at,
+                    store.credentials.c.last_used_at,
+                    store.credentials.c.last_used_ip,
                     store.passkey_details.c.key_id,
                     store.passkey_details.c.aaguid,
                     store.passkey_details.c.client_ip,
@@ -484,6 +486,8 @@ def security(request: Request):
                     "id": item["id"],
                     "name": item["name"],
                     "created_at": item["created_at"],
+                    "last_used_at": item["last_used_at"],
+                    "last_used_ip": item["last_used_ip"],
                     "provider_name": provider_name(item["aaguid"]),
                     "client_ip": item["client_ip"],
                     "details_recorded": item["key_id"] is not None,
@@ -791,7 +795,11 @@ def reauthentication_verify(payload: PasskeyResponse, request: Request):
         connection.execute(
             update(store.credentials)
             .where(store.credentials.c.id == key["id"])
-            .values(sign_count=verified.new_sign_count)
+            .values(
+                sign_count=verified.new_sign_count,
+                last_used_at=time.time(),
+                last_used_ip=client_ip(request, store.config.trusted_proxies),
+            )
         )
         log(connection, user["id"], "reauth.passkey")
         return issue_verification(connection, identity, item["payload"]["operation"])
@@ -848,7 +856,11 @@ def authentication_verify(payload: PasskeyResponse, request: Request, response: 
         connection.execute(
             update(store.credentials)
             .where(store.credentials.c.id == key["id"])
-            .values(sign_count=verified.new_sign_count)
+            .values(
+                sign_count=verified.new_sign_count,
+                last_used_at=time.time(),
+                last_used_ip=client_ip(request, store.config.trusted_proxies),
+            )
         )
         # A verified Passkey already proves possession and biometric/PIN verification.
         return finish_login(connection, user, request, response)

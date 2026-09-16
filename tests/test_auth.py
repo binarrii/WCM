@@ -808,18 +808,23 @@ def test_real_passkey_registration_login_counter_and_removal(client):
     user = signup(client)["user"]
     authenticator = Authenticator()
     bind(client, authenticator)
+    assert client.get("/api/v1/auth/security").json()["passkeys"][0]["last_used_at"] is None
     second = sibling(client)
     pending = second.post("/api/v1/auth/passkeys/login/options").json()
+    assert client.get("/api/v1/auth/security").json()["passkeys"][0]["last_used_at"] is None
     assertion = {
         "challenge_id": pending["challenge_id"],
         "credential": authenticator.authenticate(pending["options"], user["id"]),
     }
+    before_login = time.time()
     assert (
         accept(second, second.post("/api/v1/auth/passkeys/login/verify", json=assertion))["user"][
             "id"
         ]
         == user["id"]
     )
+    last_used = client.get("/api/v1/auth/security").json()["passkeys"][0]["last_used_at"]
+    assert before_login <= last_used <= time.time()
     assert second.post("/api/v1/auth/passkeys/login/verify", json=assertion).status_code == 400
     pending = second.post("/api/v1/auth/passkeys/login/options").json()
     # Reusing a non-zero authenticator counter fails with a fresh challenge too.
@@ -833,6 +838,9 @@ def test_real_passkey_registration_login_counter_and_removal(client):
         ).status_code
         == 400
     )
+    # Failed/replayed assertions and password logins are not Passkey usage.
+    password_login(second)
+    assert client.get("/api/v1/auth/security").json()["passkeys"][0]["last_used_at"] == last_used
     key_id = client.get("/api/v1/auth/security").json()["passkeys"][0]["id"]
     assert authorized(client, "DELETE", f"/api/v1/auth/passkeys/{key_id}").status_code == 200
     assert second.get("/api/v1/auth/me").status_code == 401
@@ -912,15 +920,98 @@ def test_passkey_details_are_recorded_from_registration_and_scoped_to_owner(
             )
 
 
-def test_legacy_passkey_without_details_still_lists_and_authenticates(client):
+def test_passkey_usage_tracks_successful_login_and_reauthentication_ip(client, monkeypatch):
+    monkeypatch.setattr(store.config, "trusted_proxies", ["172.25.0.0/16", "10.252.25.198/32"])
+    with closing(
+        TestClient(
+            client.app,
+            base_url=ORIGIN,
+            client=("172.25.0.4", 50000),
+            headers={
+                "Origin": ORIGIN,
+                "X-WCM-Client": "web",
+                "X-Forwarded-For": "203.0.113.9, 10.252.25.198",
+            },
+        )
+    ) as browser:
+        user = signup(browser)["user"]
+        authenticator = Authenticator()
+        bind(browser, authenticator)
+
+        def record():
+            return browser.get("/api/v1/auth/security").json()["passkeys"][0]
+
+        registered = record()
+        assert registered["client_ip"] == "203.0.113.9"
+        assert registered["last_used_at"] is None and registered["last_used_ip"] is None
+        browser.headers["X-Forwarded-For"] = "198.51.100.77, 10.252.25.198"
+        password_login(browser)
+        assert record() == registered
+
+        pending = accept(browser, browser.post("/api/v1/auth/passkeys/login/options"))
+        accept(
+            browser,
+            browser.post(
+                "/api/v1/auth/passkeys/login/verify",
+                json={
+                    "challenge_id": pending["challenge_id"],
+                    "credential": authenticator.authenticate(pending["options"], user["id"]),
+                },
+            ),
+        )
+        logged_in = record()
+        assert logged_in["last_used_ip"] == "198.51.100.77"
+        assert logged_in["last_used_at"] >= registered["created_at"]
+        assert logged_in["client_ip"] == registered["client_ip"]
+
+        # IPv6 and spoofed leftmost headers follow the same trusted-proxy policy.
+        browser.headers["X-Forwarded-For"] = "198.51.100.200, 2001:db8::9, 10.252.25.198"
+        pending = accept(
+            browser,
+            browser.post(
+                "/api/v1/auth/passkeys/reauthenticate/options",
+                json={"operation": "POST /api/v1/auth/password"},
+            ),
+        )
+        assert record() == logged_in
+        assertion = {
+            "challenge_id": pending["challenge_id"],
+            "credential": authenticator.authenticate(pending["options"], user["id"], count=2),
+        }
+        accept(browser, browser.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion))
+        reauthenticated = record()
+        assert reauthenticated["last_used_ip"] == "2001:db8::9"
+        assert reauthenticated["last_used_at"] > logged_in["last_used_at"]
+        assert reauthenticated["client_ip"] == registered["client_ip"]
+        browser.headers["X-Forwarded-For"] = "192.0.2.10, 10.252.25.198"
+        assert (
+            browser.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code
+            == 400
+        )
+        password_login(browser)
+        store.initialize()
+        assert record() == reauthenticated
+
+
+def test_legacy_passkey_schema_upgrades_without_losing_credentials(client):
     user = signup(client)["user"]
     authenticator = Authenticator()
     bind(client, authenticator)
     with store.transaction() as connection:
         connection.execute(delete(store.passkey_details))
+        # Simulate the pre-upgrade schema, retaining the real credential and counter.
+        connection.exec_driver_sql("ALTER TABLE wcm_passkeys DROP COLUMN last_used_at")
+        connection.exec_driver_sql("ALTER TABLE wcm_passkeys DROP COLUMN last_used_ip")
+        before = dict(connection.exec_driver_sql("SELECT * FROM wcm_passkeys").mappings().one())
+    store.initialize()
+    store.initialize()  # Repeated startup must not reset existing data.
+    with store.engine().connect() as connection:
+        after = dict(connection.execute(select(store.credentials)).mappings().one())
+        assert after == before | {"last_used_at": None, "last_used_ip": None}
     key = client.get("/api/v1/auth/security").json()["passkeys"][0]
     assert key["provider_name"] is None and key["client_ip"] is None
     assert key["details_recorded"] is False
+    assert key["last_used_at"] is None
     pending = client.post("/api/v1/auth/passkeys/login/options").json()
     assert (
         client.post(
@@ -932,6 +1023,10 @@ def test_legacy_passkey_without_details_still_lists_and_authenticates(client):
         ).status_code
         == 200
     )
+    store.initialize()
+    used_key = client.get("/api/v1/auth/security").json()["passkeys"][0]
+    assert used_key["last_used_at"] >= key["created_at"]
+    assert used_key["client_ip"] is None and used_key["details_recorded"] is False
 
 
 @pytest.mark.parametrize("invalid", ["origin", "rp", "uv", "signature", "handle", "challenge"])
@@ -959,6 +1054,7 @@ def test_real_passkey_rejects_invalid_assertions(client, invalid):
         ).status_code
         == 400
     )
+    assert client.get("/api/v1/auth/security").json()["passkeys"][0]["last_used_at"] is None
 
 
 def test_passkey_requires_secure_configured_origin_and_verified_registration(client):
@@ -1159,6 +1255,10 @@ def test_real_passkey_produces_a_single_operation_grant(client, without_handle):
     user = signup(client)["user"]
     authenticator = Authenticator()
     bind(client, authenticator)
+    # A later reauthentication must replace the previous successful-use timestamp.
+    previous_use = time.time() - 3600
+    with store.transaction() as connection:
+        connection.execute(update(store.credentials).values(last_used_at=previous_use))
     operation = "POST /api/v1/auth/password"
     pending = accept(
         client,
@@ -1172,13 +1272,17 @@ def test_real_passkey_produces_a_single_operation_grant(client, without_handle):
     if without_handle:
         credential["response"].pop("userHandle")
     assertion = {"challenge_id": pending["challenge_id"], "credential": credential}
+    before_reauth = time.time()
     grant = accept(
         client, client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion)
     )
+    last_used = client.get("/api/v1/auth/security").json()["passkeys"][0]["last_used_at"]
+    assert previous_use < before_reauth <= last_used <= time.time()
     assert (
         client.post("/api/v1/auth/passkeys/reauthenticate/verify", json=assertion).status_code
         == 400
     )
+    assert client.get("/api/v1/auth/security").json()["passkeys"][0]["last_used_at"] == last_used
     assert (
         client.post("/api/v1/auth/password", json={"new_password": PASSWORD + "new"}).status_code
         == 403
@@ -1230,6 +1334,8 @@ def test_passkey_reauthentication_rejects_invalid_proofs(client, invalid):
         ).status_code
         == 400
     )
+    key = client.get("/api/v1/auth/security").json()["passkeys"][0]
+    assert key["last_used_at"] is None and key["last_used_ip"] is None
     assert (
         client.post("/api/v1/auth/password", json={"new_password": PASSWORD + "new"}).status_code
         == 403
