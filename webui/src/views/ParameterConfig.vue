@@ -54,10 +54,10 @@ const form = ref({
 const concurrencyHint = computed(() => {
   const key = form.value.key;
   if (key === 'face_neighbor_concurrency') {
-    return '填写整数：1～8 限制每个视频同时处理的补帧数；≤ 0 不限制补帧并发，由模型服务端控制。补帧总量上限仍有效。';
+    return '填写整数：1～8 限制每个视频同时处理的补帧数；≤ 0 不限制补帧并发，由模型服务端控制。';
   }
   if (['guard_concurrency', 'insightface_concurrency', 'ocr_concurrency', 'visual_concurrency'].includes(key)) {
-    return '填写整数：正数限制集群内该模型的调用并发；≤ 0 不限制，由模型服务端控制。任务和窗口并发限制仍有效。';
+    return '填写整数：正数限制集群内该模型的调用并发；≤ 0 不限制，由模型服务端控制。';
   }
   return '';
 });
