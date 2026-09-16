@@ -23,7 +23,7 @@
 .auth-screen .auth-brand { min-height: 44px; margin-bottom: 0; }
 .auth-brand .brand-orb { width: 12px; height: 12px; background: var(--auth-accent); box-shadow: 0 0 20px color-mix(in srgb, var(--auth-accent) 55%, transparent); }
 .auth-appearance { display: grid; align-content: center; justify-items: end; min-height: 44px; gap: 6px; }
-.auth-background-picker { display: flex; align-items: center; gap: 6px; color: var(--auth-muted); font-size: calc(.8rem - 2px); line-height: 20px; opacity: .7; }
+.auth-background-picker { display: flex; align-items: center; gap: 6px; color: var(--auth-muted); font-size: calc(.8rem - 3px); line-height: 20px; opacity: .7; }
 .auth-background-picker svg { width: 15px; height: 15px; color: currentColor; }
 .auth-background-picker select { height: 20px; min-height: 0; max-width: 100%; padding: 0 18px 0 5px; border: 1px solid color-mix(in srgb, var(--auth-control-border) 50%, transparent); border-radius: 4px; font: inherit; line-height: 18px; background: transparent; color: inherit; cursor: pointer; color-scheme: dark; }
 .auth-background-picker select option { background: var(--auth-control-bg); color: var(--auth-ink); }
