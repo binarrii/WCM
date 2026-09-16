@@ -336,7 +336,7 @@ onMounted(loadParameters);
               <select v-model="form.booleanValue" :disabled="saving"><option :value="true">true</option><option :value="false">false</option></select>
             </label>
             <label v-else><span>{{ form.secret ? '新密钥' : '值' }}</span><textarea v-model="form.valueText" :disabled="saving" rows="12" :placeholder="form.secret ? '敏感值不会回显；输入新值后保存，留空会清空当前密钥' : form.type === 'json' ? '{\n  &quot;enabled&quot;: true\n}' : form.type === 'number' ? '10' : '请输入字符串'"></textarea></label>
-            <p v-if="concurrencyHint">{{ concurrencyHint }}</p>
+            <p v-if="concurrencyHint" class="parameter-form-hint">{{ concurrencyHint }}</p>
             <p v-if="formError" class="parameter-form-error" role="alert"><AlertCircle />{{ formError }}</p>
             <footer><button class="secondary" type="button" :disabled="saving" @click="closeEditor">取消</button><button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存参数' }}</button></footer>
           </form>
