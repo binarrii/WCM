@@ -1,10 +1,21 @@
 <script setup>
 import { onMounted, ref } from 'vue';
-import { Fingerprint, ShieldCheck } from '@lucide/vue';
+import { Fingerprint, Palette, ShieldCheck } from '@lucide/vue';
 import api from '../services/api';
 import { acceptSession, authError } from '../services/auth';
 import { passkeyAvailable, usePasskey } from '../services/passkeys';
+import { authBackgrounds, pickAuthBackground, readAuthBackground, saveAuthBackground } from '../services/authBackgrounds';
 import './auth.css';
+import './auth-background.css';
+
+const backgroundPreference = ref(readAuthBackground());
+const background = ref(pickAuthBackground(backgroundPreference.value));
+const backgroundSaved = ref(true);
+function changeBackground(event) {
+  backgroundPreference.value = event.target.value;
+  background.value = pickAuthBackground(backgroundPreference.value);
+  backgroundSaved.value = saveAuthBackground(backgroundPreference.value);
+}
 
 const mode = ref('login');
 const username = ref('');
@@ -52,16 +63,24 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="auth-screen">
-    <section class="auth-intro">
+  <main class="auth-screen" :data-background="background.id">
+    <img class="auth-background" :src="background.src" alt="" aria-hidden="true" fetchpriority="high" />
+    <header class="auth-header">
       <div class="auth-brand"><span class="brand-orb"></span> WCM Core</div>
+      <div class="auth-appearance">
+        <label class="auth-background-picker"><Palette aria-hidden="true" /><span>背景</span><select aria-label="登录页背景" :value="backgroundPreference" @change="changeBackground"><option value="random">每次随机</option><option v-for="option in authBackgrounds" :key="option.id" :value="option.id">{{ option.name }}</option></select></label>
+        <p v-if="!backgroundSaved" class="auth-background-status" role="status">当前浏览器无法保存背景偏好</p>
+      </div>
+    </header>
+    <div class="auth-layout">
+    <section class="auth-intro">
       <span class="auth-eyebrow">智能内容审核工作台</span>
-      <h1>每一次审核，<br>从可信身份开始。</h1>
-      <p>人物识别、视频审核与团队协作，<br>在统一的工作空间中完成。</p>
+      <h1>人物识别、违规审核，<br>一站完成。</h1>
+      <p>管理人物库，识别视频人物，检测违规内容，<br class="auth-desktop-break">快速定位风险片段。</p>
       <div class="auth-trust"><ShieldCheck /><span>密码 · Passkey · 双重验证</span></div>
     </section>
     <section class="auth-card" aria-label="账户登录与注册">
-      <div class="auth-tabs" v-if="!challenge"><button :class="{ active: mode === 'login' }" :disabled="busy" @click="switchMode('login')">登录</button><button :class="{ active: mode === 'register' }" :disabled="busy" @click="switchMode('register')">注册</button></div>
+      <div class="auth-tabs" v-if="!challenge"><button :class="{ active: mode === 'login' }" :disabled="busy" @click="switchMode('login')">登录</button><button :class="{ active: mode === 'register' }" :disabled="busy" @click="switchMode('register')">创建账户</button></div>
       <h2>{{ challenge ? '双重验证' : mode === 'register' ? '创建你的 WCM 账户' : '欢迎回来' }}</h2>
       <p class="auth-muted">{{ challenge ? '输入验证器中的 6 位验证码，或使用一次性恢复码。' : mode === 'register' ? '注册后即可进入工作台。' : '登录以继续使用内容审核工作台。' }}</p>
       <p v-if="mode === 'register'" class="auth-note">{{ firstRegistration ? '系统尚无用户，首个成功注册的账户将成为超级管理员。' : '新注册账户默认为普通用户，管理员角色由超级管理员授予。' }}</p>
@@ -75,7 +94,7 @@ onMounted(async () => {
           </template>
           <label v-else>验证码或恢复码<input v-model="code" name="code" autocomplete="one-time-code" required minlength="6" maxlength="64" autofocus placeholder="6 位验证码 / 恢复码" /></label>
           <p v-if="error" class="auth-error" role="alert">{{ error }}</p>
-          <button type="submit" class="auth-primary">{{ busy ? '正在验证…' : challenge ? '验证并登录' : mode === 'register' ? '注册' : '登录' }}</button>
+          <button type="submit" class="auth-primary">{{ busy ? '正在验证…' : challenge ? '验证并登录' : mode === 'register' ? '创建账户' : '登录' }}</button>
         </fieldset>
       </form>
       <template v-if="mode === 'login' && !challenge">
@@ -85,5 +104,6 @@ onMounted(async () => {
       </template>
       <button v-if="challenge" class="auth-link" :disabled="busy" @click="switchMode('login')">返回登录</button>
     </section>
+    </div>
   </main>
 </template>

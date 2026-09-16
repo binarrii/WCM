@@ -1,0 +1,152 @@
+<style>
+  #wcm-auth-directions { font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; color-scheme: light; }
+  #wcm-auth-directions * { box-sizing: border-box; }
+  #wcm-auth-directions .wcm-stage { --wcm-ink: #f3f6ff; --wcm-muted: #aebedb; --wcm-accent: #a0baff; position: relative; isolation: isolate; overflow: hidden; min-height: 660px; background: #09132a; padding: 36px 54px 30px; }
+  #wcm-auth-directions .wcm-stage[data-theme="b"] { --wcm-ink: #17233c; --wcm-muted: #526580; --wcm-accent: #4e60cb; background: #eff3fb; }
+  #wcm-auth-directions .wcm-stage[data-theme="c"] { --wcm-accent: #93e7d4; --wcm-muted: #a5c5c6; background: #081a22; }
+  #wcm-auth-directions .wcm-stage[data-theme="d"] { --wcm-accent: #c3bbfb; --wcm-muted: #bcb9d7; background: #131429; }
+  #wcm-auth-directions .wcm-art { position: absolute; inset: 0; z-index: -1; }
+  #wcm-auth-directions .wcm-art > svg { width: 100%; height: 100%; display: block; object-fit: cover; }
+  #wcm-auth-directions .wcm-art[hidden], #wcm-auth-directions [hidden] { display: none !important; }
+  #wcm-auth-directions .wcm-header { display: flex; align-items: center; justify-content: space-between; color: var(--wcm-ink); }
+  #wcm-auth-directions .wcm-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 730; letter-spacing: -.7px; }
+  #wcm-auth-directions .wcm-brand-orb { width: 10px; height: 10px; border-radius: 50%; background: var(--wcm-accent); box-shadow: 0 0 20px color-mix(in srgb, var(--wcm-accent), transparent 55%); }
+  #wcm-auth-directions .wcm-header-caption { font-size: 11px; letter-spacing: 2px; color: var(--wcm-muted); }
+  #wcm-auth-directions .wcm-content { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 56px; align-items: center; min-height: 537px; }
+  #wcm-auth-directions .wcm-intro { color: var(--wcm-ink); align-self: start; padding-top: 105px; }
+  #wcm-auth-directions .wcm-eyebrow { font-size: 11px; letter-spacing: 2.5px; color: var(--wcm-accent); }
+  #wcm-auth-directions h1 { margin: 20px 0 20px; font-size: clamp(30px, 4.1vw, 44px); font-weight: 670; line-height: 1.38; letter-spacing: -1.4px; }
+  #wcm-auth-directions .wcm-desc { max-width: 340px; font-size: 13px; line-height: 1.95; color: var(--wcm-muted); margin: 0; }
+  #wcm-auth-directions .wcm-features { display: flex; gap: 16px; margin-top: 26px; color: var(--wcm-muted); font-size: 11px; letter-spacing: .3px; }
+  #wcm-auth-directions .wcm-features span + span { border-left: 1px solid color-mix(in srgb, var(--wcm-muted), transparent 65%); padding-left: 16px; }
+  #wcm-auth-directions .wcm-card { color: #172137; border: 1px solid #e9edf5; background: #fff; border-radius: 20px; padding: 26px; box-shadow: 0 20px 70px #00000015; }
+  #wcm-auth-directions .wcm-tabs { display: flex; padding: 4px; gap: 4px; background: #f5f6fa; border-radius: 9px; }
+  #wcm-auth-directions button { font-family: inherit; cursor: pointer; }
+  #wcm-auth-directions .wcm-tab { flex: 1; padding: 9px; border: 0; border-radius: 6px; color: #68758a; background: transparent; font-size: 12px; font-weight: 600; }
+  #wcm-auth-directions .wcm-tab[aria-selected="true"] { color: #5960de; background: #fff; box-shadow: 0 2px 6px #18294808; }
+  #wcm-auth-directions h2 { margin: 27px 0 7px; font-size: 22px; font-weight: 670; letter-spacing: -.5px; }
+  #wcm-auth-directions .wcm-card-desc { color: #738095; font-size: 11px; line-height: 1.75; margin: 0 0 21px; }
+  #wcm-auth-directions .wcm-form { display: grid; gap: 15px; }
+  #wcm-auth-directions .wcm-form label { display: grid; gap: 7px; font-size: 11px; font-weight: 600; }
+  #wcm-auth-directions .wcm-form input { font-family: inherit; border: 1px solid #e2e7ef; border-radius: 7px; padding: 11px; font-size: 12px; font-weight: 400; width: 100%; background: #fff; color: #172137; }
+  #wcm-auth-directions .wcm-form input::placeholder { color: #98a1b2; }
+  #wcm-auth-directions .wcm-submit { padding: 12px; border: 0; border-radius: 7px; color: white; background: #6261f2; font-size: 12px; font-weight: 600; }
+  #wcm-auth-directions .wcm-divider { display: flex; align-items: center; gap: 12px; color: #94a0b2; font-size: 11px; margin: 20px 0; }
+  #wcm-auth-directions .wcm-divider::before, #wcm-auth-directions .wcm-divider::after { content: ""; height: 1px; flex: 1; background: #ecedf2; }
+  #wcm-auth-directions .wcm-passkey { display: flex; width: 100%; align-items: center; justify-content: center; gap: 7px; padding: 11px; border: 1px solid #e4e8f0; border-radius: 7px; background: white; color: #647187; font-size: 11px; }
+  #wcm-auth-directions .wcm-passkey svg { width: 15px; height: 15px; }
+  #wcm-auth-directions .wcm-note { color: #8490a2; line-height: 1.7; font-size: 11px; margin: 12px 0 0; }
+  #wcm-auth-directions .wcm-registration-note { color: #6d7396; background: #f4f4fe; padding: 10px; border-radius: 7px; font-size: 11px; line-height: 1.65; margin: 0; }
+  #wcm-auth-directions .wcm-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--wcm-muted); font-size: 11px; }
+  #wcm-auth-directions .wcm-footer span:first-child { letter-spacing: 1px; }
+  #wcm-auth-directions .wcm-feedback { margin: 10px 0 0; color: #5960de; font-size: 11px; }
+  @media(min-width: 1300px) {
+    #wcm-auth-directions .wcm-stage { min-height: 850px; padding: 56px 8%; }
+    #wcm-auth-directions .wcm-content { min-height: 675px; grid-template-columns: minmax(0,1fr) 390px; gap: 90px; }
+    #wcm-auth-directions .wcm-intro { padding-top: 145px; }
+    #wcm-auth-directions h1 { font-size: 54px; }
+    #wcm-auth-directions .wcm-card { padding: 32px; }
+    #wcm-auth-directions .wcm-desc { font-size: 16px; max-width: 450px; }
+    #wcm-auth-directions .wcm-form input { padding: 13px; font-size: 14px; }
+    #wcm-auth-directions .wcm-features { font-size: 13px; }
+  }
+  @media(max-width: 760px) {
+    #wcm-auth-directions .wcm-stage { padding: 26px; }
+    #wcm-auth-directions .wcm-content { grid-template-columns: 1fr 300px; gap: 24px; }
+    #wcm-auth-directions .wcm-intro { padding-top: 100px; }
+    #wcm-auth-directions h1 { font-size: 30px; }
+    #wcm-auth-directions .wcm-features { flex-wrap: wrap; gap: 10px; }
+    #wcm-auth-directions .wcm-features span + span { padding-left: 10px; }
+    #wcm-auth-directions .wcm-header-caption { display: none; }
+  }
+  @media(max-width: 610px) {
+    #wcm-auth-directions .wcm-stage { padding: 24px 20px; }
+    #wcm-auth-directions .wcm-content { display: flex; flex-direction: column; align-items: stretch; gap: 30px; padding: 34px 0; }
+    #wcm-auth-directions .wcm-intro { padding-top: 0; }
+    #wcm-auth-directions h1 { font-size: 31px; margin: 14px 0; }
+    #wcm-auth-directions .wcm-card { width: 100%; padding: 24px; }
+    #wcm-auth-directions .wcm-form input { font-size: 16px; }
+    #wcm-auth-directions .wcm-art { opacity: .62; }
+    #wcm-auth-directions .wcm-art > svg { width: auto; min-width: 100%; position: absolute; left: -220px; }
+    #wcm-auth-directions .wcm-footer { align-items: start; flex-direction: column; }
+  }
+</style>
+<div id="wcm-auth-directions">
+  <main class="wcm-stage" data-theme="a" aria-label="WCM 登录与注册视觉方案">
+    <div class="wcm-art" data-art="a" aria-hidden="true">{{SVG_A}}</div>
+    <div class="wcm-art" data-art="b" aria-hidden="true" hidden>{{SVG_B}}</div>
+    <div class="wcm-art" data-art="c" aria-hidden="true" hidden>{{SVG_C}}</div>
+    <div class="wcm-art" data-art="d" aria-hidden="true" hidden>{{SVG_D}}</div>
+    <header class="wcm-header"><div class="wcm-brand"><span class="wcm-brand-orb"></span>WCM Core</div><span class="wcm-header-caption">INTELLIGENT CONTENT REVIEW</span></header>
+    <div class="wcm-content">
+      <section class="wcm-intro" aria-label="产品介绍">
+        <div class="wcm-eyebrow">智能内容审核工作台</div>
+        <h1>人物识别，<br>视频审核，一站完成。</h1>
+        <p class="wcm-desc">管理人物库，识别视频人物，<br>快速定位审核结果。</p>
+        <div class="wcm-features"><span>人物库管理</span><span>人脸检索</span><span>视频审核</span></div>
+      </section>
+      <section class="wcm-card" aria-label="登录或注册">
+        <div class="wcm-tabs" role="tablist" aria-label="账户入口"><button class="wcm-tab" type="button" id="wcm-login" role="tab" aria-selected="true" aria-controls="wcm-form-panel" data-mode="login">登录</button><button class="wcm-tab" type="button" id="wcm-register" role="tab" aria-selected="false" aria-controls="wcm-form-panel" data-mode="register">注册</button></div>
+        <div id="wcm-form-panel" role="tabpanel" aria-labelledby="wcm-login">
+          <h2>欢迎回来</h2><p class="wcm-card-desc">登录，开始人物识别与视频审核。</p>
+          <form class="wcm-form">
+            <label>用户名<input autocomplete="off" placeholder="输入用户名" aria-label="用户名预览" /></label>
+            <label class="wcm-register-only" hidden>显示名称<input autocomplete="off" placeholder="团队中显示的名字" aria-label="显示名称预览" /></label>
+            <label>密码<input class="wcm-password" type="password" autocomplete="off" placeholder="输入密码" aria-label="密码预览" /></label>
+            <label class="wcm-register-only" hidden>确认密码<input type="password" autocomplete="off" placeholder="再次输入密码" aria-label="确认密码预览" /></label>
+            <p class="wcm-registration-note wcm-register-only" hidden>新注册账户默认为普通用户。</p>
+            <button class="wcm-submit" type="submit">登录</button>
+          </form>
+          <div class="wcm-login-only"><div class="wcm-divider">或</div><button class="wcm-passkey" type="button"><i data-lucide="fingerprint" aria-hidden="true"></i>使用 Passkey 登录</button><p class="wcm-note">使用已绑定的指纹、面容或安全密钥。</p></div>
+          <p class="wcm-feedback" aria-live="polite" hidden></p>
+        </div>
+      </section>
+    </div>
+    <footer class="wcm-footer"><span>人物识别 · 视频审核 · 任务追踪</span><span>密码 / Passkey / 双重验证</span></footer>
+  </main>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('wcm-auth-directions');
+  const stage = root.querySelector('.wcm-stage');
+  const state = { theme: 'a', copy: '1', mode: 'login' };
+  const copies = {
+    '1': ['人物识别，|视频审核，一站完成。', '管理人物库，识别视频人物，|快速定位审核结果。'],
+    '2': ['从人物检索，|到视频审核。', '人物库管理、视频分析、任务追踪，|汇集于一个工作台。'],
+    '3': ['定位关键人物，|追溯视频线索。', '人脸检索与视频分析，|让审核线索清晰可查。'],
+    '4': ['让内容审核，|更高效。', '统一管理人物、视频与审核任务，|集中查看识别结果。'],
+    '5': ['人物与视频，|一站式审核。', '建人物库、查人脸、审视频，|快速查看与导出审核结果。']
+  };
+  function lines(el, text) {
+    el.replaceChildren();
+    text.split('|').forEach((s, i) => { if (i) el.append(document.createElement('br')); el.append(document.createTextNode(s)); });
+  }
+  function render() {
+    stage.dataset.theme = state.theme;
+    root.querySelectorAll('[data-art]').forEach(el => { el.hidden = el.dataset.art !== state.theme; });
+    lines(root.querySelector('h1'), copies[state.copy][0]);
+    lines(root.querySelector('.wcm-desc'), copies[state.copy][1]);
+    const registering = state.mode === 'register';
+    root.querySelectorAll('[data-mode]').forEach(el => el.setAttribute('aria-selected', String(el.dataset.mode === state.mode)));
+    root.querySelector('#wcm-form-panel').setAttribute('aria-labelledby', registering ? 'wcm-register' : 'wcm-login');
+    root.querySelector('h2').textContent = registering ? '创建 WCM 账户' : '欢迎回来';
+    root.querySelector('.wcm-card-desc').textContent = registering ? '注册，进入智能内容审核工作台。' : '登录，开始人物识别与视频审核。';
+    root.querySelectorAll('.wcm-register-only').forEach(el => { el.hidden = !registering; });
+    root.querySelectorAll('.wcm-login-only').forEach(el => { el.hidden = registering; });
+    root.querySelector('.wcm-submit').textContent = registering ? '创建账户' : '登录';
+    root.querySelector('.wcm-password').placeholder = registering ? '至少 12 个字符' : '输入密码';
+    root.querySelector('.wcm-feedback').hidden = true;
+  }
+  root.querySelectorAll('[data-mode]').forEach(el => el.addEventListener('click', () => { state.mode = el.dataset.mode; render(); }));
+  const showPreviewNotice = () => { const el = root.querySelector('.wcm-feedback'); el.textContent = '此处为视觉预览，请在正式工作台登录。'; el.hidden = false; };
+  root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); showPreviewNotice(); });
+  root.querySelector('.wcm-passkey').addEventListener('click', showPreviewNotice);
+  render();
+  if (globalThis.Tweak) {
+    const tweak = new Tweak({ container: stage, onChange: render });
+    tweak.addSelect(state, 'theme', { label: '背景方案', options: [{label:'A · 深蓝光学',value:'a'},{label:'B · 银白玻璃',value:'b'},{label:'C · 青绿扫描',value:'c'},{label:'D · 靛紫流光',value:'d'}] });
+    tweak.addSelect(state, 'copy', { label: '文案方向', options: [{label:'1 · 功能直述',value:'1'},{label:'2 · 审核流程',value:'2'},{label:'3 · 结果定位',value:'3'},{label:'4 · 效率导向',value:'4'},{label:'5 · 简洁操作',value:'5'}] });
+    tweak.addSelect(state, 'mode', { label: '页面状态', options: [{label:'登录',value:'login'},{label:'注册',value:'register'}] });
+  }
+})();
+</script>
