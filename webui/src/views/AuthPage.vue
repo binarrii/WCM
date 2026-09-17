@@ -8,6 +8,12 @@ import { authBackgrounds, pickAuthBackground, readAuthBackground, saveAuthBackgr
 import './auth.css';
 import './auth-background.css';
 
+const emit = defineEmits(['authenticated']);
+function completeLogin(data) {
+  emit('authenticated');
+  acceptSession(data);
+}
+
 const backgroundPreference = ref(readAuthBackground());
 const background = ref(pickAuthBackground(backgroundPreference.value));
 const backgroundSaved = ref(true);
@@ -41,7 +47,7 @@ async function submit() {
     const { data } = await api.post(path, payload);
     password.value = ''; confirmPassword.value = ''; code.value = '';
     if (data.mfa_required) challenge.value = data.challenge_id;
-    else acceptSession(data);
+    else completeLogin(data);
   } catch (reason) {
     error.value = authError(reason);
     if (challenge.value) { challenge.value = ''; code.value = ''; }
@@ -52,7 +58,7 @@ async function passkeyLogin() {
   try {
     const { data } = await api.post('/auth/passkeys/login/options');
     const credential = await usePasskey(data.options);
-    acceptSession((await api.post('/auth/passkeys/login/verify', { challenge_id: data.challenge_id, credential })).data);
+    completeLogin((await api.post('/auth/passkeys/login/verify', { challenge_id: data.challenge_id, credential })).data);
   } catch (reason) { error.value = authError(reason); }
   finally { busy.value = false; }
 }

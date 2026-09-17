@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="360" viewBox="0 0 520 360" fill="none"><title>收纳图片与视频素材的立体文件夹</title><defs>
+<linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff" stop-opacity=".98"/><stop offset="1" stop-color="#dce6ff" stop-opacity=".78"/></linearGradient>
+<linearGradient id="indigo" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a0adf9"/><stop offset=".45" stop-color="#7889e5"/><stop offset="1" stop-color="#4e62b5"/></linearGradient>
+<linearGradient id="teal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a3e5d7"/><stop offset="1" stop-color="#3c9d9f"/></linearGradient>
+<linearGradient id="peach" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffdfa8"/><stop offset="1" stop-color="#d5a17b"/></linearGradient>
+<linearGradient id="screen" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#364b75"/><stop offset="1" stop-color="#152746"/></linearGradient>
+<radialGradient id="halo"><stop stop-color="#8f9feb" stop-opacity=".3"/><stop offset="1" stop-color="#8f9feb" stop-opacity="0"/></radialGradient>
+<filter id="shadow" x="-40%" y="-35%" width="180%" height="190%"><feDropShadow dx="0" dy="16" stdDeviation="13" flood-color="#19264f" flood-opacity=".17"/></filter>
+<filter id="small-shadow" x="-50%" y="-40%" width="200%" height="200%"><feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#1c375d" flood-opacity=".14"/></filter>
+</defs><ellipse cx="266" cy="198" rx="218" ry="146" fill="url(#halo)" opacity=".45"/>
+<ellipse cx="268" cy="263" rx="188" ry="54" stroke="#c0a082" stroke-opacity=".22" transform="rotate(-10 268 263)"/>
+<g filter="url(#shadow)" transform="translate(100 66) rotate(-6 155 120)">
+<path d="M22 76a17 17 0 0 1 17-17h63l19 19h153a17 17 0 0 1 17 17v161H22z" fill="#b79077"/>
+<g transform="translate(78 6) rotate(9 87 95)"><rect width="162" height="184" rx="13" fill="#9aacc9" stroke="#d5dff0"/><rect x="11" y="12" width="140" height="122" rx="6" fill="#4a628c"/><g fill="#d1e1ed"><rect x="17" y="18" width="9" height="5" rx="1"/><rect x="136" y="18" width="9" height="5" rx="1"/><rect x="17" y="119" width="9" height="5" rx="1"/><rect x="136" y="119" width="9" height="5" rx="1"/><path d="m70 52 28 18-28 18z"/></g></g>
+<g transform="translate(34 25) rotate(-9 81 88)"><rect width="157" height="173" rx="12" fill="url(#glass)" stroke="#fff"/><rect x="12" y="12" width="133" height="115" rx="6" fill="#b3d5d6"/><circle cx="112" cy="39" r="13" fill="#fdf1d7"/><path d="m12 104 42-44 36 35 23-20 32 35v17H12z" fill="#709d9c"/><path d="m12 114 36-22 45 21 22-11 30 17v8H12z" fill="#93b7ad"/><path d="M20 145h81m-81 11h52" stroke="#b0bdd0" stroke-width="3" stroke-linecap="round"/></g>
+<path d="M10 125a14 14 0 0 1 14-17h83a18 18 0 0 1 13 5l17 15h151a15 15 0 0 1 15 17l-15 104a19 19 0 0 1-19 16H45a20 20 0 0 1-20-17z" fill="url(#peach)" stroke="#fff0d8" stroke-width="1.5"/>
+<path d="M46 164h47" stroke="#fff1d8" stroke-width="6" stroke-linecap="round"/><path d="M46 178h29" stroke="#fff1d8" stroke-opacity=".55" stroke-width="4" stroke-linecap="round"/>
+<rect x="219" y="207" width="38" height="27" rx="8" fill="#fff0db" fill-opacity=".52"/><path d="m231 221 5 5 10-12" stroke="#bd8e63" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+<circle cx="425" cy="117" r="5" fill="#ddb995"/><path d="M75 170h12m-6-6v12M375 49h11" stroke="#c5a991" stroke-width="1.5"/>
+</svg>

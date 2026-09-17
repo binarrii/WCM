@@ -1,6 +1,7 @@
 .shell { min-height: 100vh; display: grid; grid-template-columns: 244px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; padding: 30px 18px; background: color-mix(in srgb, var(--bg-secondary) 94%, transparent); border-right: 1px solid var(--border-color); box-shadow: var(--shadow-sm); z-index: 30; }
-.sidebar-brand { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 8px; }
+.sidebar-brand { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 8px; text-decoration: none; border-radius: 10px; }
+.sidebar-brand:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 5px; }
 .brand-orb { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%; background: var(--color-primary); box-shadow: 0 0 16px var(--color-primary); }
 .brand-copy { display: grid; }
 .brand-copy strong { font: 700 1.35rem/1.25 var(--font-display); background: linear-gradient(135deg, var(--brand-gradient-start), var(--brand-gradient-end)); background-clip: text; color: transparent; }

@@ -5,6 +5,7 @@ import FaceDashboard from './views/FaceDashboard.vue';
 import ParameterConfig from './views/ParameterConfig.vue';
 import ReviewTasks from './views/ReviewTasks.vue';
 import MediaLibrary from './views/MediaLibrary.vue';
+import HomePage from './views/HomePage.vue';
 import SystemManagement from './views/SystemManagement.vue';
 import VideoReview from './views/VideoReview.vue';
 import AuthPage from './views/AuthPage.vue';
@@ -21,6 +22,11 @@ const currentTheme = ref(localStorage.getItem('theme') || 'system');
 const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
 const pages = {
+  home: {
+    component: HomePage,
+    title: '工作台',
+    description: '从内容识别到审核复核，在这里开始'
+  },
   people: {
     permission: 'people.read',
     component: FaceDashboard,
@@ -79,6 +85,7 @@ const setTheme = (theme) => {
   localStorage.setItem('theme', theme);
 };
 const syncRoute = () => { currentRoute.value = routeFromHash(window.location.hash); };
+const enterHome = () => { currentRoute.value = 'home'; navigateTo('home'); };
 const handleSystemTheme = () => { if (currentTheme.value === 'system') applyTheme(); };
 
 watch(currentTheme, applyTheme, { immediate: true });
@@ -88,7 +95,7 @@ onMounted(() => {
   sessionTimer = window.setInterval(refreshOnFocus, 60000);
   window.addEventListener('focus', refreshOnFocus);
   window.addEventListener('wcm-session-expired', clearSession);
-  if (!window.location.hash) navigateTo('people');
+  if (!window.location.hash) navigateTo('home');
   window.addEventListener('hashchange', syncRoute);
   mediaQuery.addEventListener('change', handleSystemTheme);
 });
@@ -103,16 +110,16 @@ onBeforeUnmount(() => {
 
 <template>
   <main v-if="!auth.ready || (auth.error && !auth.user)" class="auth-loading"><p>{{ auth.error || '正在加载账户…' }}</p><button v-if="auth.error" class="auth-secondary" @click="refreshSession">重试</button></main>
-  <AuthPage v-else-if="!auth.user" />
+  <AuthPage v-else-if="!auth.user" @authenticated="enterHome" />
   <div v-else class="shell">
     <aside class="sidebar">
-      <div class="sidebar-brand">
+      <a class="sidebar-brand" href="#/home" aria-label="WCM Core 首页">
         <span class="brand-orb"></span>
         <span class="brand-copy">
           <strong>WCM Core</strong>
           <small>智能内容审核库</small>
         </span>
-      </div>
+      </a>
 
       <nav class="main-menu" aria-label="主菜单">
         <span class="menu-heading">主菜单</span>
