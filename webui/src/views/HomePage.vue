@@ -8,9 +8,9 @@ import mediaArtwork from '../assets/home/media.svg';
 import './home.css';
 
 const entries = [
-  { route: 'people', title: '人物库管理', label: 'PEOPLE', description: '维护人物档案，让每一次识别有据可依。', artwork: peopleArtwork, permission: 'people.read' },
+  { route: 'people', title: '人物库', label: 'PEOPLE', description: '维护人物档案，让每一次识别有据可依。', artwork: peopleArtwork, permission: 'people.read' },
   { route: 'video', title: '视频审核', label: 'REVIEW', description: '识别视频人物与违规内容，定位关键画面。', artwork: videoArtwork, permission: 'review.read' },
-  { route: 'tasks', title: '审核任务', label: 'TASKS', description: '追踪审核进度，回看结果与复核记录。', artwork: tasksArtwork, permission: 'review.read' },
+  { route: 'tasks', title: '任务管理', label: 'TASKS', description: '追踪审核进度，回看结果与复核记录。', artwork: tasksArtwork, permission: 'review.read' },
   { route: 'media', title: '媒资库', label: 'MEDIA', description: '为每一份素材，准备一个新空间。', artwork: mediaArtwork, upcoming: true }
 ];
 const accessible = entry => !entry.permission || can(entry.permission);
