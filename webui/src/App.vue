@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ClipboardList, Database, LogOut, Monitor, Moon, Settings, ShieldCheck, SlidersHorizontal, Sun, Users, Video } from '@lucide/vue';
+import { ClipboardList, Database, FolderOpen, LogOut, Monitor, Moon, Settings, ShieldCheck, SlidersHorizontal, Sun, Users, Video } from '@lucide/vue';
 import FaceDashboard from './views/FaceDashboard.vue';
 import ParameterConfig from './views/ParameterConfig.vue';
 import ReviewTasks from './views/ReviewTasks.vue';
+import MediaLibrary from './views/MediaLibrary.vue';
 import SystemManagement from './views/SystemManagement.vue';
 import VideoReview from './views/VideoReview.vue';
 import AuthPage from './views/AuthPage.vue';
@@ -37,6 +38,11 @@ const pages = {
     component: ReviewTasks,
     title: '审核任务',
     description: '检索、查看并继续复核历史视频审核任务'
+  },
+  media: {
+    component: MediaLibrary,
+    title: '媒资库',
+    description: '你的媒体资源管理空间'
   },
   parameters: {
     permission: 'parameters.manage',
@@ -118,6 +124,9 @@ onBeforeUnmount(() => {
         </button>
         <button v-if="can('review.read')" type="button" aria-label="审核任务" :class="['menu-item', { active: currentRoute === 'tasks' }]" @click="navigateTo('tasks')">
           <ClipboardList /><span>审核任务</span>
+        </button>
+        <button type="button" aria-label="媒资库" :class="['menu-item', { active: currentRoute === 'media' }]" @click="navigateTo('media')">
+          <FolderOpen /><span>媒资库</span>
         </button>
         <button v-if="can('parameters.manage')" type="button" aria-label="参数配置" :class="['menu-item', { active: currentRoute === 'parameters' }]" @click="navigateTo('parameters')">
           <SlidersHorizontal /><span>参数配置</span>

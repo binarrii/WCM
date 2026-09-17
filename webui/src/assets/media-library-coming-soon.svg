@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" fill="none">
+  <title>媒资库 · 建设中</title>
+  <desc>蓝紫色玻璃文件夹与悬浮的视频、图片、音频卡片，构成即将开放的媒体资源空间。</desc>
+  <defs>
+    <linearGradient id="folder-back" x1="322" y1="202" x2="705" y2="434" gradientUnits="userSpaceOnUse"><stop stop-color="#A6ADFF"/><stop offset=".5" stop-color="#7675ED"/><stop offset="1" stop-color="#4D45B5"/></linearGradient>
+    <linearGradient id="folder-front" x1="330" y1="267" x2="676" y2="490" gradientUnits="userSpaceOnUse"><stop stop-color="#A9ADFF"/><stop offset=".46" stop-color="#7775F1"/><stop offset="1" stop-color="#5448D5"/></linearGradient>
+    <linearGradient id="folder-light" x1="310" y1="267" x2="586" y2="483" gradientUnits="userSpaceOnUse"><stop stop-color="white" stop-opacity=".8"/><stop offset=".5" stop-color="#E9E9FF" stop-opacity=".18"/><stop offset="1" stop-color="#BAAFFF" stop-opacity=".55"/></linearGradient>
+    <linearGradient id="film" x1="367" y1="119" x2="634" y2="327" gradientUnits="userSpaceOnUse"><stop stop-color="#242457"/><stop offset="1" stop-color="#514198"/></linearGradient>
+    <linearGradient id="film-wave" x1="362" y1="128" x2="607" y2="288" gradientUnits="userSpaceOnUse"><stop stop-color="#A5B8FF"/><stop offset=".45" stop-color="#A898F5"/><stop offset="1" stop-color="#6552B4"/></linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7EAFF"/></linearGradient>
+    <linearGradient id="landscape" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#CAD7FF"/><stop offset="1" stop-color="#B4B2F5"/></linearGradient>
+    <linearGradient id="video" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#E4E8FF"/><stop offset="1" stop-color="#C9C5FF"/></linearGradient>
+    <linearGradient id="orbit" x1="168" y1="312" x2="827" y2="410" gradientUnits="userSpaceOnUse"><stop stop-color="#8396EE" stop-opacity="0"/><stop offset=".3" stop-color="#8796ED" stop-opacity=".48"/><stop offset=".7" stop-color="#9691E8" stop-opacity=".4"/><stop offset="1" stop-color="#9691E8" stop-opacity="0"/></linearGradient>
+    <radialGradient id="ground"><stop stop-color="#6E69C7" stop-opacity=".19"/><stop offset="1" stop-color="#7770CD" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glow"><stop stop-color="#BFC5FF" stop-opacity=".4"/><stop offset="1" stop-color="#BFC5FF" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-35%" y="-35%" width="180%" height="190%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="18" stdDeviation="17" flood-color="#41358B" flood-opacity=".15"/></filter>
+    <filter id="small-shadow" x="-35%" y="-35%" width="180%" height="190%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#50408F" flood-opacity=".12"/></filter>
+    <clipPath id="film-clip"><rect x="344" y="115" width="303" height="184" rx="13"/></clipPath>
+    <clipPath id="photo-clip"><rect x="18" y="18" width="136" height="91" rx="9"/></clipPath>
+  </defs>
+
+  <!-- Quiet orbital paths tie the three media types into one collection. -->
+  <ellipse cx="500" cy="303" rx="329" ry="222" fill="url(#glow)"/>
+  <ellipse cx="510" cy="498" rx="294" ry="38" fill="url(#ground)"/>
+  <ellipse cx="500" cy="324" rx="373" ry="164" transform="rotate(-13 500 324)" stroke="url(#orbit)" stroke-width="1.2"/>
+  <ellipse cx="502" cy="307" rx="306" ry="219" transform="rotate(16 502 307)" stroke="#9499DF" stroke-opacity=".23" stroke-dasharray="3 10"/>
+  <path d="M179 205h12m-6-6v12M775 321h10m-5-5v10M304 92h10m-5-5v10" stroke="#939BDC" stroke-width="2" stroke-linecap="round" opacity=".65"/>
+  <circle cx="671" cy="79" r="4" fill="#AEA7F0"/>
+  <circle cx="252" cy="422" r="5" fill="#92CAD7"/>
+  <circle cx="826" cy="245" r="3" fill="#A6A7E3"/>
+  <circle cx="199" cy="366" r="2.5" fill="#B2ADE9"/>
+
+  <!-- Raised back of the archive, with a pair of staggered media sheets. -->
+  <g filter="url(#shadow)">
+    <path d="M302 229c0-15 12-27 27-27h114c10 0 16 3 23 10l19 20h183c17 0 30 13 30 30v172H302V229Z" fill="url(#folder-back)" stroke="#CBCBFF" stroke-width="1.5"/>
+  </g>
+  <g transform="rotate(7 503 266)" filter="url(#small-shadow)">
+    <rect x="349" y="122" width="325" height="264" rx="20" fill="#CECFFD" stroke="#F1F0FF" stroke-width="1.5"/>
+    <path d="M373 149h70m-70 13h111" stroke="#ABACE5" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <g transform="rotate(-8 496 259)" filter="url(#small-shadow)">
+    <rect x="330" y="101" width="331" height="270" rx="21" fill="url(#card)" stroke="white" stroke-width="1.5"/>
+    <rect x="344" y="115" width="303" height="184" rx="13" fill="url(#film)"/>
+    <g clip-path="url(#film-clip)">
+      <circle cx="601" cy="138" r="105" stroke="#B2A8FF" stroke-opacity=".15" stroke-width="36"/>
+      <path d="M324 239c55-153 93-72 146-104 41-25 70-85 118-60 47 26-4 124 42 160 46 37 103-5 126 49v67H324V239Z" fill="url(#film-wave)" opacity=".9"/>
+      <path d="M325 283c53-108 103-61 150-89 40-24 61-54 91-40 35 16 12 89 61 108 41 17 80-25 115 22" stroke="#C9C4FF" stroke-opacity=".46" stroke-width="1.5"/>
+      <path d="M325 298c53-108 103-61 150-89 40-24 61-54 91-40 35 16 12 89 61 108 41 17 80-25 115 22" stroke="#E8E3FF" stroke-opacity=".22" stroke-width="1.5"/>
+    </g>
+    <circle cx="495" cy="205" r="29" fill="white" fill-opacity=".17" stroke="white" stroke-opacity=".5"/>
+    <path d="m489 193 17 11a2 2 0 0 1 0 3l-17 11a2 2 0 0 1-3-2v-21a2 2 0 0 1 3-2Z" fill="white"/>
+    <rect x="350" y="317" width="129" height="6" rx="3" fill="#B8BBDD"/>
+    <rect x="350" y="331" width="77" height="4" rx="2" fill="#D5D8EC"/>
+    <rect x="598" y="315" width="37" height="20" rx="6" fill="#E8E8F8"/>
+    <path d="M607 325h18" stroke="#AAADD2" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- The front cover carries subtle reflections and a minimal collection mark. -->
+  <g filter="url(#shadow)">
+    <path d="M290 293c-2-17 11-31 28-31h96c9 0 16 3 22 9l20 20h240c18 0 31 15 28 33l-21 135c-2 15-15 26-30 26H340c-15 0-28-11-30-26l-20-166Z" fill="url(#folder-front)"/>
+    <path d="M290 293c-2-17 11-31 28-31h96c9 0 16 3 22 9l20 20h240c18 0 31 15 28 33l-21 135c-2 15-15 26-30 26H340c-15 0-28-11-30-26l-20-166Z" stroke="url(#folder-light)" stroke-width="2"/>
+    <path d="M304 293c-1-10 6-18 17-18h90c7 0 11 2 15 6l22 22h248c9 0 15 6 14 15" stroke="white" stroke-opacity=".19" stroke-width="2" stroke-linecap="round"/>
+    <path d="M309 325h386l-17 124c-1 9-9 16-18 16H343c-8 0-15-6-17-15l-17-125Z" fill="white" fill-opacity=".035"/>
+    <g transform="translate(465 342)" stroke="#F3F1FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m7 19 28-16 28 16-28 16L7 19Z" fill="white" fill-opacity=".12"/>
+      <path d="m7 30 28 16 28-16M7 41l28 16 28-16" opacity=".8"/>
+    </g>
+    <text x="500" y="434" text-anchor="middle" fill="#E5E1FF" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="600" letter-spacing="3.2">MEDIA LIBRARY</text>
+    <rect x="343" y="453" width="25" height="4" rx="2" fill="white" fill-opacity=".3"/>
+    <circle cx="670" cy="455" r="3" fill="#CCC3FF"/>
+  </g>
+
+  <!-- Picture tile. -->
+  <g transform="translate(705 106) rotate(12 86 74)" filter="url(#small-shadow)">
+    <rect width="172" height="149" rx="19" fill="url(#card)" stroke="white" stroke-width="1.5"/>
+    <rect x="18" y="18" width="136" height="91" rx="9" fill="url(#landscape)"/>
+    <g clip-path="url(#photo-clip)">
+      <circle cx="122" cy="41" r="13" fill="#FFFAEC"/>
+      <path d="m-4 115 62-61 40 40 24-21 50 47H-4Z" fill="#929BD9"/>
+      <path d="m36 115 60-52 76 62H36Z" fill="#747FC0"/>
+      <path d="m77 80 19-17 23 19-17-4-8 6-8-6-9 2Z" fill="#EAEBFA"/>
+    </g>
+    <rect x="19" y="125" width="62" height="5" rx="2.5" fill="#B6BCDB"/>
+    <circle cx="148" cy="127" r="3" fill="#AAA4E9"/>
+  </g>
+
+  <!-- Video tile. -->
+  <g transform="translate(107 235) rotate(-12 87 63)" filter="url(#small-shadow)">
+    <rect width="175" height="132" rx="18" fill="url(#card)" stroke="white" stroke-width="1.5"/>
+    <rect x="13" y="13" width="149" height="85" rx="10" fill="url(#video)"/>
+    <path d="M20 84c26-40 48-9 69-34 26-32 45-20 66-25v65H20Z" fill="#B2ACEB" fill-opacity=".65"/>
+    <circle cx="87" cy="55" r="21" fill="white" fill-opacity=".76"/>
+    <path d="m82 46 13 8a2 2 0 0 1 0 3l-13 8V46Z" fill="#7C72CD"/>
+    <path d="M18 114h75" stroke="#C4C6E3" stroke-width="4" stroke-linecap="round"/>
+    <path d="M132 110v8m6-10v12m6-8v4m6-6v8" stroke="#A5A2D1" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- Audio tile, kept light to balance the darker archive. -->
+  <g transform="translate(718 378) rotate(8 85 43)" filter="url(#small-shadow)">
+    <rect width="173" height="88" rx="18" fill="url(#card)" stroke="white" stroke-width="1.5"/>
+    <circle cx="33" cy="44" r="17" fill="#E4E1FA"/>
+    <path d="M29 49V34l11-2v14M29 37l11-2" stroke="#8D82CD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <ellipse cx="26" cy="49" rx="4" ry="3" fill="#8D82CD"/><ellipse cx="37" cy="46" rx="4" ry="3" fill="#8D82CD"/>
+    <path d="M68 40v8m7-16v24m7-29v34m7-23v12m7-17v22m7-32v42m7-34v26m7-19v12m7-25v38m7-27v16m7-12v8m7-16v24m7-17v10" stroke="#9890D9" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(268 127) rotate(-18)" filter="url(#small-shadow)">
+    <rect width="44" height="44" rx="13" fill="#F1FBFD" stroke="white"/>
+    <path d="m22 11 3 8 8 3-8 3-3 8-3-8-8-3 8-3 3-8Z" fill="#96C7D5"/>
+  </g>
+</svg>
