@@ -16,7 +16,9 @@ dependencies = [
     # overload. The InsightFace adapter itself uses PIL only, but the
     # public FaceEngine API still accepts arrays for back-compat with
     # main.py and scripts/.
-    "opencv-python-headless>=4.10.0.20241230",
+    # 4.13's bundled FFmpeg 8 returns successful but black frames for interlaced
+    # H.264. Keep the verified decoder until an upgrade passes pixel/PTS checks.
+    "opencv-python-headless==4.12.0.88",
     "pydantic-settings>=2.13.1",
     "python-multipart>=0.0.26",
     "pymysql>=1.1.2",

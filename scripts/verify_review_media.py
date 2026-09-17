@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -31,12 +32,16 @@ from wcm_facerec.execution import execution_scope
 def verify_sampling(path):
     signatures = set()
     selected = 0
+    last_sample = 0.0
+    started = time.monotonic()
     with VideoFrameSampler(path, 1, max_dimension=1080, sampling_mode="scene") as sampler:
         for window in sampler:
             if window.review_visual:
                 selected += 1
                 signatures.add(hashlib.sha256(window[0].image.tobytes()).digest())
+                last_sample = window[0].timestamp
         assert sampler.fixed_samples >= int(sampler.duration_seconds) - 1
+        assert last_sample >= sampler.duration_seconds - 1.1, "Video tail was not sampled"
         # Both our generated test pattern and the supplied real acceptance video
         # contain motion. Previously the server decoded every frame as black.
         assert len(signatures) > 1, "Acceptance footage was decoded as one repeated image"
@@ -49,6 +54,8 @@ def verify_sampling(path):
                     "selected": selected,
                     "distinct_selected_images": len(signatures),
                     "scene_cuts": sampler.scene_cuts,
+                    "last_sample_seconds": last_sample,
+                    "sampling_seconds": round(time.monotonic() - started, 2),
                 }
             ),
             flush=True,
@@ -77,7 +84,7 @@ async def playback(task_id):
     print("PASS independent-process private S3 playback, HEAD and Range", flush=True)
 
 
-async def ingest(url, directory):
+async def ingest(url, directory, *, expect_video_copy=False):
     task_id = await store.create(url, {"sample_interval": 1, "top_k": 10, "threshold": 0.5})
     task = await task_queue.claim("media-verification")
     assert task["id"] == task_id
@@ -92,10 +99,20 @@ async def ingest(url, directory):
         with execution_scope(task_id, task["lease_token"], task["attempts"]):
             async with ReviewProgress(task_id) as progress:
                 path = directory / f"{task_id}.mp4"
+                started = time.monotonic()
                 await handlers._download_review_video(
                     url, path, settings.max_video_size_mb * 1048576, progress=progress
                 )
                 assert path.is_file()
+                media = (await store.get(task_id))["media"]
+                if expect_video_copy:
+                    assert not media["video_transcoded"] and not media["deinterlaced"]
+                print(
+                    json.dumps(
+                        {"prepare_and_archive_seconds": round(time.monotonic() - started, 2)}
+                    ),
+                    flush=True,
+                )
                 await asyncio.to_thread(verify_sampling, path)
                 assert await store.complete(task_id, [])
                 # Playback must survive losing the worker's local copy.
@@ -162,9 +179,13 @@ async def main(args):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            await ingest(f"http://127.0.0.1:{server.server_port}/index.m3u8?token=test", root)
+            await ingest(
+                f"http://127.0.0.1:{server.server_port}/index.m3u8?token=test",
+                root,
+                expect_video_copy=args.expect_video_copy,
+            )
             if args.source_url:
-                await ingest(args.source_url, root)
+                await ingest(args.source_url, root, expect_video_copy=args.expect_video_copy)
         finally:
             server.shutdown()
             server.server_close()
@@ -179,4 +200,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-url")
     parser.add_argument("--playback")
+    parser.add_argument("--expect-video-copy", action="store_true")
     asyncio.run(main(parser.parse_args()))

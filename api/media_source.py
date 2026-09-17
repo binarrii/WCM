@@ -487,12 +487,11 @@ async def prepare_video(
             info, video, duration = await probe(paths[0])
             audio = next((s for s in info["streams"] if s["codec_type"] == "audio"), None)
             field_order = video.get("field_order", "unknown")
-            deinterlace = field_order != "progressive"
-            copy_video = (
-                video.get("codec_name") == "h264"
-                and video.get("pix_fmt") == "yuv420p"
-                and not deinterlace
-            )
+            copy_video = video.get("codec_name") == "h264" and video.get("pix_fmt") == "yuv420p"
+            # The pinned OpenCV decoder accepts interlaced H.264. Preserve its
+            # packets instead of re-encoding the entire video just for decoding;
+            # verify_decoder still rejects broken output before any review.
+            deinterlace = not copy_video and field_order != "progressive"
             args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-n"]
             for path in paths:
                 args += [*input_options(path), "-i", str(path)]
@@ -542,7 +541,7 @@ async def prepare_video(
                     args, output=destination, timeout=settings.video_prepare_timeout_seconds
                 )
                 output_info, output_video, output_duration = await probe(destination)
-                if output_video.get("field_order") != "progressive":
+                if not copy_video and output_video.get("field_order") != "progressive":
                     raise MediaSourceError("视频未正确转换为逐行画面，已停止审核")
                 decoder = await verify_decoder(
                     destination, output_info, output_video, output_duration

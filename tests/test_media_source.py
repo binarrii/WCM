@@ -376,8 +376,9 @@ async def test_non_browser_video_is_transcoded(media_http, video_files, tmp_path
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("order", ["top", "bottom"])
-async def test_interlaced_h264_becomes_progressive_with_original_frame_rate(
-    media_http, tmp_path, order
+@pytest.mark.parametrize("codec", ["libx264", "mpeg2video"])
+async def test_interlaced_video_preserves_frames_and_transcodes_only_incompatible_codecs(
+    media_http, tmp_path, order, codec
 ):
     routes, _ = media_http
     source = tmp_path / "interlaced.ts"
@@ -393,13 +394,16 @@ async def test_interlaced_h264_becomes_progressive_with_original_frame_rate(
             "-vf",
             f"tinterlace=interleave_{order}",
             "-c:v",
-            "libx264",
+            codec,
             "-threads",
             "1",
             "-flags",
             "+ilme+ildct",
-            "-x264-params",
-            "tff=1" if order == "top" else "bff=1",
+            *(
+                ["-x264-params", "tff=1" if order == "top" else "bff=1"]
+                if codec == "libx264"
+                else []
+            ),
             str(source),
         ],
         check=True,
@@ -409,23 +413,31 @@ async def test_interlaced_h264_becomes_progressive_with_original_frame_rate(
     routes["https://source/interlaced.ts"] = source.read_bytes()
     output = tmp_path / "out.mp4"
     result = await prepare("https://source/interlaced.ts", output)
-    assert result["video_transcoded"] and result["deinterlaced"]
+    transcode = codec != "libx264"
+    assert result["video_transcoded"] == transcode
+    assert result["deinterlaced"] == transcode
     assert result["decoder_verified"]
+    assert result["source_field_order"] == before["field_order"]
     _, after, duration = await media.probe(output)
-    assert after["field_order"] == "progressive"
+    assert after["field_order"] == ("progressive" if transcode else before["field_order"])
     assert after["avg_frame_rate"] == before["avg_frame_rate"] == "25/1"
     assert int(after["nb_frames"]) == 75
     assert duration == pytest.approx(3, abs=0.05)
     capture = cv2.VideoCapture(str(output))
+    original = cv2.VideoCapture(str(source))
     hashes = set()
     try:
         for index in range(75):
             ok, frame = capture.read()
             assert ok and frame.std() > 10
+            if not transcode:
+                source_ok, source_frame = original.read()
+                assert source_ok and (source_frame == frame).all()
             assert capture.get(cv2.CAP_PROP_POS_MSEC) / 1000 == pytest.approx(index / 25, abs=0.002)
             hashes.add(hash(frame.tobytes()))
     finally:
         capture.release()
+        original.release()
     assert len(hashes) > 70
 
 
