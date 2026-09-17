@@ -1,11 +1,13 @@
 """Bounded HTTP media ingestion. FFmpeg only sees localized, finite inputs."""
 
 import asyncio
+import base64
 import contextlib
 import json
 import math
 import re
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -13,9 +15,12 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 import m3u8
+import numpy as np
 
 from wcm_facerec.cluster import cluster_slot, drain_task
 from wcm_facerec.config import settings
+
+from .media_decode_check import SAMPLE_HEIGHT, SAMPLE_WIDTH
 
 VIDEO_EXTENSIONS = {
     ".mp4",
@@ -184,6 +189,69 @@ async def probe(path):
             f"视频时长 {duration:.1f} 秒超过上限 {settings.max_video_duration_seconds} 秒"
         )
     return result, video, duration
+
+
+async def verify_decoder(path, info, video, duration):
+    """Cross-check real decoder pixels, accepting genuine black/static footage.
+
+    A successful VideoCapture.read() can still return all-zero pixels when its
+    bundled swscale cannot convert an input. Independent FFmpeg references catch
+    that failure before scene deduplication can turn it into a successful review.
+    Both decoder and reference processes are bounded and killed on cancellation.
+    """
+    video_duration = float(video.get("duration") or duration)
+    samples = json.loads(
+        await media_command(
+            [sys.executable, "-m", "api.media_decode_check", str(path), str(video_duration)],
+            timeout=60,
+        )
+    )
+    video_start = float(video.get("start_time") or 0)
+    format_start = float(info.get("format", {}).get("start_time") or 0)
+    for sample in samples["samples"]:
+        # OpenCV's clock starts at the first video frame; FFmpeg input seeking
+        # starts at format.start_time. Stay just before the exact frame PTS so
+        # floating point rounding cannot select the following frame at a cut.
+        target = max(0, sample["pts"] + video_start - format_start - 0.0005)
+        reference = await media_command(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-nostdin",
+                "-threads",
+                "2",
+                "-ss",
+                str(target),
+                *input_options(path),
+                "-i",
+                str(path),
+                "-map",
+                f"0:{video['index']}",
+                "-frames:v",
+                "1",
+                "-vf",
+                f"scale={SAMPLE_WIDTH}:{SAMPLE_HEIGHT}:flags=area",
+                "-pix_fmt",
+                "bgr24",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ],
+            timeout=30,
+        )
+        actual = base64.b64decode(sample["pixels"], validate=True)
+        expected_bytes = SAMPLE_WIDTH * SAMPLE_HEIGHT * 3
+        if len(actual) != expected_bytes or len(reference) != expected_bytes:
+            raise MediaSourceError("视频抽帧校验失败：未获得完整画面，已停止审核")
+        actual_pixels = np.frombuffer(actual, np.uint8).astype(np.int16)
+        reference_pixels = np.frombuffer(reference, np.uint8).astype(np.int16)
+        difference = float(np.abs(actual_pixels - reference_pixels).mean())
+        if difference > 32 or (not actual_pixels.any() and reference_pixels.mean() > 2):
+            raise MediaSourceError(
+                f"视频抽帧校验失败：第 {sample['pts']:.2f} 秒的解码画面异常，已停止审核"
+            )
+    return {"decoder_verified": True, "decoder_version": samples["decoder_version"]}
 
 
 class HlsDownload:
@@ -418,7 +486,13 @@ async def prepare_video(
                 await on_stage("preparing")
             info, video, duration = await probe(paths[0])
             audio = next((s for s in info["streams"] if s["codec_type"] == "audio"), None)
-            copy_video = video.get("codec_name") == "h264" and video.get("pix_fmt") == "yuv420p"
+            field_order = video.get("field_order", "unknown")
+            deinterlace = field_order != "progressive"
+            copy_video = (
+                video.get("codec_name") == "h264"
+                and video.get("pix_fmt") == "yuv420p"
+                and not deinterlace
+            )
             args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-n"]
             for path in paths:
                 args += [*input_options(path), "-i", str(path)]
@@ -434,6 +508,11 @@ async def prepare_video(
                 ["-c:v", "copy"]
                 if copy_video
                 else [
+                    "-vf",
+                    # One output frame per input frame preserves review timing.
+                    "bwdif=mode=send_frame:parity=auto:deint=interlaced,setfield=prog"
+                    if deinterlace
+                    else "setfield=prog",
                     "-c:v",
                     "libx264",
                     "-preset",
@@ -462,7 +541,12 @@ async def prepare_video(
                 await media_command(
                     args, output=destination, timeout=settings.video_prepare_timeout_seconds
                 )
-            _, output_video, output_duration = await probe(destination)
+                output_info, output_video, output_duration = await probe(destination)
+                if output_video.get("field_order") != "progressive":
+                    raise MediaSourceError("视频未正确转换为逐行画面，已停止审核")
+                decoder = await verify_decoder(
+                    destination, output_info, output_video, output_duration
+                )
             if abs(output_duration - duration) > max(2, duration * 0.02):
                 raise MediaSourceError("转换后视频时长异常，已停止审核以避免遗漏内容")
             if destination.stat().st_size > settings.max_video_output_mb * 1048576:
@@ -477,6 +561,9 @@ async def prepare_video(
                 "height": output_video["height"],
                 "video_codec": output_video["codec_name"],
                 "video_transcoded": not copy_video,
+                "source_field_order": field_order,
+                "deinterlaced": deinterlace,
+                **decoder,
                 "selection": selected,
             }
 

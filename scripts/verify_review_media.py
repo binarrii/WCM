@@ -6,8 +6,8 @@ Pass --source-url to also ingest an actual video through the same pipeline.
 
 import argparse
 import asyncio
-import contextlib
 import functools
+import hashlib
 import http.server
 import json
 import subprocess
@@ -23,9 +23,36 @@ from api import handlers, parameter_store, review_media, task_queue
 from api import review_task_store as store
 from api.review_progress import ReviewProgress
 from api.review_tasks import review_tasks_bp
-from wcm_facerec import runtime_parameters
+from api.utils import VideoFrameSampler
 from wcm_facerec.config import settings
 from wcm_facerec.execution import execution_scope
+
+
+def verify_sampling(path):
+    signatures = set()
+    selected = 0
+    with VideoFrameSampler(path, 1, max_dimension=1080, sampling_mode="scene") as sampler:
+        for window in sampler:
+            if window.review_visual:
+                selected += 1
+                signatures.add(hashlib.sha256(window[0].image.tobytes()).digest())
+        assert sampler.fixed_samples >= int(sampler.duration_seconds) - 1
+        # Both our generated test pattern and the supplied real acceptance video
+        # contain motion. Previously the server decoded every frame as black.
+        assert len(signatures) > 1, "Acceptance footage was decoded as one repeated image"
+        print(
+            json.dumps(
+                {
+                    "sampling_verified": True,
+                    "decoded": sampler.frames_read,
+                    "fixed_samples": sampler.fixed_samples,
+                    "selected": selected,
+                    "distinct_selected_images": len(signatures),
+                    "scene_cuts": sampler.scene_cuts,
+                }
+            ),
+            flush=True,
+        )
 
 
 async def playback(task_id):
@@ -69,6 +96,7 @@ async def ingest(url, directory):
                     url, path, settings.max_video_size_mb * 1048576, progress=progress
                 )
                 assert path.is_file()
+                await asyncio.to_thread(verify_sampling, path)
                 assert await store.complete(task_id, [])
                 # Playback must survive losing the worker's local copy.
                 path.unlink()
@@ -77,6 +105,7 @@ async def ingest(url, directory):
             )
             assert await child.wait() == 0
         item = await store.get(task_id)
+        assert item["media"]["decoder_verified"]
         print(json.dumps({"verified_media": item["media"]}, ensure_ascii=False), flush=True)
         await store.delete_many([task_id])
         await review_media.collect_expired()

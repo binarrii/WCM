@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import shutil
 import subprocess
@@ -371,3 +372,111 @@ async def test_non_browser_video_is_transcoded(media_http, video_files, tmp_path
     routes["https://source/v.ts"] = source.read_bytes()
     result = await prepare("https://source/v.ts", tmp_path / "out.mp4")
     assert result["video_transcoded"] and result["video_codec"] == "h264"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("order", ["top", "bottom"])
+async def test_interlaced_h264_becomes_progressive_with_original_frame_rate(
+    media_http, tmp_path, order
+):
+    routes, _ = media_http
+    source = tmp_path / "interlaced.ts"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x96:rate=50:duration=3",
+            "-vf",
+            f"tinterlace=interleave_{order}",
+            "-c:v",
+            "libx264",
+            "-threads",
+            "1",
+            "-flags",
+            "+ilme+ildct",
+            "-x264-params",
+            "tff=1" if order == "top" else "bff=1",
+            str(source),
+        ],
+        check=True,
+    )
+    _, before, _ = await media.probe(source)
+    assert before["field_order"] in {"tt", "bb", "tb", "bt"}
+    routes["https://source/interlaced.ts"] = source.read_bytes()
+    output = tmp_path / "out.mp4"
+    result = await prepare("https://source/interlaced.ts", output)
+    assert result["video_transcoded"] and result["deinterlaced"]
+    assert result["decoder_verified"]
+    _, after, duration = await media.probe(output)
+    assert after["field_order"] == "progressive"
+    assert after["avg_frame_rate"] == before["avg_frame_rate"] == "25/1"
+    assert int(after["nb_frames"]) == 75
+    assert duration == pytest.approx(3, abs=0.05)
+    capture = cv2.VideoCapture(str(output))
+    hashes = set()
+    try:
+        for index in range(75):
+            ok, frame = capture.read()
+            assert ok and frame.std() > 10
+            assert capture.get(cv2.CAP_PROP_POS_MSEC) / 1000 == pytest.approx(index / 25, abs=0.002)
+            hashes.add(hash(frame.tobytes()))
+    finally:
+        capture.release()
+    assert len(hashes) > 70
+
+
+@pytest.mark.asyncio
+async def test_decoder_success_returning_black_pixels_is_rejected_and_cleaned(
+    media_http, video_files, tmp_path, monkeypatch
+):
+    routes, _ = media_http
+    routes["https://source/v.ts"] = (video_files / "source.ts").read_bytes()
+    original = media.media_command
+
+    async def broken_decoder(args, **kwargs):
+        if "api.media_decode_check" in args:
+            return json.dumps(
+                {
+                    "decoder_version": "broken",
+                    "samples": [
+                        {"pts": 1, "pixels": base64.b64encode(bytes(96 * 54 * 3)).decode()}
+                    ],
+                }
+            ).encode()
+        return await original(args, **kwargs)
+
+    monkeypatch.setattr(media, "media_command", broken_decoder)
+    with pytest.raises(media.MediaSourceError, match="抽帧校验失败"):
+        await prepare("https://source/v.ts", tmp_path / "out.mp4")
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("color", ["black", "gray"])
+async def test_genuine_black_or_static_video_passes_decode_validation(media_http, tmp_path, color):
+    routes, _ = media_http
+    source = tmp_path / "static.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c={color}:s=160x96:r=25:d=1",
+            "-c:v",
+            "libx264",
+            "-threads",
+            "1",
+            str(source),
+        ],
+        check=True,
+    )
+    routes["https://source/static.mp4"] = source.read_bytes()
+    result = await prepare("https://source/static.mp4", tmp_path / "out.mp4")
+    assert result["decoder_verified"] and not result["video_transcoded"]
