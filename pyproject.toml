@@ -33,6 +33,7 @@ dependencies = [
     "webauthn>=2.7,<3",
     "cryptography>=46,<48",
     "qrcode>=8.2,<9",
+    "m3u8>=6.0,<7",
 ]
 
 [project.optional-dependencies]

@@ -374,6 +374,17 @@ def _initialize_sync() -> None:
             existing = cursor.fetchone()
             if existing is None:
                 value = settings.seed_value(key)
+                if key == "max_video_size_mb":
+                    cursor.execute(
+                        "SELECT `value` AS config_value FROM system_parameters WHERE `key` = %s",
+                        ("max_file_size_mb",),
+                    )
+                    old_limit = cursor.fetchone()
+                    value = (
+                        int(old_limit["config_value"]) * 100
+                        if old_limit
+                        else settings.seed_value("max_file_size_mb") * 100
+                    )
             else:
                 previous_options = (
                     _decode_enum_values(existing.get("enum_values"))

@@ -23,6 +23,7 @@ import {
 import FaceOverlay from '../components/FaceOverlay.vue';
 import { facesAtTime, containedVideoRect, faceSampleTimes, faceSampleSeekTime } from '../services/faceOverlay';
 import { observeVideoFrames } from '../services/videoFrames';
+import { reviewPlayback, playbackErrorMessage } from '../services/reviewPlayback';
 
 const overlayMode = ref('corners');
 const selectedMarker = ref('');
@@ -72,6 +73,10 @@ const error = ref('');
 const rawResults = ref(null);
 const loadedTaskId = ref('');
 const currentTask = ref(null);
+const playbackError = ref('');
+const playback = computed(() => reviewPlayback(currentTask.value, videoUrl.value));
+const playbackOffset = computed(() => playback.value.offset);
+watch(() => playback.value.url, () => { playbackError.value = ''; presentedTime.value = null; });
 let disposed = false;
 const setupExpanded = ref(true);
 const markers = ref([]);
@@ -344,9 +349,9 @@ const seekVideo = time => {
   const video = videoRef.value;
   if (!video || !Number.isFinite(time)) return;
   currentSeconds.value = time;
-  if (video.currentTime === time && presentedTime.value != null) return;
+  if (video.currentTime === time + playbackOffset.value && presentedTime.value != null) return;
   frameObserver?.invalidate();
-  video.currentTime = time;
+  video.currentTime = time + playbackOffset.value;
 };
 const handleMetadata = () => {
   updateVideoRect();
@@ -354,9 +359,9 @@ const handleMetadata = () => {
     seekVideo(pendingSeek.value);
     pendingSeek.value = null;
   }
-  durationMs.value = Number.isFinite(videoRef.value?.duration) ? Math.round(videoRef.value.duration * 1000) : 0;
+  durationMs.value = Number.isFinite(videoRef.value?.duration) ? Math.max(0, Math.round((videoRef.value.duration - playbackOffset.value) * 1000)) : 0;
 };
-const handleTimeUpdate = () => { currentSeconds.value = videoRef.value?.currentTime || 0; };
+const handleTimeUpdate = () => { currentSeconds.value = Math.max(0, (videoRef.value?.currentTime || 0) - playbackOffset.value); };
 const handleSeek = (event) => {
   selectedMarker.value = '';
   currentSeconds.value = Number(event.target.value);
@@ -397,7 +402,7 @@ watch(timelineRef, observeTimeline, { flush: 'post' });
 watch(playerPanelRef, observePlayerPanel, { flush: 'post' });
 watch(videoRef, element => {
   frameObserver?.stop();
-  frameObserver = observeVideoFrames(element, time => { presentedTime.value = time; });
+  frameObserver = observeVideoFrames(element, time => { presentedTime.value = time == null ? null : Math.max(0, time - playbackOffset.value); });
   frameSyncSupported.value = frameObserver.supported;
   videoResizeObserver?.disconnect();
   if (element) videoResizeObserver?.observe(element);
@@ -482,12 +487,14 @@ onBeforeUnmount(() => {
     <section v-if="videoUrl || rawResults != null" class="review-workspace" :style="{ '--review-player-height': playerPanelHeight ? `${playerPanelHeight}px` : 'auto' }">
       <div ref="playerPanelRef" class="review-player-panel">
         <div ref="videoStageRef" class="video-stage">
-          <video ref="videoRef" :src="videoUrl" controls controlslist="nofullscreen" preload="metadata"
+          <p v-if="playback.message" class="review-error" role="status">{{ playback.message }}</p>
+          <p v-if="playbackError" class="review-error" role="alert">{{ playbackError }}</p>
+          <video ref="videoRef" :src="playback.url || undefined" controls controlslist="nofullscreen" preload="metadata"
             @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate"
             @play="paused = false; selectedMarker = ''" @pause="paused = true; handleTimeUpdate()"
             @seeking="seeking = true; presentedTime = null" @seeked="seeking = false; handleTimeUpdate()"
             @emptied="videoRect = null; durationMs = 0; paused = true; seeking = false; presentedTime = null"
-            @error="error = '视频无法播放，请确认地址可访问且服务支持 Range 请求'" />
+            @error="playbackError = playbackErrorMessage(videoRef?.error)" />
           <FaceOverlay :faces="sampleFaces" :rect="videoRect" :selected="selectedMarker" :mode="overlayMode" @select="selectFace" />
           <button class="overlay-fullscreen" type="button" @click="toggleFullscreen">切换全屏</button>
         </div>

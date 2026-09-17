@@ -23,13 +23,14 @@ from .handlers import (
     _process_detect_sensitive,
     _search_video_frames,
 )
+from .media_source import MediaSourceError, is_video_url
 from .review_cancellation import ReviewTaskCancelled, run_cancellable_review
 from .review_coverage import ReviewCoverage
 from .review_progress import ReviewProgress
 from .review_results import consolidate_results
 from .review_scheduler import review_task_slot
 from .review_stream import push_review_progress, stream_review_tasks
-from .utils import VIDEO_EXTENSIONS, _download_url_safe
+from .utils import _download_url_safe
 
 api_bp = APIRouter()
 
@@ -292,7 +293,7 @@ async def search_faces(request: Request):
 
         # Download from URL
         try:
-            is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
+            is_video = await is_video_url(url)
             if is_video:
                 sample_interval = float(data.get("sample_interval", 1.0))
                 frames, results = await _search_video_frames(
@@ -378,7 +379,7 @@ async def websocket_search(websocket: WebSocket):
             await websocket.send_json({"status": "accepted", "taskId": task_id})
 
             engine = get_face_engine()
-            is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
+            is_video = await is_video_url(url)
 
             try:
                 if is_video:
@@ -593,7 +594,11 @@ async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
         except Exception as exc:
             failed = None
             with contextlib.suppress(Exception):
-                failed = await review_task_store.fail(task_id, str(exc))
+                failed = await review_task_store.fail(
+                    task_id,
+                    str(exc),
+                    **({"retryable": False} if isinstance(exc, MediaSourceError) else {}),
+                )
             if failed is False and await review_task_store.cancellation_requested(task_id):
                 await record_cancellation()
                 raise ReviewTaskCancelled("审核任务已取消") from exc

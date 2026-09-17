@@ -99,5 +99,13 @@ def test_existing_database_adds_nullable_statistics_column(monkeypatch):
     cursor.fetchone.return_value = None
     monkeypatch.setattr(review_task_store, "_connect", lambda: connection)
     review_task_store._initialize_sync()
-    assert any("ADD COLUMN review_summary JSON NULL" in call.args[0] for call in cursor.execute.call_args_list)
-    assert "ADD COLUMN progress JSON NULL" in cursor.execute.call_args.args[0]
+    assert any(
+        "ADD COLUMN review_summary JSON NULL" in call.args[0]
+        for call in cursor.execute.call_args_list
+    )
+    assert any(
+        "ADD COLUMN progress JSON NULL" in call.args[0] for call in cursor.execute.call_args_list
+    )
+    assert any(
+        "ADD COLUMN media JSON NULL" in call.args[0] for call in cursor.execute.call_args_list
+    )

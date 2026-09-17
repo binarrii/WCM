@@ -5,12 +5,12 @@ import json
 import re
 import zipfile
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import AnyHttpUrl, BaseModel, Field
 
 from wcm_facerec.config import DEFAULT_DISTANCE_THRESHOLD, settings
 
-from . import review_task_store
+from . import review_media, review_task_store
 from .review_results import consolidate_results
 
 review_tasks_bp = APIRouter()
@@ -170,3 +170,8 @@ async def delete_review_tasks(body: ReviewTaskDeleteRequest):
     except review_task_store.ReviewTaskConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"deleted": deleted, "requested": len(task_ids)}
+
+
+@review_tasks_bp.api_route("/review_tasks/{task_id}/media/{media_id}", methods=["GET", "HEAD"])
+async def get_review_media(task_id: str, media_id: str, request: Request):
+    return await review_media.playback(task_id, media_id, request)

@@ -12,7 +12,7 @@ from wcm_facerec.cluster import drain_task
 from wcm_facerec.config import settings
 from wcm_facerec.model_budget import cancel_model_requests, model_request_budget
 
-from .utils import VIDEO_EXTENSIONS
+from .media_source import is_video_url
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +139,7 @@ def protect_video_review(operation):
     async def protected(url, *args, **kwargs):
         # Nested window review shares the parent video's budgets; images and
         # independent video tasks must not accumulate each other's failures.
-        if _current_health.get() is not None or not any(
-            url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS
-        ):
+        if _current_health.get() is not None or not await is_video_url(url):
             return await operation(url, *args, **kwargs)
         health = ModelHealth()
         token = _current_health.set(health)

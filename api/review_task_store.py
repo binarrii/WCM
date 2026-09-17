@@ -14,6 +14,7 @@ from wcm_facerec.cluster import run_sync
 from wcm_facerec.config import BUSINESS_PARAMETER_SPECS, settings
 from wcm_facerec.execution import current_execution
 
+from . import review_media
 from .review_coverage import completion_status, coverage_message
 from .review_events import review_events
 from .review_evidence import archive_evidence
@@ -82,7 +83,7 @@ def _initialize_sync() -> None:
             """
         )
 
-        for column in ("review_summary", "progress"):
+        for column in ("review_summary", "progress", "media"):
             cursor.execute("SHOW COLUMNS FROM review_tasks LIKE %s", (column,))
             if not cursor.fetchone():
                 try:
@@ -91,6 +92,8 @@ def _initialize_sync() -> None:
                     # Multiple API workers can initialize the existing table together.
                     if exc.args[0] != 1060:
                         raise
+
+        review_media.initialize_sync(cursor)
 
 
 async def initialize() -> None:
@@ -133,6 +136,7 @@ def _public_row(row: dict, *, include_results: bool) -> dict:
         "error": row["error"],
         "review_summary": _json_load(row.get("review_summary")),
         "progress": _json_load(row.get("progress")),
+        "media": review_media.public_media(row.get("media")),
         "has_results": bool(row.get("has_results", row.get("results") is not None)),
         "created_at": _iso(row["created_at"]),
         "updated_at": _iso(row["updated_at"]),
@@ -230,7 +234,7 @@ async def complete(task_id: str | None, results: list[dict], summary: dict | Non
     return True
 
 
-def _fail_sync(task_id: str, error: str) -> bool:
+def _fail_sync(task_id: str, error: str, retryable: bool = True) -> bool:
     fence, ownership = _ownership(task_id)
     with _connect() as connection, connection.cursor() as cursor:
         if settings.cluster_enabled:
@@ -241,9 +245,9 @@ def _fail_sync(task_id: str, error: str) -> bool:
                     "available_at = TIMESTAMPADD(SECOND, %s, UTC_TIMESTAMP(3)), lease_token = NULL, lease_expires = NULL "
                     "WHERE id = %s AND status = 'processing'" + fence,
                     (
-                        settings.review_max_attempts,
+                        settings.review_max_attempts if retryable else 0,
                         error[:65535],
-                        settings.review_max_attempts,
+                        settings.review_max_attempts if retryable else 0,
                         settings.review_retry_seconds,
                         task_id,
                         *ownership,
@@ -261,9 +265,9 @@ def _fail_sync(task_id: str, error: str) -> bool:
         return bool(cursor.rowcount)
 
 
-async def fail(task_id: str | None, error: str) -> bool:
+async def fail(task_id: str | None, error: str, *, retryable: bool = True) -> bool:
     if task_id and is_enabled():
-        if not await _run(_fail_sync, task_id, error):
+        if not await _run(_fail_sync, task_id, error, retryable):
             return False
         await review_events.publish({"type": "changed", "task_ids": [task_id], "reason": "failed"})
     return True
@@ -388,7 +392,7 @@ def _get_summaries_sync(task_ids: list[str]) -> list[dict]:
         cursor.execute(
             "SELECT "
             + ("attempts, " if settings.cluster_enabled else "")
-            + "id, video_url, parameters, status, result_count, error, review_summary, progress, "
+            + "id, video_url, parameters, status, result_count, error, review_summary, progress, media, "
             f"results IS NOT NULL AS has_results, created_at, updated_at FROM review_tasks WHERE id IN ({placeholders})",
             task_ids,
         )
@@ -445,7 +449,7 @@ def _list_sync(query: str, status: str, page: int, page_size: int) -> dict:
         cursor.execute(
             "SELECT "
             + ("attempts, " if settings.cluster_enabled else "")
-            + "id, video_url, parameters, status, result_count, error, review_summary, progress, "
+            + "id, video_url, parameters, status, result_count, error, review_summary, progress, media, "
             "results IS NOT NULL AS has_results, "
             f"created_at, updated_at FROM review_tasks{where} "
             "ORDER BY created_at DESC LIMIT %s OFFSET %s",

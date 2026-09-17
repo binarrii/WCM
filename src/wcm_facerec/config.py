@@ -108,7 +108,18 @@ class Settings(BaseSettings):
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    max_file_size_mb: int = 100
+    max_file_size_mb: int = Field(default=100, ge=1)
+    max_video_size_mb: int = Field(default=10000, ge=1)
+    max_video_output_mb: int = Field(default=20000, ge=1)
+    max_video_duration_seconds: int = Field(default=43200, ge=1)
+    video_prepare_timeout_seconds: int = Field(default=7200, ge=30)
+    video_prepare_concurrency: int = Field(default=2, ge=1, le=16)
+    video_min_free_disk_mb: int = Field(default=2048, ge=1)
+    video_retention_days: int = Field(default=7, ge=1, le=365)
+    hls_max_height: int = Field(default=1080, ge=144, le=4320)
+    hls_max_segments: int = Field(default=50000, ge=1, le=100000)
+    review_media_dir: str = "/tmp/wcm-review-media"
+    review_media_prefix: str = "wcm/review-media"
     review_task_concurrency: int = Field(default=4, ge=1)
     review_window_concurrency: int = Field(default=4, ge=1)
     jpeg_quality: int = Field(default=95, ge=1, le=100)
@@ -212,6 +223,15 @@ BUSINESS_PARAMETER_SPECS = {
     "face_gallery_target_samples": BusinessParameterSpec("number", "人脸优化"),
     # API limits and review scheduling.
     "max_file_size_mb": BusinessParameterSpec("number", "审核调度"),
+    "max_video_size_mb": BusinessParameterSpec("number", "视频接入"),
+    "max_video_output_mb": BusinessParameterSpec("number", "视频接入"),
+    "max_video_duration_seconds": BusinessParameterSpec("number", "视频接入"),
+    "video_prepare_timeout_seconds": BusinessParameterSpec("number", "视频接入"),
+    "video_prepare_concurrency": BusinessParameterSpec("number", "视频接入"),
+    "video_min_free_disk_mb": BusinessParameterSpec("number", "视频接入"),
+    "video_retention_days": BusinessParameterSpec("number", "视频接入"),
+    "hls_max_height": BusinessParameterSpec("number", "视频接入"),
+    "hls_max_segments": BusinessParameterSpec("number", "视频接入"),
     "review_task_concurrency": BusinessParameterSpec("number", "审核调度"),
     "review_window_concurrency": BusinessParameterSpec("number", "审核调度"),
     "insightface_concurrency": BusinessParameterSpec("number", "审核调度"),

@@ -16,7 +16,8 @@ import numpy as np
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 
-from . import ocr, review_windows
+from . import ocr, review_media, review_windows
+from .media_source import is_video_url, video_limit_bytes
 from .model_clients import model_client
 from .model_health import (
     ModelServiceUnavailable,
@@ -25,7 +26,6 @@ from .model_health import (
     protect_video_review,
 )
 from .utils import (
-    VIDEO_EXTENSIONS,
     VideoFrameSampler,
     _download_url_safe,
     _download_video_safe_async,
@@ -198,7 +198,7 @@ async def _search_video_frames(
             await _download_video_safe_async(
                 url,
                 video_path,
-                settings.max_file_size_mb * 100 * 1024 * 1024,
+                video_limit_bytes(),
                 timeout=900.0,
             )
         all_results = []
@@ -453,15 +453,19 @@ class PreparedVisualFrames(list):
 async def _download_review_video(url, path, max_size, *, progress=None):
     if progress is not None:
         await progress.begin_download()
-    await _download_video_safe_async(
+    metadata = await _download_video_safe_async(
         url,
         path,
         max_size,
         timeout=900.0,
         on_progress=progress.update_download if progress is not None else None,
+        on_stage=progress.set_phase if progress is not None else None,
     )
     if progress is not None:
         await progress.finish_download()
+        if isinstance(metadata, dict):
+            await progress.set_phase("archiving_media")
+            await review_media.archive(progress.task_id, path, metadata)
 
 
 def _compose_nsfw_frames(
@@ -792,7 +796,7 @@ async def _call_nsfw_analysis(
 
 @protect_video_review
 async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
-    is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
+    is_video = await is_video_url(url)
     if is_video and settings.nsfw_review_mode == "window":
         rows = await review_windows.analyze_video(url, sample_interval, include_visual=False)
         return review_windows.standalone_results(rows, include_visual=False)
@@ -811,7 +815,7 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
             await _download_video_safe_async(
                 url,
                 video_path,
-                settings.max_file_size_mb * 100 * 1024 * 1024,
+                video_limit_bytes(),
             )
             frames_data = await asyncio.to_thread(
                 _extract_video_frames_for_ocr, video_path, sample_interval
@@ -1081,7 +1085,7 @@ def _merge_person_timelines(
 async def _process_analyze_media(
     url: str, sample_interval: float, top_k: int, threshold: float, *, coverage=None, progress=None
 ) -> list:
-    is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
+    is_video = await is_video_url(url)
     if is_video and settings.nsfw_review_mode == "window":
         return await review_windows.analyze_video(
             url,
@@ -1157,7 +1161,7 @@ async def _process_analyze_media(
             await _download_review_video(
                 url,
                 video_path,
-                settings.max_file_size_mb * 100 * 1024 * 1024,
+                video_limit_bytes(),
                 progress=progress,
             )
 
@@ -1309,7 +1313,7 @@ async def _process_analyze_media(
 
 @protect_video_review
 async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
-    is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
+    is_video = await is_video_url(url)
     if is_video and settings.nsfw_review_mode == "window":
         return review_windows.standalone_results(
             await review_windows.analyze_video(url, sample_interval)
@@ -1347,7 +1351,7 @@ async def _process_detect_nsfw(url: str, sample_interval: float) -> dict:
             await _download_video_safe_async(
                 url,
                 video_path,
-                settings.max_file_size_mb * 100 * 1024 * 1024,
+                video_limit_bytes(),
             )
             frames_data = await asyncio.to_thread(
                 _extract_video_windows, video_path, sample_interval

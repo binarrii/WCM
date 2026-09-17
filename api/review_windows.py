@@ -558,7 +558,7 @@ async def analyze_video(
         await handlers._download_review_video(
             url,
             path,
-            settings.max_file_size_mb * 100 * 1024 * 1024,
+            handlers.video_limit_bytes(),
             progress=progress,
         )
         consumers = [asyncio.create_task(consumer()) for _ in range(concurrency)]

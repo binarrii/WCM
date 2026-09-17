@@ -16,7 +16,8 @@ import numpy as np
 
 from wcm_facerec.config import settings
 
-VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
+from .media_source import check_disk, prepare_video, size_error
+
 MIN_FACE_PIXELS = 32 * 32
 logger = logging.getLogger(__name__)
 
@@ -459,7 +460,7 @@ def _download_video_safe_sync(
                 on_progress(downloaded, total)
 
 
-async def _download_video_safe_async(
+async def _download_video_file_async(
     url: str, file_path: Path, max_size: int, timeout: float = 120.0, *, on_progress=None
 ):
     """Stream a review download; cancellation closes the response and file promptly."""
@@ -478,8 +479,9 @@ async def _download_video_safe_async(
             ).lower() != "identity":
                 total = None
             if total is not None and total > max_size:
-                raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
+                raise size_error(total, max_size)
 
+            manifest = False
             downloaded = 0
             last_report = time.monotonic()
             if on_progress is not None:
@@ -487,18 +489,40 @@ async def _download_video_safe_async(
             with open(file_path, "wb") as f:
                 async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
                     await asyncio.sleep(0)
-                    f.write(chunk)
+                    if downloaded == 0:
+                        manifest = chunk.lstrip(b"\xef\xbb\xbf \r\n").startswith(b"#EXTM3U")
                     downloaded += len(chunk)
+                    if manifest and downloaded > 2 * 1024 * 1024:
+                        raise size_error(downloaded, 2 * 1024 * 1024)
                     if downloaded > max_size:
-                        raise ValueError(f"Video file too large. Max allowed: {max_size} bytes")
+                        raise size_error(downloaded, max_size)
+                    check_disk(file_path)
+                    f.write(chunk)
                     if total is not None and downloaded > total:
                         total = None
                     now = time.monotonic()
                     if on_progress is not None and now - last_report >= 0.5:
                         on_progress(downloaded, total)
                         last_report = now
+            if total is not None and downloaded < total:
+                raise httpx.ReadError("视频下载不完整")
             if on_progress is not None:
                 on_progress(downloaded, total)
+            return {"url": str(response.url)}
+
+
+async def _download_video_safe_async(
+    url, file_path, max_size, timeout=120.0, *, on_progress=None, on_stage=None
+):
+    return await prepare_video(
+        url,
+        file_path,
+        max_size,
+        downloader=_download_video_file_async,
+        timeout=timeout,
+        on_progress=on_progress,
+        on_stage=on_stage,
+    )
 
 
 def _extract_video_frames_for_ocr(

@@ -83,7 +83,7 @@ def _claim_sync(worker_id):
         cursor.execute(
             "UPDATE review_tasks SET status = 'processing', worker_id = %s, lease_token = %s, "
             "lease_expires = TIMESTAMPADD(SECOND, %s, UTC_TIMESTAMP(3)), heartbeat_at = UTC_TIMESTAMP(3), "
-            "attempts = %s, error = NULL, progress = %s WHERE id = %s",
+            "attempts = %s, error = NULL, media = NULL, progress = %s WHERE id = %s",
             (
                 worker_id,
                 token,

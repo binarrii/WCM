@@ -120,9 +120,10 @@ async def test_cancel_during_slow_download_closes_stream_and_file(monkeypatch, t
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, 1)
-    assert closed and path.stat().st_size == 65536
+    assert closed and not path.exists()
+    assert not list(tmp_path.glob("wcm-ingest-*"))
     progress.finish_download.assert_not_called()
-    path.unlink()
+    path.unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio

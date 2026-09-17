@@ -14,7 +14,7 @@ from wcm_facerec import runtime_parameters
 from wcm_facerec.config import settings
 from wcm_facerec.execution import execution_scope
 
-from . import parameter_store, review_task_store, task_queue
+from . import parameter_store, review_media, review_task_store, task_queue
 from .model_clients import model_client_pool
 from .review_events import review_events
 from .routes import _run_review_task
@@ -78,6 +78,17 @@ async def serve():
     await review_events.start()
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     tasks = set()
+
+    async def media_cleanup():
+        while not stop.is_set():
+            try:
+                await review_media.collect_expired()
+            except Exception:
+                logger.warning("Review media cleanup temporarily unavailable")
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop.wait(), 60)
+
+    collector = asyncio.create_task(media_cleanup())
     try:
         async with model_client_pool():
             while not stop.is_set():
@@ -101,6 +112,8 @@ async def serve():
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
     finally:
+        collector.cancel()
+        await asyncio.gather(collector, return_exceptions=True)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

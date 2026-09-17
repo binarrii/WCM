@@ -130,7 +130,7 @@ async def test_failed_download_retains_last_bytes_and_never_finishes(monkeypatch
     stream = install_download(monkeypatch, [b"a" * 65536, httpx.ReadError("broken")])
     monkeypatch.setattr(review_progress.review_task_store, "update_progress", AsyncMock())
     progress = ReviewProgress("task", interval=0)
-    with pytest.raises(httpx.ReadError):
+    with pytest.raises(RuntimeError, match="媒体源连接失败"):
         await handlers._download_review_video(
             "http://fixture/movie.mp4", tmp_path / "movie.mp4", 200000, progress=progress
         )
