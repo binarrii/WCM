@@ -454,6 +454,10 @@ async def analyze_video(
                 }
                 if any(abs(frame.timestamp - value) < 0.05 for value in primary_times):
                     return
+                if coverage is not None:
+                    # Auxiliary failures must map to an actual reviewed sample.
+                    # Register successes too, using decoded PTS rather than the request.
+                    coverage.add([frame.timestamp])
                 key = await asyncio.to_thread(
                     lambda: (frame.image.shape, _digest(frame.image.tobytes()))
                 )

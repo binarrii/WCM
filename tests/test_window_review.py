@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from api import handlers, review_progress, review_windows
+from api.model_health import model_call
 from api.review_coverage import ReviewCoverage
 from api.utils import ReviewWindowPlanner, VideoFrame, VideoWindow
 from tests.test_nsfw_target_review import caption, image, install_client
@@ -485,15 +486,17 @@ async def test_difficult_face_adds_only_budgeted_neighbor_frame(monkeypatch):
 
     monkeypatch.setattr(review_progress.review_task_store, "update_progress", update_progress)
     progress = review_progress.ReviewProgress("task", interval=0)
+    coverage = ReviewCoverage()
 
     rows = await handlers._process_analyze_media(
-        "https://fixture/video.mp4", 1, 5, 0.5, progress=progress
+        "https://fixture/video.mp4", 1, 5, 0.5, progress=progress, coverage=coverage
     )
 
     # Three primary samples allow ceil(3 * 0.30) == one auxiliary call.
     assert requested == [0.8]
     assert len(calls) == 4
     assert calls[-1] == (0.8, True, True)
+    assert coverage.summarize(rows)["total_samples"] == 4
     person = next(row for row in rows if row.get("source") == "face")
     assert person["recognition_status"] == "confirmed"
     assert person["evidence_count"] == 2
@@ -506,6 +509,62 @@ async def test_difficult_face_adds_only_budgeted_neighbor_frame(monkeypatch):
         "total": 1,
         "percent": 100.0,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "recovered", "failed", "missing", "primary"])
+async def test_auxiliary_coverage_counts_actual_frames_and_final_retry_outcome(
+    monkeypatch, outcome
+):
+    install_video(monkeypatch, [sample(i, i * 30) for i in range(3)])
+    monkeypatch.setattr(handlers.settings, "face_profile_optimization", True)
+    monkeypatch.setattr(handlers.settings, "face_max_extra_call_ratio", 0.30)
+    monkeypatch.setattr(handlers.settings, "face_neighbor_offsets_s", (-0.2,))
+    monkeypatch.setattr(
+        review_windows,
+        "aggregate_face_candidates",
+        lambda *args, **kwargs: ([], {"trigger_times": [1]}),
+    )
+    # The requested 0.8 s frame can decode at 0.84 s; coverage must use actual PTS.
+    frame = (
+        None
+        if outcome == "missing"
+        else VideoFrame(1.0 if outcome == "primary" else 0.84, np.full((64, 96, 3), 99, np.uint8))
+    )
+    monkeypatch.setattr(
+        review_windows, "iter_video_frames_near", lambda *args, **kwargs: [(0.8, frame)]
+    )
+    attempts = 0
+
+    @model_call("face")
+    async def face(engine, image, top_k, threshold, time, *, auxiliary=False, **kwargs):
+        nonlocal attempts
+        if auxiliary:
+            attempts += 1
+            if outcome == "failed" or (outcome == "recovered" and attempts == 1):
+                raise httpx.ReadTimeout("auxiliary frame timeout")
+            return []
+        return [{"frame_time": time}] if time == 1 else []
+
+    monkeypatch.setattr(handlers, "_face_task", face)
+    monkeypatch.setattr(handlers, "_call_ocr_api", AsyncMock(return_value=""))
+    monkeypatch.setattr(handlers, "_call_nsfw_analysis", AsyncMock(return_value="普通画面"))
+    monkeypatch.setattr(handlers, "_call_llm_guard", AsyncMock(return_value={"safe": True}))
+    coverage = ReviewCoverage()
+    rows = await handlers._process_analyze_media(
+        "https://fixture/video.mp4", 1, 5, 0.5, coverage=coverage
+    )
+    summary = coverage.summarize(rows)
+    reviewed = outcome not in {"missing", "primary"}
+    assert summary is not None
+    assert summary["total_samples"] == (4 if reviewed else 3)
+    assert summary["incomplete_samples"] == (1 if outcome == "failed" else 0)
+    assert summary["incomplete_checks"] == (1 if outcome == "failed" else 0)
+    assert (
+        attempts == {"success": 1, "recovered": 2, "failed": 2, "missing": 0, "primary": 0}[outcome]
+    )
+    if reviewed:
+        assert 840 in coverage.samples and 800 not in coverage.samples
 
 
 @pytest.mark.asyncio

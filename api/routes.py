@@ -24,6 +24,7 @@ from .handlers import (
     _search_video_frames,
 )
 from .media_source import MediaSourceError, is_video_url
+from .model_health import ModelServiceUnavailable
 from .review_cancellation import ReviewTaskCancelled, run_cancellable_review
 from .review_coverage import ReviewCoverage
 from .review_progress import ReviewProgress
@@ -597,7 +598,11 @@ async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
                 failed = await review_task_store.fail(
                     task_id,
                     str(exc),
-                    **({"retryable": False} if isinstance(exc, MediaSourceError) else {}),
+                    **(
+                        {"retryable": False}
+                        if isinstance(exc, (MediaSourceError, ModelServiceUnavailable))
+                        else {}
+                    ),
                 )
             if failed is False and await review_task_store.cancellation_requested(task_id):
                 await record_cancellation()

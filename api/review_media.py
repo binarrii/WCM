@@ -1,6 +1,5 @@
 """Private, immutable review videos shared by API/Worker replicas."""
 
-import hashlib
 import logging
 import re
 import shutil
@@ -18,6 +17,7 @@ from wcm_facerec.cluster import cluster_slot, run_sync
 from wcm_facerec.config import settings
 from wcm_facerec.model_budget import model_request_budget, remaining_request_time
 
+from . import media_objects
 from . import review_task_store as store
 from .review_events import review_events
 
@@ -37,6 +37,7 @@ def initialize_sync(cursor):
             INDEX idx_review_media_task (task_id)
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
     """)
+    media_objects.initialize_sync(cursor)
 
 
 def public_media(value):
@@ -44,44 +45,44 @@ def public_media(value):
     if not media:
         return None
     return {
-        **{k: v for k, v in media.items() if k not in {"storage", "object_key"}},
+        **{k: v for k, v in media.items() if k not in {"storage", "object_key", "object_id"}},
         "url": f"/api/v1/review_tasks/{media['task_id']}/media/{media['id']}",
     }
 
 
-def _register(task_id, media):
-    with store._connect() as connection, connection.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO review_media (id, task_id, storage, object_key, expires_at) VALUES (%s, %s, %s, %s, %s)",
-            (
-                media["id"],
-                task_id,
-                media["storage"],
-                media["object_key"],
-                datetime.fromisoformat(media["expires_at"]).replace(tzinfo=None),
-            ),
-        )
+def _register(task_id, media, cursor=None):
+    if cursor is None:
+        with store._connect() as connection, connection.cursor() as cursor:
+            return _register(task_id, media, cursor)
+    cursor.execute(
+        "INSERT INTO review_media (id, task_id, storage, object_key, expires_at, object_id) VALUES (%s, %s, %s, %s, %s, %s)",
+        (
+            media["id"],
+            task_id,
+            media["storage"],
+            media["object_key"],
+            datetime.fromisoformat(media["expires_at"]).replace(tzinfo=None),
+            media.get("object_id"),
+        ),
+    )
 
 
-def _publish(task_id, media):
+def _publish(task_id, media, cursor=None):
+    if cursor is None:
+        with store._connect() as connection, connection.cursor() as cursor:
+            return _publish(task_id, media, cursor)
     fence, ownership = store._ownership(task_id)
-    with store._connect() as connection, connection.cursor() as cursor:
-        return bool(
-            cursor.execute(
-                "UPDATE review_tasks SET media = %s WHERE id = %s AND status = 'processing'"
-                + fence,
-                (store._json_dump(media), task_id, *ownership),
-            )
+    return bool(
+        cursor.execute(
+            "UPDATE review_tasks SET media = %s WHERE id = %s AND status = 'processing'" + fence,
+            (store._json_dump(media), task_id, *ownership),
         )
+    )
 
 
 def _upload(path, media):
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(1024 * 1024):
-            remaining_request_time()
-            digest.update(chunk)
-    media["sha256"] = digest.hexdigest()
+    if "sha256" not in media:
+        media["sha256"] = media_objects.fingerprint(path)
     if media["storage"] == "s3":
         client = image_store.client()
         parameters = {"Bucket": settings.s3_bucket, "Key": media["object_key"]}
@@ -111,30 +112,54 @@ def _upload(path, media):
                     client.abort_multipart_upload(**parameters, UploadId=upload["UploadId"])
 
     else:
-        target = Path(settings.review_media_dir) / f"{media['id']}.mp4"
+        target = media_objects.local_path(media)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
 
 
-async def archive(task_id, path, metadata):
-    if not task_id or not store.is_enabled():
-        return
+def _archive(task_id, path, metadata):
+    digest = media_objects.fingerprint(path)
+    size = path.stat().st_size
+    scope = media_objects.storage_scope(settings.image_storage)
     media_id = uuid.uuid4().hex
     media = {
         **metadata,
         "id": media_id,
         "task_id": task_id,
         "storage": settings.image_storage,
+        "sha256": digest,
+        "size_bytes": size,
         "object_key": f"{settings.review_media_prefix.strip('/')}/{media_id}.mp4",
         "expires_at": (
             datetime.now(timezone.utc) + timedelta(days=settings.video_retention_days)
         ).isoformat(),
     }
-    # Register before upload: abandoned uploads and deleted tasks remain collectible.
-    await store._run(_register, task_id, media)
-    await run_sync(_upload, Path(path), media)
-    if not await store._run(_publish, task_id, media):
-        raise RuntimeError("媒体保存时任务已取消或执行租约失效")
+    with media_objects.locked(scope, digest) as (_, cursor):
+        obj = media_objects.reusable(cursor, scope, digest, size)
+        reused = obj is not None
+        if obj is None:
+            obj = media_objects.create(
+                cursor, scope, digest, media["storage"], media["object_key"], size
+            )
+        media.update(object_id=obj["id"], object_key=obj["object_key"])
+        # Register before upload, including unsuccessful/cancelled attempts.
+        _register(task_id, media, cursor)
+        if not reused:
+            _upload(path, media)
+            remaining_request_time()
+            cursor.execute(
+                "UPDATE review_media_objects SET state='ready' WHERE id=%s", (obj["id"],)
+            )
+        remaining_request_time()
+        if not _publish(task_id, media, cursor):
+            raise RuntimeError("媒体保存时任务已取消或执行租约失效")
+    logger.info("Review media archived: task=%s reused=%s sha256=%s", task_id, reused, digest)
+
+
+async def archive(task_id, path, metadata):
+    if not task_id or not store.is_enabled():
+        return
+    await store._run(_archive, task_id, Path(path), metadata)
     await review_events.publish({"type": "changed", "task_ids": [task_id], "reason": "media_ready"})
 
 
@@ -152,23 +177,48 @@ def _collectable():
 
 
 def _delete(media):
-    if media["storage"] == "s3":
-        image_store.client().delete_object(Bucket=settings.s3_bucket, Key=media["object_key"])
-    else:
-        (Path(settings.review_media_dir) / f"{media['id']}.mp4").unlink(missing_ok=True)
-    with store._connect() as connection, connection.cursor() as cursor:
-        cursor.execute("DELETE FROM review_media WHERE id = %s", (media["id"],))
+    # Migration can attach a formerly-legacy reference after the GC snapshot.
+    with media_objects.locked("legacy", "") as (_, cursor):
+        cursor.execute(
+            """SELECT m.* FROM review_media m LEFT JOIN review_tasks t ON t.id=m.task_id
+            WHERE m.id=%s AND (t.id IS NULL OR t.status NOT IN ('processing','cancelling'))
+            AND (m.expires_at<=UTC_TIMESTAMP(3) OR t.id IS NULL OR
+                (m.created_at<TIMESTAMPADD(DAY,-1,UTC_TIMESTAMP(3)) AND
+                 COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.media,'$.id')),'')<>m.id))""",
+            (media["id"],),
+        )
+        current = cursor.fetchone()
+        if not current:
+            return
+        if not current["object_id"]:
+            cursor.execute(
+                "SELECT id FROM review_media_objects WHERE storage_scope=%s AND object_key=%s",
+                (media_objects.storage_scope(current["storage"]), current["object_key"]),
+            )
+            if not cursor.fetchone():
+                media_objects.delete_file(current)
+        cursor.execute("DELETE FROM review_media WHERE id = %s", (current["id"],))
 
 
 async def collect_expired():
     if not store.is_enabled():
         return
     async with cluster_slot("media-gc"):
+        for legacy in await store._run(media_objects.legacy_candidates):
+            try:
+                await store._run(media_objects.migrate_legacy, legacy)
+            except Exception:
+                logger.warning("Review media migration will retry: id=%s", legacy["id"])
         for media in await store._run(_collectable):
             try:
                 await run_sync(_delete, media)
             except Exception:
                 logger.warning("Review media cleanup will retry: id=%s", media["id"])
+        for obj in await store._run(media_objects.unreferenced):
+            try:
+                await store._run(media_objects.delete_unreferenced, obj)
+            except Exception:
+                logger.warning("Review media object cleanup will retry: id=%s", obj["id"])
 
 
 def _get(task_id, media_id):
@@ -206,7 +256,7 @@ async def playback(task_id, media_id, request: Request):
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     if media["storage"] == "local":
-        path = Path(settings.review_media_dir) / f"{media['id']}.mp4"
+        path = media_objects.local_path(media)
         if not path.is_file():
             raise HTTPException(410, "复核视频已清理，请重新提交审核")
         return FileResponse(path, media_type="video/mp4", headers=headers)

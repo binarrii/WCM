@@ -16,6 +16,12 @@ OpenCV 的采样时钟相对第一视频帧，浏览器的媒体时钟可能包�
 
 任务媒体保存到私有 S3 的独立 `wcm/review-media` 前缀，原有人物图片命名空间及元数据不变。接口为 `/api/v1/review_tasks/{task_id}/media/{media_id}`，要求 `review.read` 权限，支持 GET、HEAD、Range、ETag、If-Range。只允许当前任务绑定的不可变媒体版本，不接受任意对象 Key 或代理 URL。
 
+归档按最终 MP4 的 SHA-256 和存储位置查重。`review_media_objects` 登记物理文件，`review_media.object_id` 保存任务引用；相同内容只上传一份，不同任务仍保留各自的媒体 ID、播放地址、审核结果与到期时间。相同 URL 的内容变化会产生不同对象。本轮仍会下载、准备和校验源视频，复用的是归档文件，不缓存审核结论。既有转码版和直接封装版若字节不同，分别保留。
+
+上传与物理文件清理按存储位置和内容哈希获取 MySQL 连接级锁，单机模式同样生效。复用前核验对象存在、大小与哈希；过期清理先移除任务引用，最后一个引用移除后才删除物理文件。删除前将对象标为不可复用，失败时保留登记重试。每次新上传仍分配不可变 Key，防止连接丢失后的旧上传覆盖新对象。
+
+Worker 分批迁移旧引用，同哈希的旧副本合并到共享文件；任务播放地址和保存期限不变。迁移后的冗余物理文件登记为 retired，保留至少 24 小时，供在途播放和回滚使用，之后自动清理。正在执行的任务暂缓迁移。批量迁移命令为 `python -m scripts.review_media_catalog migrate --apply`；不带 `--apply` 仅报告数量，执行时会确认无在途任务并锁定任务准入。
+
 媒体在执行租约校验后发布。失败重试开始时清除上一版本绑定；未发布对象仍有数据库登记，可回收。下载/FFmpeg 取消会关闭连接、终止并等待子进程、清理临时目录；S3 分片上传异常会执行 abort。上传进程被强制杀死时，运维仍应为此视频前缀配置未完成 multipart 的清理策略。
 
 复核媒体默认保留 7 天，Worker 每分钟清理一批过期、已删除任务及超过一天的未引用媒体；执行中的任务不会被清理。到期播放返回 410，保留审核结果。历史任务仍保留原结果；无法直接播放的旧 TS/HLS 需重新提交以生成媒体，导入 JSON 不会自动下载/转换视频。
@@ -42,6 +48,8 @@ OpenCV 的采样时钟相对第一视频帧，浏览器的媒体时钟可能包�
 
 新增 nullable `review_tasks.media` 与 `review_media` 表；初始化幂等，旧任务不要求回填。先核对服务器独立修改并保存源文件、镜像和 MySQL 快照，构建成功后在无在途任务时更新 api、worker、webui。旧版 8001、InsightFace、SQLite 和人物 metadata 无需修改。
 
-回滚可恢复本次备份的文件和原镜像，新增表/列保留即可，无需删除审核数据。回滚前等待新格式任务结束或由用户取消，避免旧 Worker 接手 HLS/TS 任务。
+回滚前等待审核任务结束并停止 Worker，使用本次镜像执行 `python -m scripts.review_media_catalog unshare --apply`，将共享文件恢复为每个媒体 ID 独立的对象并校验可读性，再恢复备份的源码和原镜像；新增表/列可保留。不能直接启动不理解共享引用的旧 Worker，否则旧清理逻辑可能删除其他任务仍在使用的文件。该命令使用服务端复制（大文件自动分片），不重新编码视频，不改变审核结果、播放地址或保存期限。
 
 验证：`pytest tests/test_media_source.py tests/test_review_media.py`，前端 `npm test && npm run build`。真实存储验收使用 `python -m scripts.verify_review_media --source-url URL`，必须配置新建 `wcm_verify_*` 数据库及 `WCM_REVIEW_MEDIA_PREFIX=wcm/verify-media/...`。该脚本使用真实 FFmpeg/MySQL/S3、独立进程读取播放资源，不调用审核模型或修改人物库。
+
+同样的隔离配置下，`python -m scripts.verify_media_dedup` 验证跨进程并发只上传一次、同 URL 内容变化、独立引用过期、旧数据迁移、过期 GC 快照、租约失效，以及解除共享回滚与重新迁移；验收对象和任务结束后清理。

@@ -310,6 +310,7 @@ async def test_breaker_stops_producer_models_and_persists_failure(
         await asyncio.wait_for(routes._run_review_task("broken", "fixture.mp4", 1, 10, 0.5), 1)
     assert 10 <= calls <= 16  # Five final failures plus other windows already in flight.
     failed.assert_awaited_once()
+    assert failed.await_args.kwargs == {"retryable": False}
     assert failed.await_args.args[1] == (
         f"{model_health.MODEL_LABELS[failed_model]}模型调用频繁错误或超时，已提前终止该审核任务。"
     )

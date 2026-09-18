@@ -1,4 +1,7 @@
+import asyncio
 import io
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,6 +10,7 @@ from botocore.response import StreamingBody
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from api import media_objects as objects
 from api import review_media as media
 from api import review_task_store as store
 from api.auth_guard import required_permission
@@ -123,6 +127,104 @@ async def test_stale_execution_cannot_publish_uploaded_media(monkeypatch, tmp_pa
     monkeypatch.setattr(media, "_upload", MagicMock())
     monkeypatch.setattr(media, "_publish", lambda *args: False)
     monkeypatch.setattr(media.review_events, "publish", AsyncMock())
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"video")
+
+    @contextmanager
+    def locked(*args):
+        yield None, MagicMock()
+
+    monkeypatch.setattr(objects, "locked", locked)
+    monkeypatch.setattr(objects, "reusable", lambda *args: {"id": "object", "object_key": "key"})
     with pytest.raises(RuntimeError, match="租约"):
-        await media.archive("task", tmp_path / "video.mp4", {})
+        await media.archive("task", path, {})
     media.review_events.publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_identical_media_share_one_upload_with_independent_references(
+    monkeypatch, tmp_path
+):
+    path = tmp_path / "source.mp4"
+    path.write_bytes(b"identical video")
+    lock, catalog, references, published, uploads = threading.Lock(), {}, {}, {}, []
+
+    @contextmanager
+    def locked(*args):
+        with lock:
+            yield None, MagicMock()
+
+    def reusable(cursor, scope, digest, size):
+        return catalog.get(digest)
+
+    def create(cursor, scope, digest, storage, key, size):
+        item = {"id": digest[:32], "object_key": key}
+        catalog[digest] = item
+        return item
+
+    def publish(task_id, value, cursor):
+        published[task_id] = dict(value)
+        return True
+
+    monkeypatch.setattr(store, "is_enabled", lambda: True)
+    monkeypatch.setattr(objects, "locked", locked)
+    monkeypatch.setattr(objects, "reusable", reusable)
+    monkeypatch.setattr(objects, "create", create)
+    monkeypatch.setattr(
+        media, "_register", lambda task_id, value, cursor: references.update({task_id: dict(value)})
+    )
+    monkeypatch.setattr(media, "_publish", publish)
+    monkeypatch.setattr(media, "_upload", lambda path, value: uploads.append(value["object_key"]))
+    monkeypatch.setattr(media.review_events, "publish", AsyncMock())
+    await asyncio.gather(media.archive("one", path, {}), media.archive("two", path, {}))
+    assert len(uploads) == 1
+    assert published["one"]["id"] != published["two"]["id"]
+    assert published["one"]["object_id"] == published["two"]["object_id"]
+    assert published["one"]["object_key"] == published["two"]["object_key"]
+    path.write_bytes(b"different video at the same URL")
+    await media.archive("three", path, {})
+    assert len(uploads) == 2
+    assert published["three"]["object_key"] != published["one"]["object_key"]
+
+
+def test_object_gc_rechecks_references_and_retires_before_storage_delete(monkeypatch):
+    item = {
+        "id": "asset",
+        "storage": "s3",
+        "storage_scope": "scope",
+        "sha256": "hash",
+        "object_key": "key",
+    }
+    cursor = MagicMock()
+
+    @contextmanager
+    def locked(*args):
+        yield None, cursor
+
+    monkeypatch.setattr(objects, "locked", locked)
+    monkeypatch.setattr(objects, "storage_scope", lambda storage: "scope")
+    delete = MagicMock()
+    monkeypatch.setattr(objects, "delete_file", delete)
+    cursor.fetchone.side_effect = [item, {"id": "live-reference"}]
+    objects.delete_unreferenced(item)
+    delete.assert_not_called()
+    cursor.fetchone.side_effect = [item, None]
+
+    def fail_after_retire(value):
+        assert "state='deleting'" in cursor.execute.call_args.args[0]
+        raise RuntimeError("storage timeout")
+
+    delete.side_effect = fail_after_retire
+    with pytest.raises(RuntimeError):
+        objects.delete_unreferenced(item)
+    assert not any(
+        "DELETE FROM review_media_objects" in call.args[0] for call in cursor.execute.call_args_list
+    )
+
+
+def test_shared_local_playback_uses_object_key_not_task_media_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "review_media_dir", str(tmp_path))
+    value = {"id": "b" * 32, "object_key": "wcm/review-media/" + "a" * 32 + ".mp4"}
+    assert objects.local_path(value) == tmp_path / ("a" * 32 + ".mp4")
+    with pytest.raises(ValueError):
+        objects.local_path({"object_key": "../../secret"})
