@@ -1,4 +1,5 @@
 import { normalizeFaceSamples } from './faceOverlay.js';
+import { normalizeObjectSamples } from './objectOverlay.js';
 
 const TIMESTAMP = /^(\d+):([0-5]\d):([0-5]\d)(?:\.(\d{1,3}))?$/;
 
@@ -66,6 +67,7 @@ export function normalizeResults(payload) {
       finding.stage = item.stage;
     }
     if (Array.isArray(item.face_samples)) finding.face_samples = normalizeFaceSamples(item.face_samples, start, end);
+    if (Array.isArray(item.object_samples)) finding.object_samples = normalizeObjectSamples(item.object_samples, start, end);
     return { start, end, finding };
   }).sort((a, b) => a.start - b.start || b.end - a.end);
   const groups = [];
@@ -81,11 +83,15 @@ export function normalizeResults(payload) {
     }
     const existing = outer.findings.find(value => value.timestamp === finding.timestamp
       && value.category === finding.category && value.description === finding.description
+      && value.object_type === finding.object_type && value.name === finding.name
+      && value.object_target === finding.object_target && value.object_evidence === finding.object_evidence && value.organization === finding.organization
       && value.source === finding.source && value.component === finding.component && value.error_code === finding.error_code
       && JSON.stringify(value.evidence) === JSON.stringify(finding.evidence) && value.review_status === finding.review_status && value.stage === finding.stage);
     if (!existing) outer.findings.push(finding);
-    else if (finding.face_samples) {
-      existing.face_samples = [...(existing.face_samples || []), ...finding.face_samples];
+    else {
+      for (const field of ['face_samples', 'object_samples']) {
+        if (finding[field]) existing[field] = [...(existing[field] || []), ...finding[field]];
+      }
     }
   }
   return groups.map((marker, index) => ({

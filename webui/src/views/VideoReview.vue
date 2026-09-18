@@ -21,7 +21,8 @@ import {
 } from '../services/videoTimeline';
 
 import FaceOverlay from '../components/FaceOverlay.vue';
-import { facesAtTime, containedVideoRect, faceSampleTimes, faceSampleSeekTime } from '../services/faceOverlay';
+import { facesAtTime, containedVideoRect } from '../services/faceOverlay';
+import { objectsAtTime, detectionSampleTimes, detectionSampleSeekTime } from '../services/objectOverlay';
 import { observeVideoFrames } from '../services/videoFrames';
 import { reviewPlayback, playbackErrorMessage } from '../services/reviewPlayback';
 
@@ -37,8 +38,10 @@ const presentedTime = ref(null);
 const frameSyncSupported = ref(false);
 const sampleFaces = computed(() => paused.value && !seeking.value
   ? facesAtTime(visibleMarkers.value, presentedTime.value, category.value) : []);
-const sampleTimes = computed(() => faceSampleTimes(visibleMarkers.value, category.value));
-const hasFaceLocations = computed(() => faceSampleTimes(markers.value).length > 0);
+const sampleObjects = computed(() => paused.value && !seeking.value
+  ? objectsAtTime(visibleMarkers.value, presentedTime.value, category.value) : []);
+const sampleTimes = computed(() => detectionSampleTimes(visibleMarkers.value, category.value));
+const hasLocations = computed(() => detectionSampleTimes(markers.value).length > 0);
 const previousSample = computed(() => sampleTimes.value.findLast(time => time < (presentedTime.value ?? currentSeconds.value) * 1000 - .501));
 const nextSample = computed(() => sampleTimes.value.find(time => time > (presentedTime.value ?? currentSeconds.value) * 1000 + .501));
 const jumpToSample = async time => {
@@ -47,7 +50,7 @@ const jumpToSample = async time => {
   if (!video || !video.readyState) return;
   video.pause();
   selectedMarker.value = '';
-  const target = faceSampleSeekTime(visibleMarkers.value, time, category.value);
+  const target = detectionSampleSeekTime(visibleMarkers.value, time, category.value);
   if (target != null) seekVideo(target);
 };
 const updateVideoRect = () => {
@@ -114,7 +117,9 @@ const previousIndex = computed(() => {
 });
 const nextIndex = computed(() => visibleMarkers.value.findIndex(marker => marker.time_ms / 1000 > currentSeconds.value + 0.05));
 
-const details = marker => marker.findings.map(finding => `${finding.category}${finding.timestamp !== marker.timestamp ? `（${finding.timestamp}）` : ''}：${finding.description}`).join('\n');
+const details = marker => marker.findings.map(finding =>
+  `${finding.category}${finding.timestamp !== marker.timestamp ? `（${finding.timestamp}）` : ''}${finding.review_status === 'needs_review' ? '（待复核）' : ''}：${finding.description}${finding.object_evidence ? `\n可见依据：${finding.object_evidence}` : ''}`
+).join('\n');
 const markerActive = marker => markerIsActive(marker, currentSeconds.value);
 const markerStyle = index => {
   const item = markerLayout.value[index];
@@ -167,9 +172,9 @@ const jump = async (index) => {
   const marker = visibleMarkers.value[index];
   if (!marker) return;
   selectedMarker.value = marker.id;
-  const samples = faceSampleTimes([marker], category.value);
+  const samples = detectionSampleTimes([marker], category.value);
   const target = samples.length
-    ? faceSampleSeekTime([marker], samples[0], category.value) : marker.time_ms / 1000;
+    ? detectionSampleSeekTime([marker], samples[0], category.value) : marker.time_ms / 1000;
   currentSeconds.value = target;
   if (videoRef.value) {
     videoRef.value.pause();
@@ -438,7 +443,7 @@ onBeforeUnmount(() => {
     <p v-if="incompleteCount" class="review-warning" role="status"><AlertCircle /><span>有 {{ incompleteCount }} 项审核未完成，已保留其他审核结果。请筛选“审核未完成”并逐一人工复核，不能视为安全通过。</span><button type="button" @click="category = '审核未完成'">查看未审核项</button></p>
     <section :class="['review-setup-card', { collapsed: !setupExpanded }]">
       <div class="setup-heading">
-        <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸及其他疑似违规内容。</p></div>
+        <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸、文字、画面内容、关注旗帜/徽标及明确裸露部位。</p></div>
         <div class="setup-heading-actions">
           <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
           <CancelReviewButton :task="currentTask" @updated="updateCancelledTask" @error="error = $event" @settled="refreshCurrentTask" />
@@ -495,20 +500,20 @@ onBeforeUnmount(() => {
             @seeking="seeking = true; presentedTime = null" @seeked="seeking = false; handleTimeUpdate()"
             @emptied="videoRect = null; durationMs = 0; paused = true; seeking = false; presentedTime = null"
             @error="playbackError = playbackErrorMessage(videoRef?.error)" />
-          <FaceOverlay :faces="sampleFaces" :rect="videoRect" :selected="selectedMarker" :mode="overlayMode" @select="selectFace" />
+          <FaceOverlay :faces="[...sampleFaces, ...sampleObjects]" :rect="videoRect" :selected="selectedMarker" :mode="overlayMode" @select="selectFace" />
           <button class="overlay-fullscreen" type="button" @click="toggleFullscreen">切换全屏</button>
         </div>
         <div class="face-controls">
-          <label>人脸标记 <select v-model="overlayMode" aria-label="人脸标记显示模式"><option value="corners">四角框</option><option value="boxes">完整框</option><option value="hidden">隐藏</option></select></label>
-          <div v-if="hasFaceLocations" class="sample-navigation">
-            <button type="button" :disabled="previousSample == null" @click="jumpToSample(previousSample)" aria-label="上一人脸采样帧"><ChevronLeft />上一采样帧</button>
-            <button type="button" :disabled="nextSample == null" @click="jumpToSample(nextSample)" aria-label="下一人脸采样帧">下一采样帧<ChevronRight /></button>
+          <label>位置标记 <select v-model="overlayMode" aria-label="位置标记显示模式"><option value="corners">四角框</option><option value="boxes">完整框</option><option value="hidden">隐藏</option></select></label>
+          <div v-if="hasLocations" class="sample-navigation">
+            <button type="button" :disabled="previousSample == null" @click="jumpToSample(previousSample)" aria-label="上一命中采样帧"><ChevronLeft />上一采样帧</button>
+            <button type="button" :disabled="nextSample == null" @click="jumpToSample(nextSample)" aria-label="下一命中采样帧">下一采样帧<ChevronRight /></button>
           </div>
-          <span v-if="hasFaceLocations && !frameSyncSupported">当前浏览器不支持精确帧定位，人脸框已隐藏。</span>
-          <span v-else-if="!hasFaceLocations">此结果暂无人脸位置，重新分析后可显示。</span>
-          <span v-else-if="overlayMode === 'hidden'">已隐藏人脸标记</span>
-          <span v-else-if="!paused">暂停到命中采样帧可查看人脸标记</span>
-          <span v-else-if="sampleFaces.length">当前 {{ sampleFaces.length }} 张命中人脸 · 悬浮查看候选，点击联动记录</span>
+          <span v-if="hasLocations && !frameSyncSupported">当前浏览器不支持精确帧定位，位置框已隐藏。</span>
+          <span v-else-if="!hasLocations">此结果暂无目标位置，重新分析后可显示。</span>
+          <span v-else-if="overlayMode === 'hidden'">已隐藏位置标记</span>
+          <span v-else-if="!paused">暂停到命中采样帧可查看位置标记</span>
+          <span v-else-if="sampleFaces.length || sampleObjects.length">当前 {{ sampleFaces.length }} 个人脸、{{ sampleObjects.length }} 个对象（旗帜/徽标/裸露部位） · 悬浮查看，点击联动记录</span>
           <span v-else>当前帧无位置标记，点击右侧记录定位采样帧</span>
         </div>
         <div class="review-toolbar">
@@ -522,14 +527,14 @@ onBeforeUnmount(() => {
           <button v-for="(marker, index) in visibleMarkers" :key="marker.id" type="button" :class="['timeline-marker', { range: marker.end_time_ms > marker.time_ms, active: markerActive(marker) }]" :style="markerStyle(index)" :title="`${marker.timestamp}\n${details(marker)}`" :aria-label="`跳转 ${marker.timestamp}`" @click="jump(index)"></button>
         </div>
         <div class="timeline-scale"><span>00:00:00.000</span><span>{{ duration }}</span></div>
-        <p class="timeline-hint"><i class="range-key"></i>人物连续命中区间 <i class="point-key"></i>单次命中；重叠标记自动分行。</p>
+        <p class="timeline-hint"><i class="range-key"></i>连续命中区间 <i class="point-key"></i>单次命中；重叠标记自动分行。</p>
       </div>
 
       <aside class="review-events-panel">
         <div class="events-header"><h2>{{ visibleMarkers.length }} 条标记 <small>· 共 {{ markers.length }} 条</small></h2><label><span>类别</span><select v-model="category"><option value="">全部类别</option><option v-for="value in categories" :key="value" :value="value">{{ value }}</option></select></label></div>
         <div ref="eventsRef" class="review-events">
           <button v-for="(marker, index) in visibleMarkers" :key="marker.id" :ref="element => setEventRow(marker.id, element)" type="button" :class="['review-event', { active: markerActive(marker), selected: selectedMarker === marker.id }]" :aria-pressed="selectedMarker === marker.id" :aria-expanded="longDescriptions.has(marker.id) ? expandedDescriptions.has(marker.id) : undefined" @click="selectEvent(index)">
-            <strong>{{ marker.timestamp }}</strong>
+            <strong>{{ marker.timestamp }}<small v-if="marker.findings.some(f => f.review_status === 'needs_review')" class="pending-review">待复核</small></strong>
             <span :ref="element => setEventDescription(marker.id, element)" :data-marker-id="marker.id" :class="['review-event-description', { expanded: expandedDescriptions.has(marker.id) }]">{{ details(marker) }}</span>
             <span v-if="longDescriptions.has(marker.id)" class="review-event-toggle">{{ expandedDescriptions.has(marker.id) ? '收起 ▴' : '展开 ▾' }}</span>
           </button>

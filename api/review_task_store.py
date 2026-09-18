@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +21,9 @@ from .review_coverage import completion_status, coverage_message
 from .review_events import review_events
 from .review_evidence import archive_evidence
 from .review_results import consolidate_results, flatten_findings
+
+logger = logging.getLogger(__name__)
+_DEADLOCK_RETRY_DELAYS = (0.05, 0.15, 0.3)
 
 
 class ReviewTaskStoreUnavailable(RuntimeError):
@@ -51,13 +56,31 @@ def _connect():
         raise ReviewTaskStoreUnavailable(f"审核任务数据库不可用：{exc}") from exc
 
 
-async def _run(function, *args):
-    try:
-        return await run_sync(function, *args)
-    except ReviewTaskStoreUnavailable:
-        raise
-    except pymysql.MySQLError as exc:
-        raise ReviewTaskStoreUnavailable(f"审核任务数据库操作失败：{exc}") from exc
+async def _run(function, *args, retry_deadlocks=False):
+    # Opt in only for database-only operations that open a fresh connection on
+    # each call. InnoDB rolls back the entire transaction on error 1213; lost
+    # connections and lock timeouts do not give the same guarantee.
+    delays = _DEADLOCK_RETRY_DELAYS if retry_deadlocks else ()
+    for attempt in range(len(delays) + 1):
+        try:
+            return await run_sync(function, *args)
+        except ReviewTaskStoreUnavailable:
+            raise
+        except pymysql.MySQLError as exc:
+            errno = exc.args[0] if exc.args else None
+            execution = current_execution.get()
+            retry = errno == 1213 and attempt < len(delays)
+            logger.warning(
+                "Review database operation=%s task=%s mysql_errno=%s attempt=%s retry=%s",
+                function.__name__,
+                execution.task_id if execution else None,
+                errno,
+                attempt + 1,
+                retry,
+            )
+            if not retry:
+                raise ReviewTaskStoreUnavailable(f"审核任务数据库操作失败：{exc}") from exc
+            await asyncio.sleep(delays[attempt])
 
 
 def _initialize_sync() -> None:
@@ -187,8 +210,9 @@ async def create(video_url: str, parameters: dict, task_id: str | None = None) -
     return resolved_id
 
 
-def _complete_sync(task_id: str, results: list[dict], summary: dict | None = None) -> bool:
-    fence, ownership = _ownership(task_id)
+def _prepare_completion_sync(
+    task_id: str, results: list[dict], summary: dict | None = None
+) -> tuple:
     results = archive_evidence(task_id, results)
     incomplete = [
         item for item in flatten_findings(results) if item.get("review_status") == "incomplete"
@@ -202,6 +226,19 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
     if summary is not None:
         status = completion_status(summary)
         error = coverage_message(summary)
+    return (
+        status,
+        _json_dump(results),
+        len(results),
+        error,
+        _json_dump(summary) if summary is not None else None,
+    )
+
+
+def _save_completion_sync(task_id: str, values: tuple) -> bool:
+    # Recheck ownership/status/lease in the database on every retry. Evidence
+    # uploads and result preparation happen once, outside the retry boundary.
+    fence, ownership = _ownership(task_id)
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(
             """
@@ -211,22 +248,19 @@ def _complete_sync(task_id: str, results: list[dict], summary: dict | None = Non
             WHERE id = %s AND status = 'processing'
             """
             + fence,
-            (
-                status,
-                _json_dump(results),
-                len(results),
-                error,
-                _json_dump(summary) if summary is not None else None,
-                task_id,
-                *ownership,
-            ),
+            (*values, task_id, *ownership),
         )
         return bool(cursor.rowcount)
 
 
+def _complete_sync(task_id: str, results: list[dict], summary: dict | None = None) -> bool:
+    return _save_completion_sync(task_id, _prepare_completion_sync(task_id, results, summary))
+
+
 async def complete(task_id: str | None, results: list[dict], summary: dict | None = None) -> bool:
     if task_id and is_enabled():
-        if not await _run(_complete_sync, task_id, results, summary):
+        values = await _run(_prepare_completion_sync, task_id, results, summary)
+        if not await _run(_save_completion_sync, task_id, values, retry_deadlocks=True):
             return False
         await review_events.publish(
             {"type": "changed", "task_ids": [task_id], "reason": "completed"}

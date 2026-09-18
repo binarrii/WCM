@@ -1,0 +1,1812 @@
+{
+  "matching": "category-aware maximum cardinality at IoU >= 0.5; specific names reviewed separately",
+  "totals": {
+    "normalized": {
+      "tp": 24,
+      "fp": 3,
+      "fn": 3,
+      "valid": 11,
+      "strict_json": 6,
+      "requests": 11,
+      "precision": 0.8888888888888888,
+      "recall": 0.8888888888888888,
+      "mean_best_gt_iou": 0.8883109579234199,
+      "median_seconds": 2.064
+    },
+    "normalized-compact": {
+      "tp": 27,
+      "fp": 3,
+      "fn": 0,
+      "valid": 11,
+      "strict_json": 1,
+      "requests": 11,
+      "precision": 0.9,
+      "recall": 1.0,
+      "mean_best_gt_iou": 0.9733647273770787,
+      "median_seconds": 2.006
+    },
+    "pixels": {
+      "tp": 1,
+      "fp": 4,
+      "fn": 11,
+      "valid": 2,
+      "strict_json": 1,
+      "requests": 4,
+      "precision": 0.2,
+      "recall": 0.08333333333333333,
+      "mean_best_gt_iou": 0.11275899285885725,
+      "median_seconds": 2.285
+    }
+  },
+  "results": [
+    {
+      "case": "single_flag",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 1.051,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            196,
+            218,
+            598,
+            617
+          ],
+          "bbox": [
+            176.4,
+            130.8,
+            538.2,
+            370.2
+          ]
+        }
+      ],
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9908988098443641
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9908988098443641
+        }
+      ]
+    },
+    {
+      "case": "single_logo",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 1.161,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            500,
+            576,
+            770,
+            803
+          ],
+          "bbox": [
+            450.0,
+            345.6,
+            693.0,
+            481.8
+          ]
+        }
+      ],
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9760866023424634
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9760866023424634
+        }
+      ]
+    },
+    {
+      "case": "three_flags",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 2.166,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            50,
+            114,
+            301,
+            401
+          ],
+          "bbox": [
+            60.0,
+            79.8,
+            361.2,
+            280.7
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            376,
+            386,
+            600,
+            643
+          ],
+          "bbox": [
+            451.2,
+            270.2,
+            720.0,
+            450.1
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "France",
+          "bbox_2d": [
+            712,
+            656,
+            938,
+            913
+          ],
+          "bbox": [
+            854.4,
+            459.2,
+            1125.6,
+            639.1
+          ]
+        }
+      ],
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9915539435091889,
+        0.9938996703058062,
+        0.9862358938714977
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9915539435091889
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9938996703058062
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9862358938714977
+        }
+      ]
+    },
+    {
+      "case": "three_logos",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 2.431,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            54,
+            136,
+            274,
+            342
+          ],
+          "bbox": [
+            59.4,
+            89.76,
+            301.4,
+            225.72
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic Rings",
+          "bbox_2d": [
+            391,
+            408,
+            630,
+            592
+          ],
+          "bbox": [
+            430.1,
+            269.28,
+            693.0,
+            390.72
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Mercedes-Benz",
+          "bbox_2d": [
+            755,
+            650,
+            910,
+            908
+          ],
+          "bbox": [
+            830.5,
+            429.0,
+            1001.0,
+            599.28
+          ]
+        }
+      ],
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9847329914729419,
+        0.9764993905802181,
+        0.9812987649017879
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9847329914729419
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9764993905802181
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9812987649017879
+        }
+      ]
+    },
+    {
+      "case": "mixed_wide",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 2.583,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            63,
+            84,
+            251,
+            305
+          ],
+          "bbox": [
+            80.64,
+            60.48,
+            321.28,
+            219.6
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            726,
+            98,
+            891,
+            291
+          ],
+          "bbox": [
+            929.28,
+            70.56,
+            1140.48,
+            209.52
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic rings",
+          "bbox_2d": [
+            397,
+            402,
+            601,
+            572
+          ],
+          "bbox": [
+            508.16,
+            289.44,
+            769.28,
+            411.84
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            821,
+            819,
+            945,
+            943
+          ],
+          "bbox": [
+            1050.88,
+            589.68,
+            1209.6,
+            678.96
+          ]
+        }
+      ],
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9866149940714452,
+        0.9869734761532142,
+        0.9708592448805975,
+        0.9770905818411136
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9866149940714452
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9869734761532142
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9708592448805975
+        },
+        {
+          "gt": 3,
+          "prediction": 3,
+          "iou": 0.9770905818411136
+        }
+      ]
+    },
+    {
+      "case": "repeated_objects",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 2.901,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            54,
+            93,
+            264,
+            292
+          ],
+          "bbox": [
+            54.0,
+            65.1,
+            264.0,
+            204.4
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            399,
+            93,
+            609,
+            292
+          ],
+          "bbox": [
+            399.0,
+            65.1,
+            609.0,
+            204.4
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            748,
+            93,
+            961,
+            292
+          ],
+          "bbox": [
+            748.0,
+            65.1,
+            961.0,
+            204.4
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            139,
+            642,
+            321,
+            789
+          ],
+          "bbox": [
+            139.0,
+            449.4,
+            321.0,
+            552.3
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            648,
+            598,
+            891,
+            793
+          ],
+          "bbox": [
+            648.0,
+            418.6,
+            891.0,
+            555.1
+          ]
+        }
+      ],
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9855920756416029,
+        0.9855920756416029,
+        0.9810550038735124,
+        0.9803607471245958,
+        0.9768009768009768
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9855920756416029
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9855920756416029
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9810550038735124
+        },
+        {
+          "gt": 3,
+          "prediction": 3,
+          "iou": 0.9803607471245958
+        },
+        {
+          "gt": 4,
+          "prediction": 4,
+          "iou": 0.9768009768009768
+        }
+      ]
+    },
+    {
+      "case": "small_objects",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 2.725,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            71,
+            165,
+            123,
+            228
+          ],
+          "bbox": [
+            90.88,
+            118.8,
+            157.44,
+            164.16
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            486,
+            444,
+            527,
+            494
+          ],
+          "bbox": [
+            622.08,
+            319.68,
+            674.56,
+            355.68
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic Rings",
+          "bbox_2d": [
+            680,
+            222,
+            751,
+            283
+          ],
+          "bbox": [
+            870.4,
+            159.84,
+            961.28,
+            203.76
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            851,
+            806,
+            889,
+            843
+          ],
+          "bbox": [
+            1089.28,
+            580.32,
+            1137.92,
+            606.96
+          ]
+        }
+      ],
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.937014696710298,
+        0.9352431049189655,
+        0.9706565059343938,
+        0.949342076900601
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.937014696710298
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9352431049189655
+        },
+        {
+          "gt": 2,
+          "prediction": 3,
+          "iou": 0.9706565059343938
+        },
+        {
+          "gt": 3,
+          "prediction": 2,
+          "iou": 0.949342076900601
+        }
+      ]
+    },
+    {
+      "case": "edge_objects",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 1.977,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "France",
+          "bbox_2d": [
+            0,
+            49,
+            167,
+            215
+          ],
+          "bbox": [
+            0.0,
+            29.89,
+            150.3,
+            131.15
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            713,
+            0,
+            910,
+            170
+          ],
+          "bbox": [
+            641.7,
+            0.0,
+            819.0,
+            103.7
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Mercedes-Benz",
+          "bbox_2d": [
+            878,
+            818,
+            995,
+            995
+          ],
+          "bbox": [
+            790.2,
+            498.98,
+            895.5,
+            606.95
+          ]
+        }
+      ],
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9855856132885322,
+        0.9225412016279299,
+        0.9690907600229562
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9855856132885322
+        },
+        {
+          "gt": 1,
+          "prediction": 2,
+          "iou": 0.9225412016279299
+        },
+        {
+          "gt": 2,
+          "prediction": 1,
+          "iou": 0.9690907600229562
+        }
+      ]
+    },
+    {
+      "case": "portrait",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 2.006,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            125,
+            86,
+            531,
+            247
+          ],
+          "bbox": [
+            75.0,
+            86.0,
+            318.6,
+            247.0
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            539,
+            471,
+            800,
+            560
+          ],
+          "bbox": [
+            323.4,
+            471.0,
+            480.0,
+            560.0
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic",
+          "bbox_2d": [
+            179,
+            829,
+            613,
+            951
+          ],
+          "bbox": [
+            107.4,
+            829.0,
+            367.8,
+            951.0
+          ]
+        }
+      ],
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.967065048809415,
+        0.9678750000000002,
+        0.9642883881111032
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.967065048809415
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9678750000000002
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9642883881111032
+        }
+      ]
+    },
+    {
+      "case": "blank",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 0.521,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [],
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [],
+      "matches": []
+    },
+    {
+      "case": "non_target_shapes",
+      "coordinates": "normalized",
+      "variant": "normalized-compact",
+      "seconds": 1.978,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "logo",
+          "label": "Google",
+          "bbox_2d": [
+            673,
+            559,
+            908,
+            794
+          ],
+          "bbox": [
+            605.7,
+            335.4,
+            817.2,
+            476.4
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "unknown",
+          "bbox_2d": [
+            379,
+            213,
+            602,
+            517
+          ],
+          "bbox": [
+            341.1,
+            127.8,
+            541.8,
+            310.2
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "unknown",
+          "bbox_2d": [
+            79,
+            130,
+            234,
+            367
+          ],
+          "bbox": [
+            71.1,
+            78.0,
+            210.6,
+            220.2
+          ]
+        }
+      ],
+      "tp": 0,
+      "fp": 3,
+      "fn": 0,
+      "best_gt_iou": [],
+      "matches": []
+    },
+    {
+      "case": "single_flag",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 1.347,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "bbox_2d": [
+            197,
+            218,
+            598,
+            617
+          ],
+          "label": "China",
+          "category": "flag",
+          "bbox": [
+            177.3,
+            130.8,
+            538.2,
+            370.2
+          ]
+        }
+      ],
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9917129268797018
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9917129268797018
+        }
+      ]
+    },
+    {
+      "case": "single_logo",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 1.1,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            500,
+            578,
+            772,
+            806
+          ],
+          "bbox": [
+            450.0,
+            346.8,
+            694.8,
+            483.6
+          ]
+        }
+      ],
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9674922600619196
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9674922600619196
+        }
+      ]
+    },
+    {
+      "case": "three_flags",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 2.555,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            50,
+            114,
+            300,
+            400
+          ],
+          "bbox": [
+            60.0,
+            79.8,
+            360.0,
+            280.0
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            375,
+            386,
+            600,
+            643
+          ],
+          "bbox": [
+            450.0,
+            270.2,
+            720.0,
+            450.1
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "France",
+          "bbox_2d": [
+            712,
+            656,
+            938,
+            913
+          ],
+          "bbox": [
+            854.4,
+            459.2,
+            1125.6,
+            639.1
+          ]
+        }
+      ],
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.999000999000999,
+        0.9983342587451416,
+        0.9862358938714977
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.999000999000999
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9983342587451416
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9862358938714977
+        }
+      ]
+    },
+    {
+      "case": "three_logos",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 2.415,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            56,
+            137,
+            274,
+            342
+          ],
+          "bbox": [
+            61.6,
+            90.42,
+            301.4,
+            225.72
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic Rings",
+          "bbox_2d": [
+            392,
+            408,
+            630,
+            592
+          ],
+          "bbox": [
+            431.2,
+            269.28,
+            693.0,
+            390.72
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Mercedes-Benz",
+          "bbox_2d": [
+            755,
+            652,
+            909,
+            908
+          ],
+          "bbox": [
+            830.5,
+            430.32,
+            999.9,
+            599.28
+          ]
+        }
+      ],
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9793292453103174,
+        0.9724146845138073,
+        0.9903745328719721
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9793292453103174
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9724146845138073
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9903745328719721
+        }
+      ]
+    },
+    {
+      "case": "mixed_wide",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 2.777,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            63,
+            84,
+            250,
+            306
+          ],
+          "bbox": [
+            80.64,
+            60.48,
+            320.0,
+            220.32
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            726,
+            98,
+            891,
+            291
+          ],
+          "bbox": [
+            929.28,
+            70.56,
+            1140.48,
+            209.52
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic rings",
+          "bbox_2d": [
+            396,
+            403,
+            601,
+            572
+          ],
+          "bbox": [
+            506.88,
+            290.16,
+            769.28,
+            411.84
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            821,
+            819,
+            944,
+            944
+          ],
+          "bbox": [
+            1050.88,
+            589.68,
+            1208.32,
+            679.68
+          ]
+        }
+      ],
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9923619021258931,
+        0.9869734761532142,
+        0.9692856381349695,
+        0.977082846148938
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9923619021258931
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9869734761532142
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9692856381349695
+        },
+        {
+          "gt": 3,
+          "prediction": 3,
+          "iou": 0.977082846148938
+        }
+      ]
+    },
+    {
+      "case": "repeated_objects",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 2.837,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            54,
+            93,
+            264,
+            293
+          ],
+          "bbox": [
+            54.0,
+            65.1,
+            264.0,
+            205.1
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            399,
+            93,
+            608,
+            293
+          ],
+          "bbox": [
+            399.0,
+            65.1,
+            608.0,
+            205.1
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            748,
+            93,
+            961,
+            293
+          ],
+          "bbox": [
+            748.0,
+            65.1,
+            961.0,
+            205.1
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            139,
+            643,
+            321,
+            789
+          ],
+          "bbox": [
+            139.0,
+            450.1,
+            321.0,
+            552.3
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            648,
+            598,
+            892,
+            793
+          ],
+          "bbox": [
+            648.0,
+            418.6,
+            892.0,
+            555.1
+          ]
+        }
+      ],
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9891139985589074,
+        0.9843847257178426,
+        0.9845179451090781,
+        0.9851544708460451,
+        0.9727976941091695
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9891139985589074
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9843847257178426
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9845179451090781
+        },
+        {
+          "gt": 3,
+          "prediction": 3,
+          "iou": 0.9851544708460451
+        },
+        {
+          "gt": 4,
+          "prediction": 4,
+          "iou": 0.9727976941091695
+        }
+      ]
+    },
+    {
+      "case": "small_objects",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 2.196,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            70,
+            163,
+            123,
+            227
+          ],
+          "bbox": [
+            89.6,
+            117.36,
+            157.44,
+            163.44
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            485,
+            442,
+            527,
+            494
+          ],
+          "bbox": [
+            620.8,
+            318.24,
+            674.56,
+            355.68
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympics",
+          "bbox_2d": [
+            679,
+            220,
+            751,
+            283
+          ],
+          "bbox": [
+            869.12,
+            158.4,
+            961.28,
+            203.76
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            850,
+            805,
+            889,
+            844
+          ],
+          "bbox": [
+            1088.0,
+            579.6,
+            1137.92,
+            607.68
+          ]
+        }
+      ],
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9064228091367663,
+        0.9220720272589372,
+        0.9215951750877016,
+        0.9142714763374492
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9064228091367663
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9220720272589372
+        },
+        {
+          "gt": 2,
+          "prediction": 3,
+          "iou": 0.9215951750877016
+        },
+        {
+          "gt": 3,
+          "prediction": 2,
+          "iou": 0.9142714763374492
+        }
+      ]
+    },
+    {
+      "case": "edge_objects",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 1.969,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "France",
+          "bbox_2d": [
+            0,
+            31,
+            157,
+            131
+          ],
+          "bbox": [
+            0.0,
+            18.91,
+            141.3,
+            79.91
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            643,
+            0,
+            820,
+            102
+          ],
+          "bbox": [
+            578.7,
+            0.0,
+            738.0,
+            62.22
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Mercedes-Benz",
+          "bbox_2d": [
+            793,
+            500,
+            900,
+            607
+          ],
+          "bbox": [
+            713.7,
+            305.0,
+            810.0,
+            370.27
+          ]
+        }
+      ],
+      "tp": 0,
+      "fp": 3,
+      "fn": 3,
+      "best_gt_iou": [
+        0.4256821249112015,
+        0.0,
+        0.2749858551103302
+      ],
+      "matches": []
+    },
+    {
+      "case": "portrait",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 2.064,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            125,
+            84,
+            531,
+            247
+          ],
+          "bbox": [
+            75.0,
+            84.0,
+            318.6,
+            247.0
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            539,
+            472,
+            800,
+            560
+          ],
+          "bbox": [
+            323.4,
+            472.0,
+            480.0,
+            560.0
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic",
+          "bbox_2d": [
+            178,
+            829,
+            612,
+            951
+          ],
+          "bbox": [
+            106.8,
+            829.0,
+            367.2,
+            951.0
+          ]
+        }
+      ],
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9670887606153101,
+        0.9570000000000002,
+        0.9687101373152248
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9670887606153101
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.9570000000000002
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9687101373152248
+        }
+      ]
+    },
+    {
+      "case": "blank",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 0.579,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [],
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [],
+      "matches": []
+    },
+    {
+      "case": "non_target_shapes",
+      "coordinates": "normalized",
+      "variant": "normalized",
+      "seconds": 0.554,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [],
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [],
+      "matches": []
+    },
+    {
+      "case": "single_flag",
+      "coordinates": "pixels",
+      "variant": "pixels",
+      "seconds": 1.129,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            180,
+            132,
+            540,
+            372
+          ],
+          "bbox": [
+            180.0,
+            132.0,
+            540.0,
+            372.0
+          ]
+        }
+      ],
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.9753763846496794
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.9753763846496794
+        }
+      ]
+    },
+    {
+      "case": "mixed_wide",
+      "coordinates": "pixels",
+      "variant": "pixels",
+      "seconds": 2.703,
+      "valid": false,
+      "strict_json": false,
+      "error": "out-of-range or inverted bbox",
+      "predictions": [],
+      "tp": 0,
+      "fp": 0,
+      "fn": 4,
+      "best_gt_iou": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "matches": []
+    },
+    {
+      "case": "small_objects",
+      "coordinates": "pixels",
+      "variant": "pixels",
+      "seconds": 2.61,
+      "valid": true,
+      "strict_json": true,
+      "error": null,
+      "predictions": [
+        {
+          "category": "flag",
+          "label": "China",
+          "bbox_2d": [
+            71,
+            119,
+            123,
+            165
+          ],
+          "bbox": [
+            71.0,
+            119.0,
+            123.0,
+            165.0
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox_2d": [
+            486,
+            320,
+            528,
+            355
+          ],
+          "bbox": [
+            486.0,
+            320.0,
+            528.0,
+            355.0
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "Olympic rings",
+          "bbox_2d": [
+            679,
+            160,
+            751,
+            205
+          ],
+          "bbox": [
+            679.0,
+            160.0,
+            751.0,
+            205.0
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "YouTube",
+          "bbox_2d": [
+            850,
+            582,
+            889,
+            608
+          ],
+          "bbox": [
+            850.0,
+            582.0,
+            889.0,
+            608.0
+          ]
+        }
+      ],
+      "tp": 0,
+      "fp": 4,
+      "fn": 4,
+      "best_gt_iou": [
+        0.3777315296566077,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "matches": []
+    },
+    {
+      "case": "portrait",
+      "coordinates": "pixels",
+      "variant": "pixels",
+      "seconds": 1.96,
+      "valid": false,
+      "strict_json": false,
+      "error": "out-of-range or inverted bbox",
+      "predictions": [],
+      "tp": 0,
+      "fp": 0,
+      "fn": 3,
+      "best_gt_iou": [
+        0,
+        0,
+        0
+      ],
+      "matches": []
+    }
+  ]
+}

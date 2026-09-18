@@ -1,0 +1,126 @@
+{
+  "tag": "object-scope-20260918",
+  "services": [
+    {
+      "Service": "api",
+      "ID": "4aa6830e5ff5",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "api",
+      "ID": "5a9f9c7f7c0f",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "face-sync",
+      "ID": "c7f6218ff92f",
+      "Image": "sha256:aed78885d1f4dd26dea92ede8060ca7c1339275d491d07c6c41642ce8e60d5bc",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-a",
+      "ID": "57dc0cdb70e7",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-b",
+      "ID": "810005593f91",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "mysql",
+      "ID": "d3190faf7aad",
+      "Image": "mysql:8.4",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "redis",
+      "ID": "d3a7e24fede0",
+      "Image": "redis:8-alpine",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "webui",
+      "ID": "743462241d46",
+      "Image": "wcm-cluster-webui:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "c58cd6c98902",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "051d92f268fd",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    }
+  ],
+  "health": {
+    "8000": 200,
+    "8001": 200
+  },
+  "source_hashes": {
+    "api/flags.py": "d9bc03c2702571079a8cc2f477467de00ddfc2c6a52ffab4fcf6510957abf97c",
+    "api/model_health.py": "27c7002282ad5d45590825383ddff061d11fd92bbe3fe67302a6901af0ba9195",
+    "src/wcm_facerec/config.py": "8cd279018614ee17eebcd06daf4d5ed59a04f6b7cf716c7a0d282e1fa8e4b1a6",
+    "src/wcm_facerec/object_detection_policy.py": "4f430504826c0a036e888df0c2103cd5b7099c75f1a130329d88e19a0e8a1236"
+  },
+  "assets": {
+    "/assets/index-CuO_NeqG.js": "c356997bc5faac54fec93f8793735f2878e21858d0ca4b120825cdc5ba175ac7",
+    "/assets/index-B1P-AiQd.css": "597d13bb3ca84c32db04eea4aa396ae9e7806fd3ada1132467b49bd60c768b6b"
+  },
+  "reported_task_unchanged": {
+    "id": "46fa3db0-6911-4fe5-b5e9-d89670ed835e",
+    "status": "completed",
+    "attempts": 2,
+    "updated_at": "2026-09-18 03:48:37.824000",
+    "result_digest": "f453134f6a53ed7a66978f8add87152ac3c2ade6a895bac8b8e5a6813d2e12ec"
+  },
+  "infrastructure_unchanged": true,
+  "runtime_errors": 0,
+  "local_tests": {
+    "passed": 919,
+    "skipped": 7,
+    "frontend_passed": 122
+  },
+  "queue_checks": [
+    "2026-09-18 04:31:32,133 INFO Review progress: task=994eed99-a97a-4fea-a99e-e51dbf616aa0 phase=queued progress=unknown windows=0/None samples=0/None video_seconds=0.000/None elapsed_seconds=0.0 active_windows=[] sub_progress=null",
+    "2026-09-18 04:31:32,161 INFO Review progress: task=994eed99-a97a-4fea-a99e-e51dbf616aa0 phase=downloading progress=unknown windows=0/None samples=0/None video_seconds=0.000/None elapsed_seconds=0.0 active_windows=[] sub_progress=null",
+    "2026-09-18 04:31:32,176 INFO Review progress: task=994eed99-a97a-4fea-a99e-e51dbf616aa0 phase=reviewing progress=unknown windows=0/None samples=0/None video_seconds=0.000/None elapsed_seconds=0.0 active_windows=[] sub_progress=null",
+    "2026-09-18 04:31:32,189 INFO Review progress: task=994eed99-a97a-4fea-a99e-e51dbf616aa0 phase=reviewing progress=0.0% windows=0/1 samples=0/1 video_seconds=0.000/None elapsed_seconds=0.1 active_windows=[] sub_progress=null",
+    "2026-09-18 04:31:32,204 INFO Review progress: task=994eed99-a97a-4fea-a99e-e51dbf616aa0 phase=saving progress=99.0% windows=1/1 samples=1/1 video_seconds=0.000/None elapsed_seconds=0.1 active_windows=[] sub_progress=null",
+    "2026-09-18 04:31:32,233 INFO Review progress: task=994eed99-a97a-4fea-a99e-e51dbf616aa0 phase=finished progress=100.0% windows=1/1 samples=1/1 video_seconds=0.000/None elapsed_seconds=0.1 active_windows=[] sub_progress=null",
+    "{\"status\": \"completed\", \"attempt\": 1, \"findings\": 4, \"types\": [\"flag\", \"logo\", \"nudity\"], \"frozen_parameters\": true, \"incomplete_checks\": 0}"
+  ],
+  "live_evaluation": {
+    "matched_cases": 9,
+    "total_cases": 10,
+    "known_miss": "nfsc.jpg 100x70"
+  },
+  "backup_directory": "/home/aigc/wcm-cluster/backups/object-scope-20260918",
+  "parameters": {
+    "enabled": true,
+    "organizations": [
+      "新唐人",
+      "新中国联邦"
+    ],
+    "prompt_sha256": "161ad0a3c7f54d6a3a3d989e8267699331ff8577c5a4b436b4ef73fdba2b68f6"
+  }
+}

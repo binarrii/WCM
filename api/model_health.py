@@ -52,12 +52,14 @@ _current_health = ContextVar("model_health", default=None)
 
 MODEL_LABELS = {
     "visual": "visual 视觉",
+    "flags": "flags 对象检测（旗帜、徽标与裸露）",
     "ocr": "OCR 文字",
     "guard": "guard 安全判定",
     "face": "face 人脸",
 }
 TIMEOUT_SETTINGS = {
     "visual": "visual_timeout_s",
+    "flags": "flags_timeout_s",
     "ocr": "ocr_timeout_s",
     "guard": "guard_timeout_s",
     "face": "insightface_timeout_s",

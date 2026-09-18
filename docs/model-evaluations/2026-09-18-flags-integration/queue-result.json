@@ -1,0 +1,316 @@
+{
+  "id": "11d908a1-d0a1-4def-82db-988ae8cc2a1e",
+  "video_url": "http://wcm-flags-smoke-source:8769/flags-smoke.mp4",
+  "parameters": {
+    "top_k": 10,
+    "threshold": 0.5,
+    "sample_interval": 1.0
+  },
+  "status": "completed",
+  "result_count": 2,
+  "error": null,
+  "review_summary": {
+    "total_samples": 2,
+    "incomplete_ratio": 0.0,
+    "incomplete_checks": 0,
+    "incomplete_samples": 0
+  },
+  "progress": {
+    "phase": "finished",
+    "attempt": 1,
+    "percent": 100,
+    "sequence": 13,
+    "sub_progress": null,
+    "total_samples": 2,
+    "total_windows": 1,
+    "active_windows": [],
+    "elapsed_seconds": 12.5,
+    "duration_seconds": 3.0,
+    "completed_samples": 2,
+    "completed_windows": 1,
+    "processed_seconds": 2.0,
+    "last_completed_window": {
+      "index": 1,
+      "stages": {},
+      "end_seconds": 2.0,
+      "start_seconds": 0.0,
+      "sample_timestamps": [
+        0.0,
+        2.0
+      ]
+    }
+  },
+  "media": {
+    "id": "4d236c817fb34bea91c0087ea7d429a1",
+    "width": 1080,
+    "height": 502,
+    "sha256": "3cd4f9879436aeef4cb53e6bbba12ad426bb7bc893f466fae71ace9202499001",
+    "task_id": "11d908a1-d0a1-4def-82db-988ae8cc2a1e",
+    "selection": {},
+    "expires_at": "2026-09-25T03:32:30.581972+00:00",
+    "size_bytes": 41711,
+    "input_bytes": 41711,
+    "source_kind": "file",
+    "video_codec": "h264",
+    "deinterlaced": false,
+    "decoder_version": "4.12.0",
+    "decoder_verified": true,
+    "duration_seconds": 3.0,
+    "video_transcoded": false,
+    "source_field_order": "progressive",
+    "video_start_seconds": 0.0,
+    "url": "/api/v1/review_tasks/11d908a1-d0a1-4def-82db-988ae8cc2a1e/media/4d236c817fb34bea91c0087ea7d429a1"
+  },
+  "has_results": true,
+  "created_at": "2026-09-18T03:32:28.817000Z",
+  "updated_at": "2026-09-18T03:32:41.397000Z",
+  "attempt": 1,
+  "results": [
+    {
+      "timestamp": "00:00:00.000",
+      "category": "旗帜与徽标",
+      "source": "flags",
+      "description": "旗帜与徽标：旗帜：Republic of China (Blue Sky with a White Sun)\n\n旗帜与徽标：旗帜：Japan\n\n旗帜与徽标：旗帜：Germany\n\n旗帜与徽标：旗帜：United States\n\n旗帜与徽标：徽标：Tang Dynasty (唐) channel logo",
+      "findings": [
+        {
+          "name": "Republic of China (Blue Sky with a White Sun)",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:00.000",
+          "description": "旗帜：Republic of China (Blue Sky with a White Sun)",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.072,
+                "w": 0.077,
+                "x": 0.063,
+                "y": 0.085
+              },
+              "time_ms": 0,
+              "frame_index": 0,
+              "pts_seconds": 0.0,
+              "duration_seconds": 0.04
+            }
+          ]
+        },
+        {
+          "name": "Japan",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:00.000",
+          "description": "旗帜：Japan",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.072,
+                "w": 0.077,
+                "x": 0.5,
+                "y": 0.085
+              },
+              "time_ms": 0,
+              "frame_index": 0,
+              "pts_seconds": 0.0,
+              "duration_seconds": 0.04
+            }
+          ]
+        },
+        {
+          "name": "Germany",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:00.000",
+          "description": "旗帜：Germany",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.072,
+                "w": 0.077,
+                "x": 0.063,
+                "y": 0.589
+              },
+              "time_ms": 0,
+              "frame_index": 0,
+              "pts_seconds": 0.0,
+              "duration_seconds": 0.04
+            }
+          ]
+        },
+        {
+          "name": "United States",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:00.000",
+          "description": "旗帜：United States",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.072,
+                "w": 0.077,
+                "x": 0.5,
+                "y": 0.589
+              },
+              "time_ms": 0,
+              "frame_index": 0,
+              "pts_seconds": 0.0,
+              "duration_seconds": 0.04
+            }
+          ]
+        },
+        {
+          "name": "Tang Dynasty (唐) channel logo",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:00.000",
+          "description": "徽标：Tang Dynasty (唐) channel logo",
+          "object_type": "logo",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.211,
+                "w": 0.065,
+                "x": 0.865,
+                "y": 0.024
+              },
+              "time_ms": 0,
+              "frame_index": 0,
+              "pts_seconds": 0.0,
+              "duration_seconds": 0.04
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": "00:00:02.000",
+      "category": "旗帜与徽标",
+      "source": "flags",
+      "description": "旗帜与徽标：旗帜：Taiwan (ROC)\n\n旗帜与徽标：旗帜：Japan\n\n旗帜与徽标：旗帜：Germany\n\n旗帜与徽标：旗帜：United States\n\n旗帜与徽标：徽标：Tang Dynasty (唐)",
+      "findings": [
+        {
+          "name": "Taiwan (ROC)",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:02.000",
+          "description": "旗帜：Taiwan (ROC)",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.073,
+                "w": 0.072,
+                "x": 0.063,
+                "y": 0.084
+              },
+              "time_ms": 2000,
+              "frame_index": 50,
+              "pts_seconds": 2.0,
+              "duration_seconds": 0.04000000000000003
+            }
+          ]
+        },
+        {
+          "name": "Japan",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:02.000",
+          "description": "旗帜：Japan",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.073,
+                "w": 0.072,
+                "x": 0.5,
+                "y": 0.084
+              },
+              "time_ms": 2000,
+              "frame_index": 50,
+              "pts_seconds": 2.0,
+              "duration_seconds": 0.04000000000000003
+            }
+          ]
+        },
+        {
+          "name": "Germany",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:02.000",
+          "description": "旗帜：Germany",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.073,
+                "w": 0.072,
+                "x": 0.063,
+                "y": 0.59
+              },
+              "time_ms": 2000,
+              "frame_index": 50,
+              "pts_seconds": 2.0,
+              "duration_seconds": 0.04000000000000003
+            }
+          ]
+        },
+        {
+          "name": "United States",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:02.000",
+          "description": "旗帜：United States",
+          "object_type": "flag",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.073,
+                "w": 0.072,
+                "x": 0.5,
+                "y": 0.59
+              },
+              "time_ms": 2000,
+              "frame_index": 50,
+              "pts_seconds": 2.0,
+              "duration_seconds": 0.04000000000000003
+            }
+          ]
+        },
+        {
+          "name": "Tang Dynasty (唐)",
+          "source": "flags",
+          "category": "旗帜与徽标",
+          "timestamp": "00:00:02.000",
+          "description": "徽标：Tang Dynasty (唐)",
+          "object_type": "logo",
+          "review_status": "needs_review",
+          "object_samples": [
+            {
+              "bbox": {
+                "h": 0.135,
+                "w": 0.064,
+                "x": 0.866,
+                "y": 0.022
+              },
+              "time_ms": 2000,
+              "frame_index": 50,
+              "pts_seconds": 2.0,
+              "duration_seconds": 0.04000000000000003
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

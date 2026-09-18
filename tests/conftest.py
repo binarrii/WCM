@@ -19,6 +19,17 @@ from PIL import Image as PILImage
 
 
 @pytest.fixture(autouse=True)
+def isolate_optional_flag_service(monkeypatch):
+    """Existing unit suites do not call the newly enabled external detector.
+
+    Flag pipeline integration tests explicitly enable it with a mocked transport.
+    """
+    from wcm_facerec.config import settings
+
+    monkeypatch.setattr(settings, "flags_enabled", False)
+
+
+@pytest.fixture(autouse=True)
 def business_test_identity(request, monkeypatch):
     """Existing business tests run as an authenticated operator.
 

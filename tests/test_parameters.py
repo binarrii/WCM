@@ -12,6 +12,13 @@ from wcm_facerec import runtime_parameters
 from wcm_facerec.config import BUSINESS_PARAMETER_SPECS, Settings, settings
 
 EXPECTED_BUSINESS_PARAMETERS = {
+    "flags_enabled",
+    "flags_model",
+    "flags_timeout_s",
+    "flags_max_tokens",
+    "flags_positive_prompt",
+    "flags_negative_prompt",
+    "flags_organization_targets",
     "insightface_base_url",
     "insightface_model_name",
     "insightface_collection_id",
@@ -184,7 +191,11 @@ def test_all_business_settings_are_declared_and_bootstrap_settings_are_excluded(
     boolean_parameters = {
         key for key, spec in BUSINESS_PARAMETER_SPECS.items() if spec.value_type == "boolean"
     }
-    assert boolean_parameters == {"face_profile_optimization", "nsfw_verify_target"}
+    assert boolean_parameters == {
+        "face_profile_optimization",
+        "nsfw_verify_target",
+        "flags_enabled",
+    }
     assert all(
         not isinstance(settings.seed_value(key), bool)
         for key, spec in BUSINESS_PARAMETER_SPECS.items()

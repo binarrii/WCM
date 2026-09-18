@@ -28,11 +28,11 @@ export function normalizeFaceSamples(samples, start = 0, end = Infinity) {
   });
 }
 
-export function faceSampleSeekTime(markers, timeMs, category = '') {
+export function faceSampleSeekTime(markers, timeMs, category = '', sampleField = 'face_samples') {
   if (!Number.isFinite(timeMs) || timeMs < 0) return null;
   const samples = markers.flatMap(marker => marker.findings
     .filter(finding => !category || finding.category === category)
-    .flatMap(finding => normalizeFaceSamples(finding.face_samples)))
+    .flatMap(finding => normalizeFaceSamples(finding[sampleField])))
     .filter(sample => sample.time_ms === timeMs);
   if (!samples.length) return null;
   const sample = samples.find(sample => Number.isFinite(sample.pts_seconds)) || samples[0];
@@ -42,15 +42,15 @@ export function faceSampleSeekTime(markers, timeMs, category = '') {
   return (sample.pts_seconds ?? sample.time_ms / 1000) + offset;
 }
 
-export function faceSampleTimes(markers, category = '') {
+export function faceSampleTimes(markers, category = '', sampleField = 'face_samples') {
   return [...new Set(markers.flatMap(marker => marker.findings
     .filter(finding => !category || finding.category === category)
-    .flatMap(finding => normalizeFaceSamples(finding.face_samples).map(sample => sample.time_ms))
+    .flatMap(finding => normalizeFaceSamples(finding[sampleField]).map(sample => sample.time_ms))
   ))].sort((a, b) => a - b);
 }
 
 // seconds must be the compositor's mediaTime, never the requested currentTime.
-export function facesAtTime(markers, seconds, category = '') {
+export function facesAtTime(markers, seconds, category = '', sampleField = 'face_samples') {
   const faces = [];
   if (!Number.isFinite(seconds)) return faces;
   // Only tolerate timestamp serialization precision, never a neighbouring video frame.
@@ -58,7 +58,7 @@ export function facesAtTime(markers, seconds, category = '') {
     <= (sample.pts_seconds == null ? .000501 : .00001);
   const candidates = markers.flatMap(marker => marker.findings
     .filter(finding => !category || finding.category === category)
-    .flatMap(finding => normalizeFaceSamples(finding.face_samples))).filter(matches);
+    .flatMap(finding => normalizeFaceSamples(finding[sampleField]))).filter(matches);
   const nearest = candidates.sort((a, b) =>
     Math.abs((a.pts_seconds ?? a.time_ms / 1000) - seconds)
       - Math.abs((b.pts_seconds ?? b.time_ms / 1000) - seconds))[0];
@@ -66,17 +66,18 @@ export function facesAtTime(markers, seconds, category = '') {
   for (const marker of markers) {
     for (const finding of marker.findings) {
       if (category && finding.category !== category) continue;
-      for (const sample of normalizeFaceSamples(finding.face_samples)) {
+      for (const sample of normalizeFaceSamples(finding[sampleField])) {
         const box = sample?.bbox;
         if (sample.time_ms !== nearest.time_ms || !matches(sample)) continue;
-        const key = [sample.time_ms, box.x, box.y, box.w, box.h].join(':');
+        const key = [sampleField, sampleField === 'object_samples' ? finding.object_type : '', sample.time_ms, box.x, box.y, box.w, box.h].join(':');
         let face = faces.find(item => item.key === key);
         if (!face) {
           face = { key, box, candidates: [] };
+          if (sampleField === 'object_samples') face.objectType = finding.object_type;
           faces.push(face);
         }
         const existing = face.candidates.find(item => item.markerId === marker.id && item.name === finding.description);
-        if (!existing) face.candidates.push({ markerId: marker.id, name: finding.description, similarity: sample.similarity });
+        if (!existing) face.candidates.push({ markerId: marker.id, name: finding.description, similarity: sample.similarity, ...(sampleField === 'object_samples' ? { needsReview: true } : {}) });
         else if (sample.similarity != null && (existing.similarity == null || sample.similarity > existing.similarity)) existing.similarity = sample.similarity;
       }
     }

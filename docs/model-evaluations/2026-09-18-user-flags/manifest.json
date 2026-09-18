@@ -1,0 +1,57 @@
+{
+  "kind": "user-supplied screenshot",
+  "description": "用户提供的财经画面原图，参考框由人工目视标注，模糊边缘有数像素不确定性",
+  "cases": [
+    {
+      "id": "user_flags",
+      "image": "user-flags.png",
+      "size": [
+        1796,
+        836
+      ],
+      "sha256": "48492ce23e90fba65326bfa675e1ef445607bd80746aadba4efd479b2acfe11a",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "ROC flag",
+          "bbox": [
+            118,
+            72,
+            222,
+            130
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Japan",
+          "bbox": [
+            909,
+            74,
+            1011,
+            134
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "Germany",
+          "bbox": [
+            119,
+            496,
+            219,
+            555
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "United States",
+          "bbox": [
+            910,
+            493,
+            1014,
+            553
+          ]
+        }
+      ]
+    }
+  ]
+}

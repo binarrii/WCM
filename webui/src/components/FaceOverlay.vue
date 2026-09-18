@@ -38,7 +38,7 @@ const boxStyle = box => ({
 <template>
   <div v-if="rect && mode !== 'hidden'" class="face-overlay" :style="layerStyle">
     <div v-for="face in faces" :key="face.key" class="face-hit"
-      :class="{ selected: face.candidates.some(c => c.markerId === selected), full: mode === 'boxes' }"
+      :class="{ selected: face.candidates.some(c => c.markerId === selected), full: mode === 'boxes', flag: face.objectType === 'flag', logo: face.objectType === 'logo', nudity: face.objectType === 'nudity' }"
       :style="boxStyle(face.box)">
       <button class="face-target" type="button"
         :aria-label="`查看候选：${face.candidates.map(c => c.name).join('、')}`"
@@ -49,7 +49,8 @@ const boxStyle = box => ({
         <button v-for="candidate in face.candidates" :key="candidate.markerId + candidate.name" type="button"
           :aria-pressed="candidate.markerId === selected" @click="$emit('select', candidate.markerId)">
           <span>{{ candidate.name }}</span>
-          <small v-if="Number.isFinite(candidate.similarity)">{{ Math.round(candidate.similarity * 100) }}%</small>
+          <small v-if="candidate.needsReview">待复核</small>
+          <small v-else-if="Number.isFinite(candidate.similarity)">{{ Math.round(candidate.similarity * 100) }}%</small>
         </button>
       </div>
     </div>
@@ -58,15 +59,18 @@ const boxStyle = box => ({
 
 <style scoped>
 .face-overlay { --face-frame-color: #ff3040; position: absolute; pointer-events: none; }
+.face-hit.flag { --face-frame-color: #ffb020; }
+.face-hit.logo { --face-frame-color: #24d7e8; }
+.face-hit.nudity { --face-frame-color: #ed7aff; }
 .face-hit { position: absolute; color: var(--face-frame-color); pointer-events: none; }
 .face-target { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 1px solid transparent; background: transparent; pointer-events: auto; cursor: pointer; border-radius: 3px; }
-.face-target i { position: absolute; width: 13px; height: 13px; border: solid currentColor; border-width: 0; color: var(--face-frame-color); filter: drop-shadow(0 1px 1px #000b) drop-shadow(0 0 3px #ff3040cc); }
+.face-target i { position: absolute; width: 13px; height: 13px; border: solid currentColor; border-width: 0; color: var(--face-frame-color); filter: drop-shadow(0 1px 1px #000b) drop-shadow(0 0 3px currentColor); }
 .tl { top: 0; left: 0; border-top-width: 2px !important; border-left-width: 2px !important; }
 .tr { top: 0; right: 0; border-top-width: 2px !important; border-right-width: 2px !important; }
 .bl { bottom: 0; left: 0; border-bottom-width: 2px !important; border-left-width: 2px !important; }
 .br { bottom: 0; right: 0; border-bottom-width: 2px !important; border-right-width: 2px !important; }
 .face-hit:hover, .face-hit:focus-within, .face-hit.selected { z-index: 2; }
-.face-hit:hover .face-target, .face-hit:focus-within .face-target, .selected .face-target, .full .face-target { border-color: var(--face-frame-color); box-shadow: 0 0 2px #ff304099; }
+.face-hit:hover .face-target, .face-hit:focus-within .face-target, .selected .face-target, .full .face-target { border-color: var(--face-frame-color); box-shadow: 0 0 2px currentColor; }
 .face-target:focus-visible { outline: 2px solid white; outline-offset: 3px; }
 .face-label { display: none; position: absolute; padding: 4px 0; overflow-y: auto; pointer-events: auto; }
 .face-hit:hover .face-label, .face-hit:focus-within .face-label, .selected .face-label, .full .face-label { display: grid; }

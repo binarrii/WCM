@@ -1,0 +1,394 @@
+{
+  "kind": "programmatic synthetic fixtures; approximate artwork",
+  "cases": [
+    {
+      "id": "single_flag",
+      "image": "single_flag.png",
+      "size": [
+        900,
+        600
+      ],
+      "sha256": "7aed8018c6d6b4825d7c19f8e1d7cbe48b5c233ca7c4f19902a46ec21e6af1b6",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "china",
+          "bbox": [
+            177,
+            131,
+            537,
+            371
+          ]
+        }
+      ]
+    },
+    {
+      "id": "single_logo",
+      "image": "single_logo.png",
+      "size": [
+        900,
+        600
+      ],
+      "sha256": "99838b97500e56e97db6e0de68e3cc968415c31e6b7bf85b26e9e97e3ba59889",
+      "objects": [
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            453,
+            347,
+            693,
+            482
+          ]
+        }
+      ]
+    },
+    {
+      "id": "three_flags",
+      "image": "three_flags.png",
+      "size": [
+        1200,
+        700
+      ],
+      "sha256": "f4f21442b8b1d24dfc8d589d7f34663a5e05eee11e36b4bd3b871b75fa9895cb",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "china",
+          "bbox": [
+            60,
+            80,
+            360,
+            280
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "japan",
+          "bbox": [
+            450,
+            270,
+            720,
+            450
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "france",
+          "bbox": [
+            855,
+            460,
+            1125,
+            640
+          ]
+        }
+      ]
+    },
+    {
+      "id": "three_logos",
+      "image": "three_logos.png",
+      "size": [
+        1100,
+        660
+      ],
+      "sha256": "1b219d141dc4c1a05ba3430f650e1020590e57c44d7644468a9ee89cafbd941e",
+      "objects": [
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            60,
+            90,
+            300,
+            225
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "olympic",
+          "bbox": [
+            430,
+            270,
+            690,
+            390
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "mercedes",
+          "bbox": [
+            830,
+            430,
+            1000,
+            600
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mixed_wide",
+      "image": "mixed_wide.png",
+      "size": [
+        1280,
+        720
+      ],
+      "sha256": "035fec6974ec4820bffe50be53eaadd3cf7f6e78a85235ed7c10e68b9cf16b4d",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "china",
+          "bbox": [
+            80,
+            60,
+            320,
+            220
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "japan",
+          "bbox": [
+            930,
+            70,
+            1140,
+            210
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "olympic",
+          "bbox": [
+            510,
+            290,
+            770,
+            410
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            1050,
+            590,
+            1210,
+            680
+          ]
+        }
+      ]
+    },
+    {
+      "id": "repeated_objects",
+      "image": "repeated_objects.png",
+      "size": [
+        1000,
+        700
+      ],
+      "sha256": "d31f64491d245b03cff65a89810ec319725458f4042b68b2c38856b15a488642",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "japan",
+          "bbox": [
+            55,
+            65,
+            265,
+            205
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "japan",
+          "bbox": [
+            400,
+            65,
+            610,
+            205
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "japan",
+          "bbox": [
+            750,
+            65,
+            960,
+            205
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            140,
+            450,
+            320,
+            552
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            650,
+            420,
+            890,
+            555
+          ]
+        }
+      ]
+    },
+    {
+      "id": "small_objects",
+      "image": "small_objects.png",
+      "size": [
+        1280,
+        720
+      ],
+      "sha256": "3dbc78cddd2bba6ccde35da7b1f9a93504ab64c460dbb0fe3a006e15734c665c",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "china",
+          "bbox": [
+            90,
+            120,
+            156,
+            164
+          ]
+        },
+        {
+          "category": "flag",
+          "label": "japan",
+          "bbox": [
+            620,
+            320,
+            674,
+            356
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            1090,
+            580,
+            1138,
+            607
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "olympic",
+          "bbox": [
+            870,
+            160,
+            961,
+            202
+          ]
+        }
+      ]
+    },
+    {
+      "id": "edge_objects",
+      "image": "edge_objects.png",
+      "size": [
+        900,
+        610
+      ],
+      "sha256": "88b499c8eebb3c4a08cf80d92464417d8a2a11cce58c9fcef4abd5ba12674a90",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "france",
+          "bbox": [
+            0,
+            30,
+            150,
+            130
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "mercedes",
+          "bbox": [
+            790,
+            500,
+            900,
+            610
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            640,
+            0,
+            820,
+            102
+          ]
+        }
+      ]
+    },
+    {
+      "id": "portrait",
+      "image": "portrait.png",
+      "size": [
+        600,
+        1000
+      ],
+      "sha256": "d6145fda4600b7b36ebe19be360852bcffd88a8b51c96724199a183cefd6d680",
+      "objects": [
+        {
+          "category": "flag",
+          "label": "china",
+          "bbox": [
+            75,
+            85,
+            315,
+            245
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "youtube",
+          "bbox": [
+            320,
+            470,
+            480,
+            560
+          ]
+        },
+        {
+          "category": "logo",
+          "label": "olympic",
+          "bbox": [
+            105,
+            830,
+            365,
+            950
+          ]
+        }
+      ]
+    },
+    {
+      "id": "blank",
+      "image": "blank.png",
+      "size": [
+        900,
+        600
+      ],
+      "sha256": "8c2b8f46d5e323381d62debffe18befef3346c188bdcbcf188b38ee1e7ac5b25",
+      "objects": []
+    },
+    {
+      "id": "non_target_shapes",
+      "image": "non_target_shapes.png",
+      "size": [
+        900,
+        600
+      ],
+      "sha256": "148af3d29333f0675e6e5c924410f2b16969ff1f957bc568dd9990ed0be9e27a",
+      "objects": []
+    }
+  ]
+}

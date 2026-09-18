@@ -1,0 +1,42 @@
+[
+  {
+    "file": "user-flags.png",
+    "source": "user-provided screenshot"
+  },
+  {
+    "file": "medical-vulva.png",
+    "source": "https://commons.wikimedia.org/wiki/File:Female_vulva.svg",
+    "author": "T. Kebert",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "changes": "Wikimedia rendered PNG preview, inference input resized and JPEG encoded"
+  },
+  {
+    "file": "medical-breast.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Weibliche_brust_en.jpg",
+    "author": "Ralf Roletschek / Sansculotte",
+    "license": "see source licensing",
+    "changes": "JPEG encoding for inference only"
+  },
+  {
+    "file": "nfsc.jpg",
+    "source": "https://gwins.org/uploads/country/1867.jpg",
+    "description_page": "https://gwins.org/cn/country/NewChina.html",
+    "usage": "identification evaluation only"
+  },
+  {
+    "files": [
+      "normal-flags.png",
+      "normal-logos.png",
+      "pride.png",
+      "rainbow-decoration.png"
+    ],
+    "source": "programmatic fixtures; not official artwork"
+  },
+  {
+    "file": "nfsc-large.png",
+    "source": "https://commons.wikimedia.org/wiki/File:%E6%96%B0%E4%B8%AD%E5%9B%BD%E8%81%94%E9%82%A6%E5%9B%BD%E6%97%97.svg",
+    "asset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/06/%E6%96%B0%E4%B8%AD%E5%9B%BD%E8%81%94%E9%82%A6%E5%9B%BD%E6%97%97.svg/960px-%E6%96%B0%E4%B8%AD%E5%9B%BD%E8%81%94%E9%82%A6%E5%9B%BD%E6%97%97.svg.png?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail&_=20200809063108",
+    "license": "public domain simple geometry; see Commons source"
+  }
+]

@@ -1,0 +1,243 @@
+{
+  "matching": "category-aware maximum cardinality at IoU >= 0.5; specific names reviewed separately",
+  "totals": {
+    "normalized-custom": {
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "valid": 1,
+      "strict_json": 0,
+      "requests": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "mean_best_gt_iou": 0.843892904863682,
+      "median_seconds": 3.382
+    },
+    "normalized-custom-flags-names": {
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "valid": 1,
+      "strict_json": 0,
+      "requests": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "mean_best_gt_iou": 0.8702379406595738,
+      "median_seconds": 3.212
+    }
+  },
+  "results": [
+    {
+      "case": "user_flags",
+      "coordinates": "normalized",
+      "variant": "normalized-custom-flags-names",
+      "seconds": 3.212,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "bbox_2d": [
+            65,
+            83,
+            119,
+            157
+          ],
+          "label": "中华民国国旗",
+          "category": "flag",
+          "bbox": [
+            116.74,
+            69.388,
+            213.724,
+            131.252
+          ]
+        },
+        {
+          "bbox_2d": [
+            509,
+            84,
+            563,
+            157
+          ],
+          "label": "日本国国旗",
+          "category": "flag",
+          "bbox": [
+            914.164,
+            70.224,
+            1011.148,
+            131.252
+          ]
+        },
+        {
+          "bbox_2d": [
+            66,
+            592,
+            120,
+            666
+          ],
+          "label": "德国联邦共和国国旗",
+          "category": "flag",
+          "bbox": [
+            118.536,
+            494.912,
+            215.52,
+            556.776
+          ]
+        },
+        {
+          "bbox_2d": [
+            508,
+            592,
+            562,
+            666
+          ],
+          "label": "美利坚合众国国旗",
+          "category": "flag",
+          "bbox": [
+            912.368,
+            494.912,
+            1009.352,
+            556.776
+          ]
+        }
+      ],
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.856811872602923,
+        0.8536295100432958,
+        0.9177362112620912,
+        0.8527741687299855
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.856811872602923
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.8536295100432958
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.9177362112620912
+        },
+        {
+          "gt": 3,
+          "prediction": 3,
+          "iou": 0.8527741687299855
+        }
+      ]
+    },
+    {
+      "case": "user_flags",
+      "coordinates": "normalized",
+      "variant": "normalized-custom",
+      "seconds": 3.382,
+      "valid": true,
+      "strict_json": false,
+      "error": null,
+      "predictions": [
+        {
+          "bbox_2d": [
+            64,
+            83,
+            125,
+            159
+          ],
+          "label": "旗帜名称",
+          "category": "flag",
+          "bbox": [
+            114.944,
+            69.388,
+            224.5,
+            132.924
+          ]
+        },
+        {
+          "bbox_2d": [
+            507,
+            83,
+            568,
+            159
+          ],
+          "label": "旗帜名称",
+          "category": "flag",
+          "bbox": [
+            910.572,
+            69.388,
+            1020.128,
+            132.924
+          ]
+        },
+        {
+          "bbox_2d": [
+            64,
+            592,
+            125,
+            668
+          ],
+          "label": "旗帜名称",
+          "category": "flag",
+          "bbox": [
+            114.944,
+            494.912,
+            224.5,
+            558.448
+          ]
+        },
+        {
+          "bbox_2d": [
+            507,
+            592,
+            568,
+            668
+          ],
+          "label": "旗帜名称",
+          "category": "flag",
+          "bbox": [
+            910.572,
+            494.912,
+            1020.128,
+            558.448
+          ]
+        }
+      ],
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "best_gt_iou": [
+        0.8665732839327411,
+        0.8261219638048801,
+        0.8476098102127275,
+        0.835266561504379
+      ],
+      "matches": [
+        {
+          "gt": 0,
+          "prediction": 0,
+          "iou": 0.8665732839327411
+        },
+        {
+          "gt": 1,
+          "prediction": 1,
+          "iou": 0.8261219638048801
+        },
+        {
+          "gt": 2,
+          "prediction": 2,
+          "iou": 0.8476098102127275
+        },
+        {
+          "gt": 3,
+          "prediction": 3,
+          "iou": 0.835266561504379
+        }
+      ]
+    }
+  ]
+}

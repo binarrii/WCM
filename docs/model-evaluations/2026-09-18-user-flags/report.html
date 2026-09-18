@@ -1,0 +1,40 @@
+<!doctype html><meta charset='utf-8'><title>Qwen flag/logo bbox probe</title><style>body{font:16px system-ui;margin:28px;background:#f4f6f8;color:#18232d}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(450px,1fr));gap:20px}article{background:white;padding:18px;border-radius:12px}img{width:100%}pre{white-space:pre-wrap;font-size:13px}h2{font-size:18px}</style><h1>Qwen · 旗帜与徽标 bbox 实测</h1><p>用户提供的财经画面原图，参考框由人工目视标注，模糊边缘有数像素不确定性；绿色：参考框，粉色：模型框。名称识别与框定位分开评估。仅验证能力，不代表真实视频准确率。</p><pre>{
+  &quot;normalized-custom&quot;: {
+    &quot;tp&quot;: 4,
+    &quot;fp&quot;: 0,
+    &quot;fn&quot;: 0,
+    &quot;valid&quot;: 1,
+    &quot;strict_json&quot;: 0,
+    &quot;requests&quot;: 1,
+    &quot;precision&quot;: 1.0,
+    &quot;recall&quot;: 1.0,
+    &quot;mean_best_gt_iou&quot;: 0.843892904863682,
+    &quot;median_seconds&quot;: 3.382
+  },
+  &quot;normalized-custom-flags-names&quot;: {
+    &quot;tp&quot;: 4,
+    &quot;fp&quot;: 0,
+    &quot;fn&quot;: 0,
+    &quot;valid&quot;: 1,
+    &quot;strict_json&quot;: 0,
+    &quot;requests&quot;: 1,
+    &quot;precision&quot;: 1.0,
+    &quot;recall&quot;: 1.0,
+    &quot;mean_best_gt_iou&quot;: 0.8702379406595738,
+    &quot;median_seconds&quot;: 3.212
+  }
+}</pre><main><article><h2>user_flags · normalized-custom-flags-names</h2><p>TP 4 / FP 0 / FN 0 · 3.212 s</p><img src='overlay-user_flags-normalized-custom-flags-names.png'><pre>```json
+[
+  {&quot;bbox_2d&quot;: [65, 83, 119, 157], &quot;label&quot;: &quot;中华民国国旗&quot;, &quot;category&quot;: &quot;flag&quot;},
+  {&quot;bbox_2d&quot;: [509, 84, 563, 157], &quot;label&quot;: &quot;日本国国旗&quot;, &quot;category&quot;: &quot;flag&quot;},
+  {&quot;bbox_2d&quot;: [66, 592, 120, 666], &quot;label&quot;: &quot;德国联邦共和国国旗&quot;, &quot;category&quot;: &quot;flag&quot;},
+  {&quot;bbox_2d&quot;: [508, 592, 562, 666], &quot;label&quot;: &quot;美利坚合众国国旗&quot;, &quot;category&quot;: &quot;flag&quot;}
+]
+```</pre></article><article><h2>user_flags · normalized-custom</h2><p>TP 4 / FP 0 / FN 0 · 3.382 s</p><img src='overlay-user_flags-normalized-custom.png'><pre>```json
+[
+  {&quot;bbox_2d&quot;: [64, 83, 125, 159], &quot;label&quot;: &quot;旗帜名称&quot;, &quot;category&quot;: &quot;flag&quot;},
+  {&quot;bbox_2d&quot;: [507, 83, 568, 159], &quot;label&quot;: &quot;旗帜名称&quot;, &quot;category&quot;: &quot;flag&quot;},
+  {&quot;bbox_2d&quot;: [64, 592, 125, 668], &quot;label&quot;: &quot;旗帜名称&quot;, &quot;category&quot;: &quot;flag&quot;},
+  {&quot;bbox_2d&quot;: [507, 592, 568, 668], &quot;label&quot;: &quot;旗帜名称&quot;, &quot;category&quot;: &quot;flag&quot;}
+]
+```</pre></article></main>

@@ -1,0 +1,60 @@
+{
+  "model": "WasuAI/Qwen3.8-27B-Abliterated",
+  "input_size": [
+    1080,
+    503
+  ],
+  "elapsed_seconds": 4.49,
+  "detections": [
+    {
+      "object_type": "flag",
+      "name": "Taiwan (ROC)",
+      "bbox": {
+        "x": 0.063,
+        "y": 0.084,
+        "w": 0.072,
+        "h": 0.073
+      }
+    },
+    {
+      "object_type": "flag",
+      "name": "Japan",
+      "bbox": {
+        "x": 0.502,
+        "y": 0.084,
+        "w": 0.072,
+        "h": 0.073
+      }
+    },
+    {
+      "object_type": "flag",
+      "name": "Germany",
+      "bbox": {
+        "x": 0.063,
+        "y": 0.59,
+        "w": 0.072,
+        "h": 0.073
+      }
+    },
+    {
+      "object_type": "flag",
+      "name": "United States",
+      "bbox": {
+        "x": 0.502,
+        "y": 0.59,
+        "w": 0.072,
+        "h": 0.073
+      }
+    },
+    {
+      "object_type": "logo",
+      "name": "Tang Dynasty (唐)",
+      "bbox": {
+        "x": 0.868,
+        "y": 0.02,
+        "w": 0.064,
+        "h": 0.12
+      }
+    }
+  ]
+}

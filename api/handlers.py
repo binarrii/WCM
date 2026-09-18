@@ -16,7 +16,7 @@ import numpy as np
 from wcm_facerec.config import settings
 from wcm_facerec.face_engine import FaceEngine, get_face_engine
 
-from . import ocr, review_media, review_windows
+from . import flags, ocr, review_media, review_windows
 from .media_source import is_video_url, video_limit_bytes
 from .model_clients import model_client
 from .model_health import (
@@ -25,6 +25,7 @@ from .model_health import (
     model_call,
     protect_video_review,
 )
+from .model_responses import ModelResponseError
 from .utils import (
     VideoFrameSampler,
     _download_url_safe,
@@ -53,16 +54,6 @@ class FaceFrameResult(list):
     def __init__(self, matches=(), *, observations=()):
         super().__init__(matches)
         self.observations = list(observations)
-
-
-class ModelResponseError(ValueError):
-    """A known response problem with a safe, actionable message for reviewers."""
-
-    def __init__(self, component: str, code: str, reason: str):
-        super().__init__(reason)
-        self.component = component
-        self.code = code
-        self.reason = reason
 
 
 def _model_response_text(response, component: str, max_tokens: int, allow_empty=False) -> str:
@@ -128,9 +119,13 @@ async def _review_stage(stage, timestamp, operation, errors, default=None, *, en
             reason = f"数据处理异常（{type(cause).__name__}）"
         else:
             reason = "处理失败"
-        label = {"face": "人脸识别", "visual": "视觉审核", "ocr": "文字审核", "frame": "帧审核"}[
-            stage
-        ]
+        label = {
+            "face": "人脸识别",
+            "visual": "视觉审核",
+            "ocr": "文字审核",
+            "frame": "帧审核",
+            "flags": "旗帜与徽标检测",
+        }[stage]
         finding = {
             "timestamp": _format_interval(timestamp, end_timestamp),
             "category": "审核未完成",
@@ -844,49 +839,6 @@ async def _process_detect_sensitive(url: str, sample_interval: float) -> dict:
     return result
 
 
-async def _call_flags_analysis(b64_img: str) -> str:
-    url = settings.model_api_url
-    headers = {"Authorization": f"Bearer {settings.model_api_key}"}
-    payload = {
-        "model": "WasuAI/WasuFlags3.5-4B",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": _prompt_text("""
-                            ## 任务
-                            检测图像中是否包含非法或政治团体的旗帜。
-
-                            ## 输出要求
-                            - 不包含时，**严格只输出一个字：无**。
-                            - 包含时，描述是什么旗帜。
-                        """),
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"},
-                    },
-                ],
-            }
-        ],
-        "max_tokens": 128,
-        "temperature": 0.1,
-    }
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            analysis = data["choices"][0]["message"]["content"].strip()
-            if "</think>" in analysis:
-                analysis = analysis.split("</think>")[-1].strip()
-            return analysis
-        except Exception:
-            return "无"
-
-
 def _format_timestamp(seconds: float) -> str:
     if seconds is None:
         return "00:00:00.000"
@@ -1093,6 +1045,7 @@ async def _process_analyze_media(
             top_k,
             threshold,
             include_faces=True,
+            include_flags=settings.flags_enabled,
             coverage=coverage,
             progress=progress,
         )
@@ -1100,12 +1053,13 @@ async def _process_analyze_media(
     merge_interval = sample_interval
     sample_times = []
     errors = []
+    flags_cache = review_windows.AsyncMemo()
 
     if coverage is not None:
         coverage.add([])
 
     async def _process_window(window, *, review_visual=True, sampled=True, index=0):
-        frame, b64_img, current_frame_time = window[0]
+        frame, b64_img, current_frame_time = window[0][:3]
 
         async def face_task():
             if frame is None or not sampled:
@@ -1140,7 +1094,26 @@ async def _process_analyze_media(
                     if progress is not None:
                         progress.finish_stage(index, "ocr")
 
-        face_res, nsfw_res, ocr_res = await gather_stages(
+        async def flags_task():
+            if not settings.flags_enabled or not sampled:
+                return []
+            if progress is not None:
+                await progress.start_stage(index, "flags", [current_frame_time])
+            try:
+                detections = await flags_cache.get(
+                    review_windows._digest(b64_img), lambda: flags.detect(b64_img)
+                )
+                return flags.findings(
+                    detections,
+                    _format_timestamp(current_frame_time),
+                    current_frame_time,
+                    frame=window[0][3] if len(window[0]) > 3 else None,
+                )
+            finally:
+                if progress is not None:
+                    progress.finish_stage(index, "flags")
+
+        face_res, nsfw_res, ocr_res, flags_res = await gather_stages(
             _review_stage("face", current_frame_time, face_task, errors, default=[]),
             _review_stage(
                 "visual",
@@ -1149,8 +1122,8 @@ async def _process_analyze_media(
                 errors,
             ),
             _review_stage("ocr", current_frame_time, text_task, errors),
+            _review_stage("flags", current_frame_time, flags_task, errors, default=[]),
         )
-        flags_res = None
         return face_res, nsfw_res, ocr_res, flags_res, current_frame_time
 
     frame_results = []
@@ -1179,7 +1152,9 @@ async def _process_analyze_media(
                     await queue.put(
                         (
                             index,
-                            tuple((frame.image, frame.b64, frame.timestamp) for frame in window),
+                            tuple(
+                                (frame.image, frame.b64, frame.timestamp, frame) for frame in window
+                            ),
                             window.review_visual,
                             window.sampled,
                         )
@@ -1232,6 +1207,7 @@ async def _process_analyze_media(
                     consumer_task.cancel()
                 await asyncio.gather(*consumers, return_exceptions=True)
         finally:
+            await flags_cache.close()
             if video_path.exists():
                 video_path.unlink()
     else:
@@ -1258,7 +1234,10 @@ async def _process_analyze_media(
             progress.enqueue(1)
             await progress.sampled()
             await progress.start_window(0, 0, 0, [0])
-        res = await _process_window(((frame, b64_img, 0.0),))
+        try:
+            res = await _process_window(((frame, b64_img, 0.0),))
+        finally:
+            await flags_cache.close()
         if progress is not None:
             await progress.complete_window(0, 0, 1)
         frame_results = [res]
@@ -1295,13 +1274,7 @@ async def _process_analyze_media(
             )
 
         if flags_res:
-            flattened_results.append(
-                {
-                    "timestamp": formatted_ts,
-                    "category": flags_res["category"],
-                    "description": flags_res["text"],
-                }
-            )
+            flattened_results.extend(flags_res)
 
     flattened_results.extend(errors)
 

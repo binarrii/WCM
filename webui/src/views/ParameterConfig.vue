@@ -53,6 +53,13 @@ const form = ref({
 
 const concurrencyHint = computed(() => {
   const key = form.value.key;
+  if (key === 'visual_concurrency') {
+    return '视觉描述与对象检测共用此集群并发额度；正数限制总并发，≤ 0 由模型服务端控制。';
+  }
+  if (key === 'flags_enabled') return '控制综合审核中的对象检测，包括关注旗帜/徽标和明确裸露部位；命中仅作为待复核发现。';
+  if (key === 'flags_positive_prompt') return '正向提示词：描述需要定位的旗帜、徽标和裸露部位，保留各类别的英文标识。';
+  if (key === 'flags_negative_prompt') return '反向提示词：排除普通国家/组织标志、常见品牌、自然彩虹及无明确裸露的画面，减少误报。';
+  if (key === 'flags_organization_targets') return '额外关注组织的具体名称 JSON 数组，默认包含新唐人、新中国联邦。只匹配专用旗帜/徽标，空数组表示不检测额外组织。';
   if (key === 'face_neighbor_concurrency') {
     return '填写整数：1～8 限制每个视频同时处理的补帧数；≤ 0 不限制补帧并发，由模型服务端控制。';
   }
@@ -62,13 +69,14 @@ const concurrencyHint = computed(() => {
   return '';
 });
 
+const groupLabel = group => group === '旗帜与徽标' ? '对象检测' : group;
 const groups = computed(() => [...new Set(parameters.value.map(item => item.group))].sort());
 const filteredParameters = computed(() => {
   const term = query.value.trim().toLocaleLowerCase();
   return parameters.value.filter(item => {
     if (selectedGroup.value && item.group !== selectedGroup.value) return false;
     const searchableValue = item.secret ? '' : summarizeParameterValue(item.value, item.type, 500);
-    return !term || `${item.key} ${item.group} ${searchableValue}`
+    return !term || `${item.key} ${item.group} ${groupLabel(item.group)} ${searchableValue}`
       .toLocaleLowerCase()
       .includes(term);
   });
@@ -257,7 +265,7 @@ onMounted(loadParameters);
         <span>参数分组</span>
         <select v-model="selectedGroup">
           <option value="">全部分组</option>
-          <option v-for="group in groups" :key="group" :value="group">{{ group }}</option>
+          <option v-for="group in groups" :key="group" :value="group">{{ groupLabel(group) }}</option>
         </select>
       </label>
       <button class="parameter-refresh" type="button" :disabled="loading" @click="loadParameters">
@@ -282,7 +290,7 @@ onMounted(loadParameters);
               <tr class="parameter-row" tabindex="0" :aria-expanded="expandedKeys.has(item.key)" @click="toggleExpanded(item.key)" @keydown.enter="toggleExpanded(item.key)">
                 <td class="parameter-expand"><ChevronDown v-if="expandedKeys.has(item.key)" /><ChevronRight v-else /></td>
                 <td class="parameter-key"><strong>{{ item.key }}</strong></td>
-                <td><span class="parameter-group">{{ item.group }}</span></td>
+                <td><span class="parameter-group">{{ groupLabel(item.group) }}</span></td>
                 <td><span :class="['parameter-type', item.type]">{{ item.type }}</span></td>
                 <td v-if="item.secret" class="parameter-preview parameter-secret">{{ item.has_value ? '••••••••（已配置）' : '（未配置）' }}</td>
                 <td v-else class="parameter-preview" :title="summarizeParameterValue(item.value, item.type, 500)">{{ summarizeParameterValue(item.value, item.type) || '（空字符串）' }}</td>
@@ -316,7 +324,7 @@ onMounted(loadParameters);
             <label><span>Key</span><input v-model="form.key" :disabled="Boolean(editingKey) || saving" maxlength="191" placeholder="例如 review.max_retries" autocomplete="off" /></label>
             <div class="parameter-form-grid">
               <label><span>类型</span><select v-model="form.type" :disabled="saving || form.builtIn"><option value="string">string</option><option value="number">number</option><option value="boolean">boolean</option><option value="enum">enum</option><option value="json">json</option></select></label>
-              <label><span>分组</span><input v-model="form.group" :disabled="saving || form.builtIn" maxlength="100" placeholder="default" autocomplete="off" /></label>
+              <label><span>分组</span><input v-if="form.builtIn" :value="groupLabel(form.group)" disabled /><input v-else v-model="form.group" :disabled="saving" maxlength="100" placeholder="default" autocomplete="off" /></label>
             </div>
             <template v-if="form.type === 'enum'">
               <label>

@@ -1,12 +1,13 @@
 """Bootstrap settings and database-managed business parameter definitions."""
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from . import runtime_parameters
+from .object_detection_policy import NEGATIVE_PROMPT, ORGANIZATION_HINTS, POSITIVE_PROMPT
 
 # InsightFace Server is a single-model service (currently buffalo_m v0.7,
 # 512-dim ArcFace R50). The legacy per-model dim lookup is kept only as a
@@ -128,6 +129,15 @@ class Settings(BaseSettings):
     guard_timeout_s: float = Field(default=10.0, gt=0)
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = ""
+    flags_enabled: bool = True
+    flags_model: str = Field(default="WasuAI/Qwen3.8-27B-Abliterated", min_length=1)
+    flags_timeout_s: float = Field(default=50.0, gt=0)
+    flags_max_tokens: int = Field(default=2048, ge=256, le=16384)
+    flags_positive_prompt: str = Field(default=POSITIVE_PROMPT, min_length=1, max_length=16000)
+    flags_negative_prompt: str = Field(default=NEGATIVE_PROMPT, min_length=1, max_length=16000)
+    flags_organization_targets: list[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    ] = Field(default_factory=lambda: list(ORGANIZATION_HINTS), max_length=100)
 
     # Multi-image Qwen input, with contact-sheet compatibility fallback.
     nsfw_image_mode: Literal["auto", "montage"] = "auto"
@@ -242,6 +252,15 @@ BUSINESS_PARAMETER_SPECS = {
     "visual_timeout_s": BusinessParameterSpec("number", "审核调度"),
     "ocr_timeout_s": BusinessParameterSpec("number", "审核调度"),
     "guard_timeout_s": BusinessParameterSpec("number", "审核调度"),
+    # Keep stored metadata compatible with older API/face-sync processes.
+    # The UI presents this existing group as object detection.
+    "flags_enabled": BusinessParameterSpec("boolean", "旗帜与徽标"),
+    "flags_model": BusinessParameterSpec("string", "旗帜与徽标"),
+    "flags_timeout_s": BusinessParameterSpec("number", "旗帜与徽标"),
+    "flags_max_tokens": BusinessParameterSpec("number", "旗帜与徽标"),
+    "flags_positive_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
+    "flags_negative_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
+    "flags_organization_targets": BusinessParameterSpec("json", "旗帜与徽标"),
     # Model gateway and behavior.
     "model_api_url": BusinessParameterSpec("string", "模型服务"),
     "model_api_key": BusinessParameterSpec("string", "模型服务", secret=True),

@@ -172,12 +172,15 @@ async def analyze_video(
     *,
     include_faces=False,
     include_visual=True,
+    include_flags=False,
     coverage=None,
     progress=None,
 ):
     engine = handlers.get_face_engine() if include_faces else None
     ocr_cache, face_cache, guard_cache = AsyncMemo(), AsyncMemo(128), AsyncMemo(512)
     visual_cache = AsyncMemo(64)
+    flags_cache = AsyncMemo()
+    flag_findings = []
     errors, completed = [], []
     path = Path(f"/tmp/window_review_{os.urandom(8).hex()}.mp4")
     concurrency = settings.review_window_concurrency
@@ -338,7 +341,34 @@ async def analyze_video(
             if progress is not None:
                 progress.finish_stage(window.index, "face")
 
-        await gather_stages(visual(), text(), faces())
+        async def flags():
+            if not include_flags:
+                return
+            try:
+                for frame in window.frames:
+                    if progress is not None:
+                        await progress.start_stage(window.index, "flags", [frame.timestamp])
+
+                    async def operation(frame=frame):
+                        encoded, key = await asyncio.to_thread(_prepare_ocr_frame, frame)
+                        return await flags_cache.get(key, lambda: handlers.flags.detect(encoded))
+
+                    detections = await handlers._review_stage(
+                        "flags", frame.timestamp, operation, errors, default=[]
+                    )
+                    flag_findings.extend(
+                        handlers.flags.findings(
+                            detections,
+                            handlers._format_timestamp(frame.timestamp),
+                            frame.timestamp,
+                            frame=frame,
+                        )
+                    )
+            finally:
+                if progress is not None:
+                    progress.finish_stage(window.index, "flags")
+
+        await gather_stages(visual(), text(), faces(), flags())
         completed.append(
             {
                 "index": window.index,
@@ -618,6 +648,7 @@ async def analyze_video(
         rows = merge_window_results(
             completed, min(settings.nsfw_window_max_seconds, max(sample_interval, 1.0) + 0.1)
         )
+        rows.extend(flag_findings)
         rows.extend(errors)
         rows.sort(key=lambda row: row["timestamp"].split("~", 1)[0])
         return rows
@@ -626,7 +657,11 @@ async def analyze_video(
             task.cancel()
         await asyncio.gather(*consumers, return_exceptions=True)
         await asyncio.gather(
-            ocr_cache.close(), face_cache.close(), guard_cache.close(), visual_cache.close()
+            ocr_cache.close(),
+            face_cache.close(),
+            guard_cache.close(),
+            visual_cache.close(),
+            flags_cache.close(),
         )
         path.unlink(missing_ok=True)
 

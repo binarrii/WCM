@@ -44,25 +44,43 @@ async def initialize():
     await store._run(_initialize_sync)
 
 
+def _recover_expired_sync(cursor):
+    # A locking UPDATE by status takes the secondary-index lock before the
+    # primary-key lock, opposite to result saving. Discover candidates without
+    # locks, then update each by primary key in a consistent order. A heartbeat,
+    # cancellation or completion may win the race, so recheck both predicates.
+    cursor.execute(
+        "SELECT id, status FROM review_tasks WHERE status IN ('processing', 'cancelling') "
+        "AND (lease_expires IS NULL OR lease_expires <= UTC_TIMESTAMP(3)) ORDER BY id"
+    )
+    for row in cursor.fetchall():
+        if row["status"] == "cancelling":
+            cursor.execute(
+                "UPDATE review_tasks SET status = 'cancelled', "
+                "progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'cancelled') "
+                "WHERE id = %s AND status = 'cancelling' "
+                "AND (lease_expires IS NULL OR lease_expires <= UTC_TIMESTAMP(3))",
+                (row["id"],),
+            )
+        else:
+            cursor.execute(
+                "UPDATE review_tasks SET status = IF(attempts < %s, 'queued', 'failed'), "
+                "error = '执行节点租约过期，任务已重新排队或达到重试上限', "
+                "progress = JSON_OBJECT('phase', IF(attempts < %s, 'queued', 'failed'), 'attempt', attempts), "
+                "lease_token = NULL, lease_expires = NULL "
+                "WHERE id = %s AND status = 'processing' "
+                "AND (lease_expires IS NULL OR lease_expires <= UTC_TIMESTAMP(3))",
+                (settings.review_max_attempts, settings.review_max_attempts, row["id"]),
+            )
+
+
 def _claim_sync(worker_id):
     with store._connect() as connection, connection.cursor() as cursor:
         connection.begin()
         # Serialize the capacity check, not the expensive work. A SELECT COUNT
         # without this row lock allows concurrent claimers to exceed the limit.
         cursor.execute("SELECT id FROM review_admission WHERE id = 1 FOR UPDATE")
-        cursor.execute(
-            "UPDATE review_tasks SET status = 'cancelled', "
-            "progress = JSON_SET(COALESCE(progress, JSON_OBJECT()), '$.phase', 'cancelled') "
-            "WHERE status = 'cancelling' AND (lease_expires IS NULL OR lease_expires <= UTC_TIMESTAMP(3))"
-        )
-        cursor.execute(
-            "UPDATE review_tasks SET status = IF(attempts < %s, 'queued', 'failed'), "
-            "error = '执行节点租约过期，任务已重新排队或达到重试上限', "
-            "progress = JSON_OBJECT('phase', IF(attempts < %s, 'queued', 'failed'), 'attempt', attempts), "
-            "lease_token = NULL, lease_expires = NULL "
-            "WHERE status = 'processing' AND (lease_expires IS NULL OR lease_expires <= UTC_TIMESTAMP(3))",
-            (settings.review_max_attempts, settings.review_max_attempts),
-        )
+        _recover_expired_sync(cursor)
         cursor.execute(
             "SELECT COUNT(*) AS total FROM review_tasks "
             "WHERE status IN ('processing', 'cancelling') AND lease_expires > UTC_TIMESTAMP(3)"
@@ -104,7 +122,7 @@ def _claim_sync(worker_id):
 
 
 async def claim(worker_id):
-    task = await store._run(_claim_sync, worker_id)
+    task = await store._run(_claim_sync, worker_id, retry_deadlocks=True)
     if task:
         await review_events.publish(
             {"type": "changed", "task_ids": [task["id"]], "reason": "claimed"}
@@ -125,7 +143,7 @@ def _renew_sync(task_id, token):
 
 
 async def renew(task_id, token):
-    return await store._run(_renew_sync, task_id, token)
+    return await store._run(_renew_sync, task_id, token, retry_deadlocks=True)
 
 
 async def wait_result(task_id):

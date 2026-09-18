@@ -122,3 +122,5 @@
 .review-warning span { flex: 1; }
 .review-warning button { flex-shrink: 0; padding: 6px 9px; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 7px; cursor: pointer; }
 @media (max-width: 560px) { .review-warning { flex-wrap: wrap; } }
+
+.pending-review { margin-left: 8px; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #9b5c00; background: #fff2cc; }

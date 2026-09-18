@@ -35,7 +35,7 @@ export const taskProgress = task => {
     if (finite(progress.completed_samples)) details.push(`采样 ${progress.completed_samples}${finite(progress.total_samples) ? ` / ${progress.total_samples}` : ''}`);
   }
   if (finite(progress.elapsed_seconds)) details.push(`用时 ${elapsedTime(progress.elapsed_seconds)}`);
-  const stageLabels = { visual: '视觉', ocr: '文字', face: '人脸' };
+  const stageLabels = { visual: '视觉', ocr: '文字', face: '人脸', flags: '对象检测（旗帜、徽标与裸露）' };
   const windows = (phase !== 'cancelled' && Array.isArray(progress.active_windows) ? progress.active_windows : []).map(window => ({
     title: `窗口 #${window.index} · ${sampleTime(window.start_seconds)}～${sampleTime(window.end_seconds)}`,
     samples: `采样点 ${window.sample_timestamps.map(sampleTime).join('、')}`,

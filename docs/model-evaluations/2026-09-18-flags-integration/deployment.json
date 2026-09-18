@@ -1,0 +1,103 @@
+{
+  "tag": "flags-20260918",
+  "services": [
+    {
+      "service": "api",
+      "id": "3d0d6f93dd9b",
+      "image": "wcm-cluster-api:flags-20260918",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "api",
+      "id": "c786c009ae67",
+      "image": "wcm-cluster-api:flags-20260918",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "face-sync",
+      "id": "c7f6218ff92f",
+      "image": "sha256:aed78885d1f4dd26dea92ede8060ca7c1339275d491d07c6c41642ce8e60d5bc",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "insightface-a",
+      "id": "57dc0cdb70e7",
+      "image": "wcm-insightface:primary-20260914",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "insightface-b",
+      "id": "810005593f91",
+      "image": "wcm-insightface:primary-20260914",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "mysql",
+      "id": "d3190faf7aad",
+      "image": "mysql:8.4",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "redis",
+      "id": "d3a7e24fede0",
+      "image": "redis:8-alpine",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "webui",
+      "id": "89e41b29fb0b",
+      "image": "wcm-cluster-webui:flags-20260918",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "worker",
+      "id": "2b837e2393f7",
+      "image": "wcm-cluster-api:flags-20260918",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "worker",
+      "id": "49c9aabaf884",
+      "image": "wcm-cluster-api:flags-20260918",
+      "state": "running",
+      "health": "healthy"
+    }
+  ],
+  "health": {
+    "status": "healthy",
+    "model": "buffalo_m",
+    "embedding_dim": 512,
+    "version": "0.1.0",
+    "dependencies": {
+      "insightface": "ready",
+      "review_tasks": "healthy"
+    }
+  },
+  "legacy_health": {
+    "status": "healthy",
+    "model": "buffalo_m",
+    "embedding_dim": 512,
+    "version": "0.1.0",
+    "dependencies": {
+      "insightface": "ready",
+      "review_tasks": "healthy"
+    }
+  },
+  "assets": {
+    "/assets/index-Cl-9ga5L.js": "de0f50b4fe4900038a335878a9761aeaecd6789c6ae5546774a27224d8ff0a6b",
+    "/assets/index-DSQnMhRI.css": "db522863196146c985842760bac0999f467620f9edb4edb6deba149d15eda17a"
+  },
+  "source_hashes_verified": true,
+  "unchanged_infrastructure_verified": true,
+  "backup": "/home/aigc/wcm-cluster/backups/flags-20260918",
+  "smoke_task_id": "11d908a1-d0a1-4def-82db-988ae8cc2a1e"
+}
