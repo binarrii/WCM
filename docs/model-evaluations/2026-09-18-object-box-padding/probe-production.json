@@ -1,0 +1,41 @@
+{
+  "size": [
+    1080,
+    607
+  ],
+  "cases": [
+    {
+      "crop": [
+        236,
+        373,
+        507,
+        607
+      ],
+      "detections": [
+        {
+          "object_type": "nudity",
+          "name": "女性乳头/乳晕裸露",
+          "object_target": "exposed_female_nipple",
+          "object_evidence": "画面中女性乳房部位裸露，乳头清晰可见",
+          "bbox": {
+            "x": 0.49,
+            "y": 0.52,
+            "w": 0.04,
+            "h": 0.04
+          }
+        }
+      ],
+      "seconds": 2.23
+    },
+    {
+      "crop": [
+        639,
+        373,
+        910,
+        607
+      ],
+      "detections": [],
+      "seconds": 0.93
+    }
+  ]
+}

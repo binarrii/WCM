@@ -1,12 +1,31 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { objectDisplayMarker } from '../services/objectOverlay.js';
 const props = defineProps({
   faces: { type: Array, default: () => [] },
   rect: Object,
+  videoSize: Object,
   selected: String,
   mode: String
 });
-defineEmits(['select']);
+const emit = defineEmits(['select']);
+const openCrosshair = ref('');
+const markers = computed(() => props.faces.map(face => objectDisplayMarker(face, props.rect, props.videoSize)));
+watch([markers, () => props.selected, () => props.mode], () => {
+  if (props.mode === 'hidden' || !markers.value.some(face => face.crosshair && face.key === openCrosshair.value
+    && face.candidates.some(candidate => candidate.markerId === props.selected))) openCrosshair.value = '';
+});
+const selectMarker = face => {
+  if (face.crosshair) {
+    openCrosshair.value = openCrosshair.value === face.key ? '' : face.key;
+    if (!openCrosshair.value) return;
+  } else openCrosshair.value = '';
+  emit('select', face.candidates[0].markerId);
+};
+const closeDetails = event => {
+  openCrosshair.value = '';
+  event.currentTarget.querySelector('.face-target')?.focus();
+};
 const labelStyle = face => {
   const { width, height } = props.rect;
   const box = face.box;
@@ -37,13 +56,19 @@ const boxStyle = box => ({
 
 <template>
   <div v-if="rect && mode !== 'hidden'" class="face-overlay" :style="layerStyle">
-    <div v-for="face in faces" :key="face.key" class="face-hit"
-      :class="{ selected: face.candidates.some(c => c.markerId === selected), full: mode === 'boxes', flag: face.objectType === 'flag', logo: face.objectType === 'logo', nudity: face.objectType === 'nudity' }"
-      :style="boxStyle(face.box)">
+    <div v-for="face in markers" :key="face.key" class="face-hit"
+      :class="{ selected: face.candidates.some(c => c.markerId === selected), full: mode === 'boxes', flag: face.objectType === 'flag', logo: face.objectType === 'logo', nudity: face.objectType === 'nudity', crosshair: face.crosshair, 'details-open': face.crosshair && openCrosshair === face.key }"
+      :style="boxStyle(face.box)" @keydown.esc.stop.prevent="closeDetails">
       <button class="face-target" type="button"
+        :style="face.crosshair ? { clipPath: face.targetClip } : null"
+        :aria-expanded="face.crosshair ? openCrosshair === face.key : undefined"
         :aria-label="`查看候选：${face.candidates.map(c => c.name).join('、')}`"
-        @click="$emit('select', face.candidates[0].markerId)">
-        <i v-for="corner in ['tl', 'tr', 'bl', 'br']" :key="corner" :class="corner" />
+        @click="selectMarker(face)">
+        <svg v-if="face.crosshair" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <circle cx="16" cy="16" r="13" />
+          <path d="M16 7v18M7 16h18" />
+        </svg>
+        <template v-else><i v-for="corner in ['tl', 'tr', 'bl', 'br']" :key="corner" :class="corner" /></template>
       </button>
       <div class="face-label" :style="labelStyle(face)">
         <button v-for="candidate in face.candidates" :key="candidate.markerId + candidate.name" type="button"
@@ -81,4 +106,9 @@ const boxStyle = box => ({
 .face-label button:hover, .face-label button:focus-visible { background: #514054; }
 .face-label span { overflow-wrap: anywhere; }
 .face-label small { flex-shrink: 0; font-size: 8px; color: #ffb5b8; }
+.face-hit.crosshair { --face-frame-color: #42ffb1; }
+.face-hit.crosshair .face-target { border: 0; border-radius: 50%; box-shadow: none; color: inherit; }
+.crosshair svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; filter: drop-shadow(0 0 2px #000b); }
+.face-hit.crosshair .face-label { display: none; }
+.face-hit.crosshair.details-open .face-label { display: grid; }
 </style>

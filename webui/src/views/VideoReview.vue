@@ -31,6 +31,7 @@ const selectedMarker = ref('');
 const paused = ref(true);
 const seeking = ref(false);
 const videoRect = ref(null);
+const videoSize = ref(null);
 const videoStageRef = ref(null);
 let videoResizeObserver;
 let frameObserver;
@@ -56,6 +57,8 @@ const jumpToSample = async time => {
 const updateVideoRect = () => {
   const video = videoRef.value;
   videoRect.value = video ? containedVideoRect(video.clientWidth, video.clientHeight, video.videoWidth, video.videoHeight) : null;
+  videoSize.value = video?.videoWidth > 0 && video?.videoHeight > 0
+    ? { width: video.videoWidth, height: video.videoHeight } : null;
 };
 const selectFace = id => { selectedMarker.value = id; revealEvent(id); };
 const toggleFullscreen = async () => {
@@ -498,9 +501,9 @@ onBeforeUnmount(() => {
             @loadedmetadata="handleMetadata" @timeupdate="handleTimeUpdate"
             @play="paused = false; selectedMarker = ''" @pause="paused = true; handleTimeUpdate()"
             @seeking="seeking = true; presentedTime = null" @seeked="seeking = false; handleTimeUpdate()"
-            @emptied="videoRect = null; durationMs = 0; paused = true; seeking = false; presentedTime = null"
+            @emptied="videoRect = null; videoSize = null; durationMs = 0; paused = true; seeking = false; presentedTime = null"
             @error="playbackError = playbackErrorMessage(videoRef?.error)" />
-          <FaceOverlay :faces="[...sampleFaces, ...sampleObjects]" :rect="videoRect" :selected="selectedMarker" :mode="overlayMode" @select="selectFace" />
+          <FaceOverlay :faces="[...sampleFaces, ...sampleObjects]" :rect="videoRect" :video-size="videoSize" :selected="selectedMarker" :mode="overlayMode" @select="selectFace" />
           <button class="overlay-fullscreen" type="button" @click="toggleFullscreen">切换全屏</button>
         </div>
         <div class="face-controls">

@@ -1,0 +1,35 @@
+{
+  "prompt": "Locate the visible nipple and areola regions in this image for a clinical content annotation. Return only a JSON array of objects with bbox_2d: [xmin, ymin, xmax, ymax], using 0-1000 coordinates normalized to this entire image. Include the full visible nipple and areola in each box. Return [] if none are visible.",
+  "cases": [
+    {
+      "crop": [
+        0,
+        0,
+        1080,
+        607
+      ],
+      "content": "[]",
+      "seconds": 0.65
+    },
+    {
+      "crop": [
+        209,
+        346,
+        534,
+        607
+      ],
+      "content": "[]",
+      "seconds": 0.82
+    },
+    {
+      "crop": [
+        612,
+        346,
+        937,
+        607
+      ],
+      "content": "[]",
+      "seconds": 0.75
+    }
+  ]
+}
