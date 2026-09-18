@@ -1,0 +1,105 @@
+{
+  "tag": "object-crosshair64-20260918",
+  "backup": "/home/aigc/wcm-cluster/backups/object-crosshair64-20260918",
+  "health": {
+    "8000": 200,
+    "8001": 200
+  },
+  "assets": {
+    "index-DADHvlZf.js": "8f96e1b6b263f1269bc01db6278ad1bb077f393d599efc4e58da27b0847e7cf1",
+    "index-B1XK09vz.css": "71d9411e5fdadea90d0f54f2fa1fe64dcd153477221c5c66d50e5933b4408e6e"
+  },
+  "services": [
+    {
+      "Service": "api",
+      "ID": "4aa6830e5ff5",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "api",
+      "ID": "5a9f9c7f7c0f",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "face-sync",
+      "ID": "c7f6218ff92f",
+      "Image": "sha256:aed78885d1f4dd26dea92ede8060ca7c1339275d491d07c6c41642ce8e60d5bc",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-a",
+      "ID": "57dc0cdb70e7",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-b",
+      "ID": "810005593f91",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "mysql",
+      "ID": "d3190faf7aad",
+      "Image": "mysql:8.4",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "redis",
+      "ID": "d3a7e24fede0",
+      "Image": "redis:8-alpine",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "webui",
+      "ID": "58f86a094f7f",
+      "Image": "wcm-cluster-webui:object-crosshair64-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "c58cd6c98902",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "051d92f268fd",
+      "Image": "wcm-cluster-api:object-scope-20260918",
+      "State": "running",
+      "Health": "healthy"
+    }
+  ],
+  "backend_and_infrastructure_containers_unchanged": true,
+  "backend_image_alias": "sha256:ef722acc9d6e55923f8cf4ad7d1acd0e575227fade5d87e7001a237ad80b087a",
+  "reported_task_unchanged": {
+    "id": "69cc978a-783c-4d30-a3c5-16dff34000ef",
+    "status": "completed",
+    "attempts": 1,
+    "updated_at": "2026-09-18 04:41:41.463000",
+    "result_digest": "b822f89196d755835fbab3625ae52a9474036e59d3f4751d4dbe1474cae1fc37"
+  },
+  "frontend_tests_passed": 128,
+  "runtime_source_sha256": {
+    "webui/src/services/objectOverlay.js": "17331a5cf941f77731cfb8a6afe6b86fcf482ee1176447dc59dcfd5d153c58f9",
+    "webui/src/views/VideoReview.vue": "6d2556d22e0952abbfa78b3c2ee30700cbd0caa1aa3fd428a8bfcaddb06ca2ef"
+  },
+  "browser_checks": [
+    "native_64px_included_65px_excluded",
+    "32css_px_marker",
+    "small_face_unchanged",
+    "click_toggle",
+    "no_console_errors"
+  ]
+}

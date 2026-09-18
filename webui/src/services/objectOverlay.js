@@ -25,7 +25,7 @@ export function objectDisplayMarker(object, rect, videoSize) {
   if (!['flag', 'logo', 'nudity'].includes(object.objectType)
     || !rect || !videoSize || !(rect.width > 0 && rect.height > 0)
     || !(videoSize.width > 0 && videoSize.height > 0)
-    || box.w * videoSize.width > 32 + 1e-9 || box.h * videoSize.height > 32 + 1e-9) return object;
+    || box.w * videoSize.width > 64 + 1e-9 || box.h * videoSize.height > 64 + 1e-9) return object;
   const markerBox = {
     x: box.x + box.w / 2 - 16 / rect.width,
     y: box.y + box.h / 2 - 16 / rect.height,

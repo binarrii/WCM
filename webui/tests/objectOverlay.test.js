@@ -77,10 +77,10 @@ const nativeObject = (width, height, type = 'nudity', x = .3, y = .4) => {
   return objectsAtTime(normalizeResults([finding]), 1.0003)[0];
 };
 
-test('32px threshold uses both native dimensions before the existing display expansion', () => {
+test('64px threshold uses both native dimensions before the existing display expansion', () => {
   for (const type of ['flag', 'logo', 'nudity']) {
-    const small = nativeObject(32, 32, type);
-    assert.ok(small.box.w * videoSize.width > 32); // Existing 1.25 padding must not change classification.
+    const small = nativeObject(64, 64, type);
+    assert.ok(small.box.w * videoSize.width > 64); // Existing 1.25 padding must not change classification.
     const marker = objectDisplayMarker(small, playerRect, videoSize);
     assert.equal(marker.crosshair, true);
     assert.equal(marker.box.w * playerRect.width, 32);
@@ -88,7 +88,10 @@ test('32px threshold uses both native dimensions before the existing display exp
     assert.equal(marker.key, small.key);
     assert.equal(marker.candidates, small.candidates);
   }
-  for (const [width, height] of [[32.001, 10], [10, 32.001], [100, 12], [42.24, 35.64]]) {
+  for (const [width, height] of [[32, 32], [42.24, 35.64], [63, 64]]) {
+    assert.equal(objectDisplayMarker(nativeObject(width, height), playerRect, videoSize).crosshair, true);
+  }
+  for (const [width, height] of [[64.001, 10], [10, 64.001], [100, 12]]) {
     const object = nativeObject(width, height);
     assert.equal(objectDisplayMarker(object, playerRect, videoSize), object);
   }

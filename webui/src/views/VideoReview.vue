@@ -121,7 +121,7 @@ const previousIndex = computed(() => {
 const nextIndex = computed(() => visibleMarkers.value.findIndex(marker => marker.time_ms / 1000 > currentSeconds.value + 0.05));
 
 const details = marker => marker.findings.map(finding =>
-  `${finding.category}${finding.timestamp !== marker.timestamp ? `（${finding.timestamp}）` : ''}${finding.review_status === 'needs_review' ? '（待复核）' : ''}：${finding.description}${finding.object_evidence ? `\n可见依据：${finding.object_evidence}` : ''}`
+  `${finding.category}${finding.timestamp !== marker.timestamp ? `（${finding.timestamp}）` : ''}：${finding.description}${finding.object_evidence ? `\n可见依据：${finding.object_evidence}` : ''}`
 ).join('\n');
 const markerActive = marker => markerIsActive(marker, currentSeconds.value);
 const markerStyle = index => {
