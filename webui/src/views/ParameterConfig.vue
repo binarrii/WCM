@@ -56,9 +56,11 @@ const concurrencyHint = computed(() => {
   if (key === 'visual_concurrency') {
     return '视觉描述与对象检测共用此集群并发额度；正数限制总并发，≤ 0 由模型服务端控制。';
   }
-  if (key === 'flags_enabled') return '控制综合审核中的对象检测，包括关注旗帜/徽标和明确裸露部位；命中仅作为待复核发现。';
+  if (key === 'flags_enabled') return '控制综合审核中的对象检测，包括关注旗帜/徽标、明确裸露部位和地图核查；命中仅作为待复核发现。';
   if (key === 'flags_positive_prompt') return '正向提示词：描述需要定位的旗帜、徽标和裸露部位，保留各类别的英文标识。';
   if (key === 'flags_negative_prompt') return '反向提示词：排除普通国家/组织标志、常见品牌、自然彩虹及无明确裸露的画面，减少误报。';
+  if (key === 'flags_map_positive_prompt') return '地图正向提示词：关注中国地图区域缺失、独立或外国归属表示，以及指定地名缺少中文旧称。保留英文类别标识和可见依据要求。';
+  if (key === 'flags_map_negative_prompt') return '地图反向提示词：排除无关外国地图、裁切/局部图、历史图、低清晰度及专题设色误判；指定俄罗斯地名为检查例外。';
   if (key === 'flags_organization_targets') return '额外关注组织的具体名称 JSON 数组，默认包含新唐人、新中国联邦。只匹配专用旗帜/徽标，空数组表示不检测额外组织。';
   if (key === 'face_neighbor_concurrency') {
     return '填写整数：1～8 限制每个视频同时处理的补帧数；≤ 0 不限制补帧并发，由模型服务端控制。';

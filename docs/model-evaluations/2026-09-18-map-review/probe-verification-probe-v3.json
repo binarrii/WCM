@@ -1,0 +1,128 @@
+[
+  {
+    "image": "china-complete.png",
+    "seconds": 4.11,
+    "choice": {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n[\n  {\n    \"index\": 0,\n    \"decision\": \"reject\",\n    \"evidence\": \"原图为完整中国全图，西部新疆区域陆地轮廓完整可见且未被裁切，仅因未绘制内部省界而误报。\",\n    \"map_text\": \"中国\"\n  }\n]\n```",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null,
+      "token_ids": null,
+      "routed_experts": null
+    }
+  },
+  {
+    "image": "china-without-taiwan.png",
+    "seconds": 3.96,
+    "choice": {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n[\n  {\n    \"index\": 0,\n    \"decision\": \"reject\",\n    \"evidence\": \"在大陆东南沿海外海可见一个清晰的、封闭的岛屿轮廓（台湾岛），且该岛屿填充了与大陆相同的颜色，表明其包含在地图范围内。\",\n    \"map_text\": \"中国\"\n  }\n]\n```",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null,
+      "token_ids": null,
+      "routed_experts": null
+    }
+  },
+  {
+    "image": "china-taiwan-foreign.png",
+    "seconds": 4.17,
+    "choice": {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n[\n  {\n    \"index\": 0,\n    \"decision\": \"confirm\",\n    \"evidence\": \"台湾岛被填充为蓝色，且右下角图例明确标注该颜色代表“国别：日本”，构成明确的外国归属证据。\",\n    \"map_text\": \"台湾\"\n  }\n]\n```",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null,
+      "token_ids": null,
+      "routed_experts": null
+    }
+  },
+  {
+    "image": "russian-names-missing.png",
+    "seconds": 6.55,
+    "choice": {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n[\n  {\n    \"index\": 0,\n    \"decision\": \"reject\",\n    \"evidence\": \"该图为《中俄边境地区图》局部，并非完整中国地图，且布拉戈维申斯克位于俄方一侧，标注仅为俄语转写，未标出中文旧称‘海兰泡’，但也不能说‘缺失’，因为本图并未承诺列出所有旧称。\",\n    \"map_text\": \"布拉戈维申斯克\"\n  },\n  {\n    \"index\": 1,\n    \"decision\": \"reject\",\n    \"evidence\": \"符拉迪沃斯托克标注清晰，位于俄方境内，图中未出现‘海参崴’字样，但同样，这是一张边境地区示意图，并非要求列出所有历史名称的中国全图，因此‘缺失’一说证据不足。\",\n    \"map_text\": \"符拉迪沃斯托克\"\n  }\n]\n```",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null,
+      "token_ids": null,
+      "routed_experts": null
+    }
+  },
+  {
+    "image": "russian-names-correct.png",
+    "seconds": 4.75,
+    "choice": {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n[\n  {\n    \"index\": 0,\n    \"decision\": \"reject\",\n    \"evidence\": \"图中该地点标注为“布拉戈维申斯克（海兰泡）”，括号内已包含中文旧称“海兰泡”。\",\n    \"map_text\": \"布拉戈维申斯克（海兰泡）\"\n  },\n  {\n    \"index\": 1,\n    \"decision\": \"reject\",\n    \"evidence\": \"图中该地点标注为“符拉迪沃斯托克（海参崴）”，括号内已包含中文旧称“海参崴”。\",\n    \"map_text\": \"符拉迪沃斯托克（海参崴）\"\n  }\n]\n```",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null,
+      "token_ids": null,
+      "routed_experts": null
+    }
+  },
+  {
+    "image": "china-crop.png",
+    "seconds": 3.34,
+    "choice": {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n[\n  {\n    \"index\": 0,\n    \"decision\": \"reject\",\n    \"evidence\": \"原图为完整中国地图，东南沿海海域可见台湾岛的封闭岛形轮廓，并非空白海面。\",\n    \"map_text\": \"中国\"\n  }\n]\n```",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null,
+      "token_ids": null,
+      "routed_experts": null
+    }
+  }
+]

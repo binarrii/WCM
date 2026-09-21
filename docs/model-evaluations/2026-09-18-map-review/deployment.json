@@ -1,0 +1,157 @@
+{
+  "tag": "map-review-20260918",
+  "backup": "/home/aigc/wcm-cluster/backups/map-review-20260918",
+  "health": {
+    "8000": 200,
+    "8001": 200
+  },
+  "assets": {
+    "index-Df0SXSbe.js": "f6e521cbc6b6b536e9a3e910ab097128e20eecc1ee8c3f9fee45fb3e13f46843",
+    "index-CHtbcfYo.css": "18568fad113adfac610faf7bc58e3fe80bded7260439dff7143d21502b7e9f8e"
+  },
+  "replicas": {
+    "api": 2,
+    "worker": 2,
+    "webui": 1
+  },
+  "services": [
+    {
+      "Service": "api",
+      "ID": "d762cac324f7",
+      "Image": "wcm-cluster-api:map-review-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "api",
+      "ID": "f6f11abdaf53",
+      "Image": "wcm-cluster-api:map-review-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "face-sync",
+      "ID": "c7f6218ff92f",
+      "Image": "sha256:aed78885d1f4dd26dea92ede8060ca7c1339275d491d07c6c41642ce8e60d5bc",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-a",
+      "ID": "57dc0cdb70e7",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-b",
+      "ID": "810005593f91",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "mysql",
+      "ID": "d3190faf7aad",
+      "Image": "mysql:8.4",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "redis",
+      "ID": "d3a7e24fede0",
+      "Image": "redis:8-alpine",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "webui",
+      "ID": "fa6fb047e7e2",
+      "Image": "wcm-cluster-webui:map-review-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "deb8779323f6",
+      "Image": "wcm-cluster-api:map-review-20260918",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "880596da3487",
+      "Image": "wcm-cluster-api:map-review-20260918",
+      "State": "running",
+      "Health": "healthy"
+    }
+  ],
+  "infrastructure_containers_unchanged": true,
+  "historical_tasks_unchanged": [
+    {
+      "id": "46fa3db0-6911-4fe5-b5e9-d89670ed835e",
+      "status": "completed",
+      "attempts": 2,
+      "updated_at": "2026-09-18 03:48:37.824000",
+      "result_digest": "f453134f6a53ed7a66978f8add87152ac3c2ade6a895bac8b8e5a6813d2e12ec"
+    },
+    {
+      "id": "69cc978a-783c-4d30-a3c5-16dff34000ef",
+      "status": "completed",
+      "attempts": 1,
+      "updated_at": "2026-09-18 04:41:41.463000",
+      "result_digest": "b822f89196d755835fbab3625ae52a9474036e59d3f4751d4dbe1474cae1fc37"
+    }
+  ],
+  "existing_object_parameters_unchanged": true,
+  "map_parameters": {
+    "api-1": {
+      "flags_map_positive_prompt": "497a13560d456d5a1378bc879568a908e87b836d2f257dd42c15df03f3f31cd0",
+      "flags_map_negative_prompt": "098e032fea9529a1a9cfe29265fe9740ba2219de97947725cfbb642fd752d781"
+    },
+    "api-2": {
+      "flags_map_positive_prompt": "497a13560d456d5a1378bc879568a908e87b836d2f257dd42c15df03f3f31cd0",
+      "flags_map_negative_prompt": "098e032fea9529a1a9cfe29265fe9740ba2219de97947725cfbb642fd752d781"
+    },
+    "worker-1": {
+      "flags_map_positive_prompt": "497a13560d456d5a1378bc879568a908e87b836d2f257dd42c15df03f3f31cd0",
+      "flags_map_negative_prompt": "098e032fea9529a1a9cfe29265fe9740ba2219de97947725cfbb642fd752d781"
+    },
+    "worker-2": {
+      "flags_map_positive_prompt": "497a13560d456d5a1378bc879568a908e87b836d2f257dd42c15df03f3f31cd0",
+      "flags_map_negative_prompt": "098e032fea9529a1a9cfe29265fe9740ba2219de97947725cfbb642fd752d781"
+    }
+  },
+  "runtime_source_sha256": {
+    "api/flags.py": "8cd8a6a0f914261e859ab378292f5b2f11a0361c9ee7b78185e72f534306f514",
+    "src/wcm_facerec/config.py": "b5b1a38749cbde1f16b97ea6297dd4c5330a358179847f695c2e98ca35ffd285",
+    "src/wcm_facerec/object_detection_policy.py": "c93e35bdc49ce94dc853e8bd478cfafeabcd5706fdf3d7f21871cbb003426c8f",
+    "webui/src/components/FaceOverlay.vue": "03aa3bbb9dd6c236eee6f693dd94e6388162711c85e1f03363f9d75219f73322",
+    "webui/src/services/objectOverlay.js": "ac3f58ed47196802abde1eebf51615aabe8b155921c2e45c6eb6fdf58e32355e",
+    "webui/src/services/reviewProgress.js": "20bf8677fba55f43ce9419eef3c9104b04ee8a9cb62a48894f3537e7096430b0",
+    "webui/src/services/videoTimeline.js": "cd023c1a32ce9f0823c91d92605f69757540544104ae7075531c021284addbb4",
+    "webui/src/views/ParameterConfig.vue": "f59149815f04ed0e0b90b80d8814ad770f1442abc9c824ec85887c6f38ce0230",
+    "webui/src/views/VideoReview.vue": "751b842c5bb0caf5d4d19415c2476460c5f6666e163b8fcd9d803deb04525943"
+  },
+  "tests": {
+    "backend_passed": 959,
+    "backend_skipped": 7,
+    "frontend_passed": 129
+  },
+  "live_fixtures": {
+    "passed": 5,
+    "total": 8,
+    "known_false_positives": [
+      "complete_outline",
+      "existing_chinese_name",
+      "cropped_map"
+    ]
+  },
+  "browser_checks": [
+    "map_blue_corners",
+    "small_map_crosshair",
+    "popup_toggle",
+    "face_unchanged",
+    "no_console_errors"
+  ]
+}

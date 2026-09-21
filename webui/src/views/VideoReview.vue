@@ -121,7 +121,7 @@ const previousIndex = computed(() => {
 const nextIndex = computed(() => visibleMarkers.value.findIndex(marker => marker.time_ms / 1000 > currentSeconds.value + 0.05));
 
 const details = marker => marker.findings.map(finding =>
-  `${finding.category}${finding.timestamp !== marker.timestamp ? `（${finding.timestamp}）` : ''}：${finding.description}${finding.object_evidence ? `\n可见依据：${finding.object_evidence}` : ''}`
+  `${finding.category}${finding.timestamp !== marker.timestamp ? `（${finding.timestamp}）` : ''}：${finding.description}${finding.object_evidence ? `\n可见依据：${finding.object_evidence}` : ''}${finding.map_text ? `\n图面标注：${finding.map_text}` : ''}`
 ).join('\n');
 const markerActive = marker => markerIsActive(marker, currentSeconds.value);
 const markerStyle = index => {
@@ -446,7 +446,7 @@ onBeforeUnmount(() => {
     <p v-if="incompleteCount" class="review-warning" role="status"><AlertCircle /><span>有 {{ incompleteCount }} 项审核未完成，已保留其他审核结果。请筛选“审核未完成”并逐一人工复核，不能视为安全通过。</span><button type="button" @click="category = '审核未完成'">查看未审核项</button></p>
     <section :class="['review-setup-card', { collapsed: !setupExpanded }]">
       <div class="setup-heading">
-        <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸、文字、画面内容、关注旗帜/徽标及明确裸露部位。</p></div>
+        <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸、文字、画面内容、关注旗帜/徽标、明确裸露部位及地图核查线索。</p></div>
         <div class="setup-heading-actions">
           <span class="review-safety-note">标记仅用于人工复核，不代表违规结论</span>
           <CancelReviewButton :task="currentTask" @updated="updateCancelledTask" @error="error = $event" @settled="refreshCurrentTask" />
@@ -516,7 +516,7 @@ onBeforeUnmount(() => {
           <span v-else-if="!hasLocations">此结果暂无目标位置，重新分析后可显示。</span>
           <span v-else-if="overlayMode === 'hidden'">已隐藏位置标记</span>
           <span v-else-if="!paused">暂停到命中采样帧可查看位置标记</span>
-          <span v-else-if="sampleFaces.length || sampleObjects.length">当前 {{ sampleFaces.length }} 个人脸、{{ sampleObjects.length }} 个对象（旗帜/徽标/裸露部位） · 悬浮查看，点击联动记录</span>
+          <span v-else-if="sampleFaces.length || sampleObjects.length">当前 {{ sampleFaces.length }} 个人脸、{{ sampleObjects.length }} 个对象（旗帜/徽标/裸露部位/地图） · 悬浮查看，点击联动记录</span>
           <span v-else>当前帧无位置标记，点击右侧记录定位采样帧</span>
         </div>
         <div class="review-toolbar">

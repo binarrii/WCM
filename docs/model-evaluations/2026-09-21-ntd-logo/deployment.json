@@ -1,0 +1,119 @@
+{
+  "tag": "ntd-logo-strict-20260921-v3",
+  "backup": "/home/aigc/wcm-cluster/backups/ntd-logo-strict-20260921/verified-release",
+  "health": {
+    "8000": 200,
+    "8001": 200
+  },
+  "assets": {
+    "/assets/index-Df0SXSbe.js": "f6e521cbc6b6b536e9a3e910ab097128e20eecc1ee8c3f9fee45fb3e13f46843",
+    "/assets/index-CHtbcfYo.css": "18568fad113adfac610faf7bc58e3fe80bded7260439dff7143d21502b7e9f8e"
+  },
+  "replicas": {
+    "api": 2,
+    "worker": 2,
+    "webui": 1
+  },
+  "services": [
+    {
+      "Service": "api",
+      "ID": "2c1a2cb528de",
+      "Image": "wcm-cluster-api:ntd-logo-strict-20260921-v3",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "api",
+      "ID": "ce12c9956e55",
+      "Image": "wcm-cluster-api:ntd-logo-strict-20260921-v3",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "face-sync",
+      "ID": "c7f6218ff92f",
+      "Image": "sha256:aed78885d1f4dd26dea92ede8060ca7c1339275d491d07c6c41642ce8e60d5bc",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-a",
+      "ID": "57dc0cdb70e7",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "insightface-b",
+      "ID": "810005593f91",
+      "Image": "wcm-insightface:primary-20260914",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "mysql",
+      "ID": "d3190faf7aad",
+      "Image": "mysql:8.4",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "redis",
+      "ID": "d3a7e24fede0",
+      "Image": "redis:8-alpine",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "webui",
+      "ID": "1142066c7d53",
+      "Image": "wcm-cluster-webui:ntd-logo-strict-20260921-v3",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "8ef36d2557a7",
+      "Image": "wcm-cluster-api:ntd-logo-strict-20260921-v3",
+      "State": "running",
+      "Health": "healthy"
+    },
+    {
+      "Service": "worker",
+      "ID": "ee35130502e1",
+      "Image": "wcm-cluster-api:ntd-logo-strict-20260921-v3",
+      "State": "running",
+      "Health": "healthy"
+    }
+  ],
+  "runtime_source_sha256": {
+    "api-1": {
+      "api/flags.py": "c76e75c910b5490025531b6529e78f92c66f71caaa937ba244f76fe393a0a0e7",
+      "src/wcm_facerec/object_detection_policy.py": "e8fc5ff210acdd30402918503f0a450943b8b05324ff1847f917240e6c88a325"
+    },
+    "api-2": {
+      "api/flags.py": "c76e75c910b5490025531b6529e78f92c66f71caaa937ba244f76fe393a0a0e7",
+      "src/wcm_facerec/object_detection_policy.py": "e8fc5ff210acdd30402918503f0a450943b8b05324ff1847f917240e6c88a325"
+    },
+    "worker-1": {
+      "api/flags.py": "c76e75c910b5490025531b6529e78f92c66f71caaa937ba244f76fe393a0a0e7",
+      "src/wcm_facerec/object_detection_policy.py": "e8fc5ff210acdd30402918503f0a450943b8b05324ff1847f917240e6c88a325"
+    },
+    "worker-2": {
+      "api/flags.py": "c76e75c910b5490025531b6529e78f92c66f71caaa937ba244f76fe393a0a0e7",
+      "src/wcm_facerec/object_detection_policy.py": "e8fc5ff210acdd30402918503f0a450943b8b05324ff1847f917240e6c88a325"
+    }
+  },
+  "historical_tasks_unchanged": 42,
+  "existing_object_parameters_unchanged": true,
+  "infrastructure_containers_unchanged": true,
+  "tests": {
+    "backend_passed": 974,
+    "backend_skipped": 7,
+    "frontend_passed": 129,
+    "live_negative_frames": 20,
+    "live_negative_false_positives": 0,
+    "live_positive_passed": 2,
+    "live_positive_unique_images": 1
+  }
+}

@@ -78,7 +78,7 @@ const nativeObject = (width, height, type = 'nudity', x = .3, y = .4) => {
 };
 
 test('64px threshold uses both native dimensions before the existing display expansion', () => {
-  for (const type of ['flag', 'logo', 'nudity']) {
+  for (const type of ['flag', 'logo', 'nudity', 'map']) {
     const small = nativeObject(64, 64, type);
     assert.ok(small.box.w * videoSize.width > 64); // Existing 1.25 padding must not change classification.
     const marker = objectDisplayMarker(small, playerRect, videoSize);
@@ -137,6 +137,26 @@ test('pending flags are a successful review stage and progress uses a readable l
     { index: 1, start_seconds: 0, end_seconds: 1, sample_timestamps: [1], stages: { flags: [1] } }
   ] } });
   assert.match(progress.windows[0].stages, /对象检测.*裸露/);
+  assert.match(progress.windows[0].stages, /地图/);
+});
+
+test('map review evidence survives grouping, filtering, JSON round trip and frame seeking', () => {
+  const map = { ...row(.3, 'map'), category: '地图核查', name: '符拉迪沃斯托克：缺少中文旧称“海参崴”',
+    object_target: 'map_missing_chinese_name', object_evidence: '地图中城市名仅标注现名',
+    map_region: '符拉迪沃斯托克', map_text: '符拉迪沃斯托克', map_reference_name: '海参崴' };
+  const markers = normalizeResults([row(.1), map, { ...map, map_text: 'Vladivostok' }]);
+  const restored = normalizeResults(JSON.parse(JSON.stringify(serializeResults(markers))));
+  const filtered = filterMarkers(restored, '地图核查');
+  assert.equal(filtered[0].findings.length, 2);
+  assert.equal(filtered[0].findings[0].map_region, map.map_region);
+  assert.equal(filtered[0].findings[0].map_reference_name, map.map_reference_name);
+  assert.deepEqual(filtered[0].findings.map(f => f.map_text), ['符拉迪沃斯托克', 'Vladivostok']);
+  const objects = objectsAtTime(filtered, 1.0003);
+  assert.equal(objects[0].objectType, 'map');
+  assert.equal(objects[0].candidates[0].needsReview, true);
+  assert.deepEqual(detectionSampleTimes(filtered), [1000]);
+  assert.equal(detectionSampleSeekTime(filtered, 1000), 1.0203);
+  assert.deepEqual(objectsAtTime(filtered, 1.04), []);
 });
 
 test('nudity has its own filter and preserves scope and evidence through JSON and frame seeking', () => {

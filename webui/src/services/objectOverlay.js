@@ -22,7 +22,7 @@ export const objectsAtTime = (markers, seconds, category = '') =>
 // Classify in native video pixels before padding, independently of player zoom.
 export function objectDisplayMarker(object, rect, videoSize) {
   const box = object.originalBox ?? object.box;
-  if (!['flag', 'logo', 'nudity'].includes(object.objectType)
+  if (!['flag', 'logo', 'nudity', 'map'].includes(object.objectType)
     || !rect || !videoSize || !(rect.width > 0 && rect.height > 0)
     || !(videoSize.width > 0 && videoSize.height > 0)
     || box.w * videoSize.width > 64 + 1e-9 || box.h * videoSize.height > 64 + 1e-9) return object;

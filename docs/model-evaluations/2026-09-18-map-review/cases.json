@@ -1,0 +1,40 @@
+[
+  {
+    "image": "china-complete.png",
+    "expected": {}
+  },
+  {
+    "image": "china-without-taiwan.png",
+    "expected": {
+      "china_map_missing_region": 1
+    }
+  },
+  {
+    "image": "china-taiwan-foreign.png",
+    "expected": {
+      "china_map_foreign_region": 1
+    }
+  },
+  {
+    "image": "russian-names-missing.png",
+    "expected": {
+      "map_missing_chinese_name": 2
+    }
+  },
+  {
+    "image": "russian-names-correct.png",
+    "expected": {}
+  },
+  {
+    "image": "china-crop.png",
+    "expected": {}
+  },
+  {
+    "image": "foreign-france.png",
+    "expected": {}
+  },
+  {
+    "image": "text-no-map.png",
+    "expected": {}
+  }
+]

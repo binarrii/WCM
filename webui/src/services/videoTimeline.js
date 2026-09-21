@@ -85,6 +85,7 @@ export function normalizeResults(payload) {
       && value.category === finding.category && value.description === finding.description
       && value.object_type === finding.object_type && value.name === finding.name
       && value.object_target === finding.object_target && value.object_evidence === finding.object_evidence && value.organization === finding.organization
+      && value.map_region === finding.map_region && value.map_text === finding.map_text && value.map_reference_name === finding.map_reference_name
       && value.source === finding.source && value.component === finding.component && value.error_code === finding.error_code
       && JSON.stringify(value.evidence) === JSON.stringify(finding.evidence) && value.review_status === finding.review_status && value.stage === finding.stage);
     if (!existing) outer.findings.push(finding);

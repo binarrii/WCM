@@ -7,7 +7,13 @@ from pydantic import Field, StringConstraints
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from . import runtime_parameters
-from .object_detection_policy import NEGATIVE_PROMPT, ORGANIZATION_HINTS, POSITIVE_PROMPT
+from .object_detection_policy import (
+    MAP_NEGATIVE_PROMPT,
+    MAP_POSITIVE_PROMPT,
+    NEGATIVE_PROMPT,
+    ORGANIZATION_HINTS,
+    POSITIVE_PROMPT,
+)
 
 # InsightFace Server is a single-model service (currently buffalo_m v0.7,
 # 512-dim ArcFace R50). The legacy per-model dim lookup is kept only as a
@@ -135,6 +141,12 @@ class Settings(BaseSettings):
     flags_max_tokens: int = Field(default=2048, ge=256, le=16384)
     flags_positive_prompt: str = Field(default=POSITIVE_PROMPT, min_length=1, max_length=16000)
     flags_negative_prompt: str = Field(default=NEGATIVE_PROMPT, min_length=1, max_length=16000)
+    flags_map_positive_prompt: str = Field(
+        default=MAP_POSITIVE_PROMPT, min_length=1, max_length=16000
+    )
+    flags_map_negative_prompt: str = Field(
+        default=MAP_NEGATIVE_PROMPT, min_length=1, max_length=16000
+    )
     flags_organization_targets: list[
         Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
     ] = Field(default_factory=lambda: list(ORGANIZATION_HINTS), max_length=100)
@@ -260,6 +272,8 @@ BUSINESS_PARAMETER_SPECS = {
     "flags_max_tokens": BusinessParameterSpec("number", "旗帜与徽标"),
     "flags_positive_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
     "flags_negative_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
+    "flags_map_positive_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
+    "flags_map_negative_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
     "flags_organization_targets": BusinessParameterSpec("json", "旗帜与徽标"),
     # Model gateway and behavior.
     "model_api_url": BusinessParameterSpec("string", "模型服务"),

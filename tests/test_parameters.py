@@ -18,6 +18,8 @@ EXPECTED_BUSINESS_PARAMETERS = {
     "flags_max_tokens",
     "flags_positive_prompt",
     "flags_negative_prompt",
+    "flags_map_positive_prompt",
+    "flags_map_negative_prompt",
     "flags_organization_targets",
     "insightface_base_url",
     "insightface_model_name",

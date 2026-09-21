@@ -57,7 +57,7 @@ const boxStyle = box => ({
 <template>
   <div v-if="rect && mode !== 'hidden'" class="face-overlay" :style="layerStyle">
     <div v-for="face in markers" :key="face.key" class="face-hit"
-      :class="{ selected: face.candidates.some(c => c.markerId === selected), full: mode === 'boxes', flag: face.objectType === 'flag', logo: face.objectType === 'logo', nudity: face.objectType === 'nudity', crosshair: face.crosshair, 'details-open': face.crosshair && openCrosshair === face.key }"
+      :class="{ selected: face.candidates.some(c => c.markerId === selected), full: mode === 'boxes', flag: face.objectType === 'flag', logo: face.objectType === 'logo', nudity: face.objectType === 'nudity', map: face.objectType === 'map', crosshair: face.crosshair, 'details-open': face.crosshair && openCrosshair === face.key }"
       :style="boxStyle(face.box)" @keydown.esc.stop.prevent="closeDetails">
       <button class="face-target" type="button"
         :style="face.crosshair ? { clipPath: face.targetClip } : null"
@@ -87,6 +87,7 @@ const boxStyle = box => ({
 .face-hit.flag { --face-frame-color: #ffb020; }
 .face-hit.logo { --face-frame-color: #24d7e8; }
 .face-hit.nudity { --face-frame-color: #ed7aff; }
+.face-hit.map { --face-frame-color: #6ca8ff; }
 .face-hit { position: absolute; color: var(--face-frame-color); pointer-events: none; }
 .face-target { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 1px solid transparent; background: transparent; pointer-events: auto; cursor: pointer; border-radius: 3px; }
 .face-target i { position: absolute; width: 13px; height: 13px; border: solid currentColor; border-width: 0; color: var(--face-frame-color); filter: drop-shadow(0 1px 1px #000b) drop-shadow(0 0 3px currentColor); }

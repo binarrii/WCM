@@ -27,6 +27,7 @@ LOGO = {
     "organization": "新唐人",
     "label": "新唐人台标",
     "evidence": "金色圆形唐字图案",
+    "ntd_identity": {"kind": "tang_emblem", "text": "唐"},
     "bbox_2d": [850, 20, 950, 180],
 }
 NUDITY = {
@@ -35,6 +36,14 @@ NUDITY = {
     "label": "裸露乳头",
     "evidence": "乳房区域乳头及乳晕实际可见，未被遮挡",
     "bbox_2d": [100, 200, 160, 260],
+}
+MAP = {
+    "category": "map",
+    "target": "china_map_missing_region",
+    "label": "中国地图疑似缺少台湾",
+    "map_region": "台湾",
+    "evidence": "标题为中国全图，东南海岸以东的图幅完整可见但未绘台湾轮廓",
+    "bbox_2d": [100, 100, 900, 900],
 }
 
 
@@ -84,6 +93,49 @@ def test_invalid_or_partially_invalid_results_are_never_safe(content):
     assert error.value.component == "flags"
 
 
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"kind": "wordmark", "text": "NTD"},
+        {"kind": "wordmark", "text": " ntdtv "},
+        {"kind": "tang_emblem", "text": "唐"},
+    ],
+)
+def test_ntd_identity_accepts_only_its_readable_marks(identity):
+    result = flags.parse_detections(json.dumps([{**LOGO, "ntd_identity": identity}]))
+    assert len(result) == 1 and result[0]["organization"] == "新唐人"
+
+
+def test_rejected_ntd_identity_does_not_discard_other_findings():
+    rejected = {
+        **LOGO,
+        "evidence": "四颗白色星形围合，未见NTD字标或篆体唐字，符合排除特征",
+        "ntd_identity": {"kind": "none", "text": ""},
+    }
+    result = flags.parse_detections(json.dumps([FLAG, rejected, NUDITY, MAP]))
+    assert [r["object_type"] for r in result] == ["flag", "nudity", "map"]
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        None,
+        {},
+        {"kind": "unknown", "text": ""},
+        {"kind": "wordmark", "text": None},
+        {"kind": "wordmark", "text": "旅游卫视"},
+        {"kind": "wordmark", "text": "未见NTD"},
+        {"kind": "wordmark", "text": "唐"},
+        {"kind": "tang_emblem", "text": "NTD"},
+        {"kind": "tang_emblem", "text": ""},
+    ],
+)
+def test_invalid_ntd_identity_is_not_silently_treated_as_safe(identity):
+    with pytest.raises(ModelResponseError) as error:
+        flags.parse_detections(json.dumps([{**LOGO, "ntd_identity": identity}]))
+    assert error.value.code == "invalid_identity"
+
+
 def install_detector(monkeypatch, *, content=None, finish="stop"):
     calls, slots = [], []
 
@@ -123,6 +175,45 @@ async def test_request_uses_visual_quota_and_one_image_and_configured_model(monk
     assert calls[0]["model"] == "WasuAI/Qwen3.8-27B-Abliterated"
     assert calls[0]["max_tokens"] == 2048
     assert [part["type"] for part in calls[0]["messages"][0]["content"]] == ["text", "image_url"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("organizations", [["新唐人", "新中国联邦"], []])
+async def test_organization_rules_reach_request_with_existing_stored_prompts(
+    monkeypatch, organizations
+):
+    from wcm_facerec import runtime_parameters
+
+    # Existing deployments freeze DB prompts; changing defaults alone would leave
+    # the overly broad small-star instruction active in actual model requests.
+    legacy_negative = "不要仅因目标小或星点细节不清就排除"
+    configured = {
+        "flags_positive_prompt": "已有自定义关注范围",
+        "flags_negative_prompt": legacy_negative,
+        "flags_organization_targets": organizations,
+    }
+    calls, slots = install_detector(monkeypatch, content="[]")
+    with runtime_parameters.frozen(configured):
+        assert await flags.detect("original-unannotated-frame") == []
+        assert settings.flags_negative_prompt == legacy_negative
+        assert settings.flags_organization_targets == organizations
+
+    assert len(calls) == 1 and slots == ["visual"]
+    content = calls[0]["messages"][0]["content"]
+    assert content[1]["image_url"]["url"].endswith("original-unannotated-frame")
+    prompt = content[0]["text"]
+    assert "已有自定义关注范围" in prompt and legacy_negative in prompt
+    if organizations:
+        assert prompt.index("组织标识严格匹配") > prompt.index(legacy_negative)
+        assert "反例：角落的白色星形" in prompt
+        assert "这项容错不得用于其他组织" in prompt
+        assert "专用 NTD/NTDTV 字标的字母" in prompt
+        assert "无法满足专属特征时省略该候选" in prompt
+    else:
+        assert "额外组织名单为空，禁止输出 listed_organization" in prompt
+        assert '"name": "新唐人"' not in prompt
+    assert "china_map_missing_region" in prompt
+    assert "bbox_2d" in prompt and "0–1000" in prompt
 
 
 @pytest.mark.asyncio
@@ -206,7 +297,7 @@ async def test_window_path_keeps_exact_frames_instances_and_cache_timestamps(mon
     quiet_siblings(monkeypatch)
     detections = flags.parse_detections("[]")
     multiple = flags.parse_detections(
-        json.dumps([FLAG, {**FLAG, "bbox_2d": [100, 100, 150, 160]}, LOGO])
+        json.dumps([FLAG, {**FLAG, "bbox_2d": [100, 100, 150, 160]}, LOGO, MAP])
     )
     detector = AsyncMock(
         side_effect=[multiple, detections, ModelResponseError("flags", "invalid_json", "无法解析")]
@@ -219,7 +310,8 @@ async def test_window_path_keeps_exact_frames_instances_and_cache_timestamps(mon
     )
     assert detector.await_count == 3  # Exact repeated images reuse successful detections.
     found = [row for row in rows if row.get("source") == "flags"]
-    assert len(found) == 9
+    assert len(found) == 12
+    assert len([row for row in found if row.get("map_region") == "台湾"]) == 3
     assert {row["timestamp"] for row in found} == {"00:00:00.000", "00:00:01.000", "00:00:03.000"}
     assert all(
         "~" not in row["timestamp"] and row["review_status"] == "needs_review" for row in found
@@ -231,7 +323,7 @@ async def test_window_path_keeps_exact_frames_instances_and_cache_timestamps(mon
     assert not progress.active_windows
     # Persistence consolidation cannot discard same-name instances or metadata.
     leaves = flatten_findings(consolidate_results(rows))
-    assert sum(len(row.get("object_samples", [])) for row in leaves) == 9
+    assert sum(len(row.get("object_samples", [])) for row in leaves) == 12
 
 
 @pytest.mark.asyncio
@@ -369,15 +461,117 @@ async def test_positive_negative_prompts_and_organization_names_are_frozen_and_u
 
 
 @pytest.mark.asyncio
-async def test_mixed_symbol_and_nudity_findings_survive_full_image_review(
+async def test_mixed_symbol_nudity_and_map_findings_survive_full_image_review(
     monkeypatch, sample_image_bytes
 ):
     quiet_siblings(monkeypatch)
     monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=sample_image_bytes))
-    install_detector(monkeypatch, content=json.dumps([FLAG, LOGO, NUDITY]))
+    install_detector(monkeypatch, content=json.dumps([FLAG, LOGO, NUDITY, MAP]))
     rows = await handlers._process_analyze_media("https://fixture/img.jpg", 1, 5, 0.5)
     leaves = list(flatten_findings(consolidate_results(rows)))
-    assert len(leaves) == 3
-    assert {row["object_type"] for row in leaves} == {"flag", "logo", "nudity"}
-    assert {row["category"] for row in leaves} == {"旗帜与徽标", "裸露部位"}
+    assert len(leaves) == 4
+    assert {row["object_type"] for row in leaves} == {"flag", "logo", "nudity", "map"}
+    assert {row["category"] for row in leaves} == {"旗帜与徽标", "裸露部位", "地图核查"}
     assert all(row["object_target"] and row["object_evidence"] for row in leaves)
+
+
+@pytest.mark.parametrize("region", ["台湾", "香港", "澳门", "西藏", "新疆", "藏南", "阿克赛钦"])
+@pytest.mark.parametrize(
+    "target", ["china_map_missing_region", "china_map_separate_region", "china_map_foreign_region"]
+)
+def test_map_regions_become_review_candidates_with_exact_point_evidence(region, target):
+    detections = flags.parse_detections(
+        json.dumps([{**MAP, "map_region": region, "target": target}])
+    )
+    frame = sample(1, 0)[0]
+    frame.timestamp, frame.duration, frame.frame_index = 1.0003, 0.04, 25
+    rows = flags.findings(detections, "00:00:01.000", frame.timestamp, frame=frame)
+    restored = list(flatten_findings(consolidate_results(rows)))
+    assert restored[0]["category"] == "地图核查"
+    assert restored[0]["map_region"] == region
+    assert restored[0]["object_target"] == target
+    assert region in restored[0]["description"]
+    assert restored[0]["object_samples"][0] == {
+        "time_ms": 1000,
+        "pts_seconds": 1.0003,
+        "duration_seconds": 0.04,
+        "frame_index": 25,
+        "bbox": {"x": 0.1, "y": 0.1, "w": 0.8, "h": 0.8},
+    }
+    coverage = ReviewCoverage()
+    coverage.add([1])
+    assert coverage.summarize(rows)["incomplete_checks"] == 0
+
+
+@pytest.mark.parametrize(
+    "region,old_name",
+    [
+        ("符拉迪沃斯托克", "海参崴"),
+        ("布拉戈维申斯克", "海兰泡"),
+        ("乌苏里斯克", "双城子"),
+        ("哈巴罗夫斯克", "伯力"),
+        ("萨哈林岛", "库页岛"),
+        ("涅尔琴斯克", "尼布楚"),
+        ("尼古拉耶夫斯克", "庙街"),
+        ("斯塔诺夫山脉", "外兴安岭"),
+    ],
+)
+def test_map_name_pairs_are_canonical_and_already_present_names_are_excluded(region, old_name):
+    item = {**MAP, "target": "map_missing_chinese_name", "map_region": region, "map_text": region}
+    parsed = flags.parse_detections(json.dumps([item]))
+    rows = flags.findings(parsed, "00:00:00.000", 0)
+    assert rows[0]["map_reference_name"] == old_name
+    assert rows[0]["map_text"] == region
+    assert old_name in rows[0]["description"]
+    assert (
+        flags.parse_detections(json.dumps([{**item, "map_text": f"{region}（{old_name}）"}])) == []
+    )
+
+
+def test_map_traditional_name_with_spacing_is_not_missing():
+    item = {
+        **MAP,
+        "target": "map_missing_chinese_name",
+        "map_region": "符拉迪沃斯托克",
+        "map_text": "符拉迪沃斯托克\n（海 參 崴）",
+    }
+    assert flags.parse_detections(json.dumps([item])) == []
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"map_region": "日本"},
+        {"map_region": ["台湾"]},
+        {"map_region": None},
+        {"category": "flag"},
+        {"target": "tibet_related"},
+        {"map_text": 123},
+        {"target": "map_missing_chinese_name", "map_region": "台湾", "map_text": "台湾"},
+        {"target": "map_missing_chinese_name", "map_region": "莫斯科", "map_text": "莫斯科"},
+        {"target": "map_missing_chinese_name", "map_region": "符拉迪沃斯托克"},
+    ],
+)
+def test_invalid_map_scope_or_evidence_is_a_stage_error(overrides):
+    with pytest.raises(ModelResponseError):
+        flags.parse_detections(json.dumps([{**MAP, **overrides}]))
+
+
+def test_map_prompt_additions_do_not_require_replacing_existing_prompt_parameters():
+    from wcm_facerec import runtime_parameters
+
+    with runtime_parameters.frozen(
+        {"flags_positive_prompt": "原正向", "flags_negative_prompt": "原反向"}
+    ):
+        prompt = flags.build_prompt()
+        assert "原正向" in prompt and "原反向" in prompt
+        assert "china_map_missing_region" in prompt and "map_missing_chinese_name" in prompt
+        assert "图外区域不做缺失推断" in prompt and "海兰泡" in prompt
+    with runtime_parameters.frozen(
+        {
+            "flags_map_positive_prompt": "自定义地图正向",
+            "flags_map_negative_prompt": "自定义地图反向",
+        }
+    ):
+        prompt = flags.build_prompt()
+        assert "自定义地图正向" in prompt and "自定义地图反向" in prompt
