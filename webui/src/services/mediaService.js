@@ -4,9 +4,12 @@ import { submitQueuedReview } from './reviewQueue';
 import { reviewTaskService } from './reviewTaskService';
 
 export const mediaService = {
-  async analyzeVideo({ url, sampleInterval = 1, topK = 10, minSimilarity = 0.5, onTaskAccepted, onTaskEvent, signal }) {
+  async analyzeVideo({
+    url, sampleInterval = 1, topK = 10, minSimilarity = 0.5, flagsEnabled = false,
+    onTaskAccepted, onTaskEvent, signal
+  }) {
     const payload = buildAnalyzePayload({
-      url, sampleInterval, topK, minSimilarity
+      url, sampleInterval, topK, minSimilarity, flagsEnabled
     });
     if (onTaskAccepted) return submitQueuedReview({
       payload, onTaskAccepted, onTaskEvent, signal,

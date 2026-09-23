@@ -1035,8 +1035,16 @@ def _merge_person_timelines(
 
 @protect_video_review
 async def _process_analyze_media(
-    url: str, sample_interval: float, top_k: int, threshold: float, *, coverage=None, progress=None
+    url: str,
+    sample_interval: float,
+    top_k: int,
+    threshold: float,
+    *,
+    include_flags: bool = False,
+    coverage=None,
+    progress=None,
 ) -> list:
+    flags_enabled = include_flags and settings.flags_enabled
     is_video = await is_video_url(url)
     if is_video and settings.nsfw_review_mode == "window":
         return await review_windows.analyze_video(
@@ -1045,7 +1053,7 @@ async def _process_analyze_media(
             top_k,
             threshold,
             include_faces=True,
-            include_flags=settings.flags_enabled,
+            include_flags=flags_enabled,
             coverage=coverage,
             progress=progress,
         )
@@ -1095,7 +1103,7 @@ async def _process_analyze_media(
                         progress.finish_stage(index, "ocr")
 
         async def flags_task():
-            if not settings.flags_enabled or not sampled:
+            if not flags_enabled or not sampled:
                 return []
             if progress is not None:
                 await progress.start_stage(index, "flags", [current_frame_time])

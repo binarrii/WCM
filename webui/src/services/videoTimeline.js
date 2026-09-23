@@ -162,15 +162,19 @@ export function validateVideoUrl(value) {
   return parsed.href;
 }
 
-export function buildAnalyzePayload({ url, sampleInterval = 1, topK = 10, minSimilarity = 0.5 }) {
+export function buildAnalyzePayload({
+  url, sampleInterval = 1, topK = 10, minSimilarity = 0.5, flagsEnabled = false
+}) {
   const interval = Number(sampleInterval);
   const limit = Number(topK);
   if (!Number.isFinite(interval) || interval <= 0) throw new Error('采样间隔必须大于 0 秒');
   if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error('人脸候选数必须在 1～10 之间');
+  if (typeof flagsEnabled !== 'boolean') throw new Error('对象检测开关必须是布尔值');
   return {
     url: validateVideoUrl(url),
     sample_interval: interval,
     top_k: limit,
-    threshold: similarityToDistance(minSimilarity)
+    threshold: similarityToDistance(minSimilarity),
+    flags_enabled: flagsEnabled
   };
 }

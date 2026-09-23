@@ -41,6 +41,7 @@ async def execute(task):
                 parameters["sample_interval"],
                 parameters["top_k"],
                 parameters["threshold"],
+                flags_enabled=parameters.get("flags_enabled") is True,
             )
         )
         lease = asyncio.create_task(heartbeat())

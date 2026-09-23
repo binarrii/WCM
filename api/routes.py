@@ -56,6 +56,13 @@ def _opt_float(source, key: str) -> float | None:
         return None
 
 
+def _task_flags_enabled(payload: dict) -> bool:
+    value = payload.get("flags_enabled", False)
+    if type(value) is not bool:
+        raise ValueError("flags_enabled 必须是布尔值")
+    return value
+
+
 _SEARCH_RESULT_FIELDS = (
     "matched_face_id",
     "created_at",
@@ -548,7 +555,9 @@ async def websocket_detect_nsfw(websocket: WebSocket):
             await websocket.send_json({"status": "error", "error": str(e)})
 
 
-async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
+async def _run_review_task(
+    task_id, url, sample_interval, top_k, threshold, *, flags_enabled: bool = False
+):
     coverage = ReviewCoverage()
     progress = ReviewProgress(task_id)
     progress.phase = "queued"
@@ -557,7 +566,13 @@ async def _run_review_task(task_id, url, sample_interval, top_k, threshold):
         async with contextlib.nullcontext() if settings.cluster_enabled else review_task_slot():
             await progress.set_phase("downloading")
             return await _process_analyze_media(
-                url, sample_interval, top_k, threshold, coverage=coverage, progress=progress
+                url,
+                sample_interval,
+                top_k,
+                threshold,
+                include_flags=flags_enabled,
+                coverage=coverage,
+                progress=progress,
             )
 
     async def record_cancellation():
@@ -630,8 +645,19 @@ async def analyze_media(request: Request, response: Response):
     sample_interval = float(body.get("sample_interval", 1.0))
     top_k = int(body.get("top_k", 10))
     threshold = float(body.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
+    try:
+        flags_enabled = _task_flags_enabled(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     parameters = {key: value for key, value in body.items() if key != "url"}
-    parameters.update({"sample_interval": sample_interval, "top_k": top_k, "threshold": threshold})
+    parameters.update(
+        {
+            "sample_interval": sample_interval,
+            "top_k": top_k,
+            "threshold": threshold,
+            "flags_enabled": flags_enabled,
+        }
+    )
 
     try:
         task_id = await review_task_store.create(url, parameters)
@@ -642,7 +668,14 @@ async def analyze_media(request: Request, response: Response):
         result = (
             await task_queue.wait_result(task_id)
             if settings.cluster_enabled
-            else await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+            else await _run_review_task(
+                task_id,
+                url,
+                sample_interval,
+                top_k,
+                threshold,
+                flags_enabled=flags_enabled,
+            )
         )
     except ReviewTaskCancelled as exc:
         raise HTTPException(
@@ -685,10 +718,20 @@ async def websocket_analyze_media(websocket: WebSocket):
             sample_interval = float(payload.get("sample_interval", 1.0))
             top_k = int(payload.get("top_k", 10))
             threshold = float(payload.get("threshold", DEFAULT_DISTANCE_THRESHOLD))
+            try:
+                flags_enabled = _task_flags_enabled(payload)
+            except ValueError as exc:
+                await websocket.send_json({"status": "error", "error": str(exc)})
+                continue
 
             parameters = {key: value for key, value in payload.items() if key != "url"}
             parameters.update(
-                {"sample_interval": sample_interval, "top_k": top_k, "threshold": threshold}
+                {
+                    "sample_interval": sample_interval,
+                    "top_k": top_k,
+                    "threshold": threshold,
+                    "flags_enabled": flags_enabled,
+                }
             )
             try:
                 await review_task_store.create(url, parameters, task_id)
@@ -703,7 +746,14 @@ async def websocket_analyze_media(websocket: WebSocket):
                     result = (
                         await task_queue.wait_result(task_id)
                         if settings.cluster_enabled
-                        else await _run_review_task(task_id, url, sample_interval, top_k, threshold)
+                        else await _run_review_task(
+                            task_id,
+                            url,
+                            sample_interval,
+                            top_k,
+                            threshold,
+                            flags_enabled=flags_enabled,
+                        )
                     )
             except ReviewTaskCancelled:
                 with contextlib.suppress(Exception):

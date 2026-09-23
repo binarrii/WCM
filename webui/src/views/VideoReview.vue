@@ -74,6 +74,7 @@ const videoUrl = ref('');
 const sampleInterval = ref(1);
 const minSimilarity = ref(DEFAULT_SIMILARITY);
 const topK = ref(10);
+const flagsEnabled = ref(false);
 const loading = ref(false);
 const error = ref('');
 const rawResults = ref(null);
@@ -266,6 +267,7 @@ const loadReviewTask = async () => {
     const parameters = task.parameters || {};
     sampleInterval.value = Number(parameters.sample_interval ?? 1);
     topK.value = Number(parameters.top_k ?? 10);
+    flagsEnabled.value = parameters.flags_enabled === true;
     if (Number.isFinite(Number(parameters.threshold))) {
       minSimilarity.value = Math.min(1, Math.max(0.1, 1 - Number(parameters.threshold)));
     }
@@ -307,6 +309,7 @@ const analyze = async () => {
       sampleInterval: sampleInterval.value,
       topK: topK.value,
       minSimilarity: minSimilarity.value,
+      flagsEnabled: flagsEnabled.value,
       onTaskAccepted: id => {
         if (disposed) return;
         loadedTaskId.value = id;
@@ -463,6 +466,7 @@ onBeforeUnmount(() => {
             <label class="url-field"><span>视频 HTTP(S) 地址</span><input v-model.trim="inputUrl" type="url" placeholder="http://10.252.25.251:18080/videos/example.mp4" required /></label>
             <label><span>采样间隔</span><div class="input-unit"><input v-model.number="sampleInterval" type="number" min="0.1" step="0.1" /><small>秒</small></div></label>
             <label><span>人脸候选数</span><select v-model.number="topK"><option v-for="value in [1, 3, 5, 10]" :key="value" :value="value">{{ value }}</option></select></label>
+            <label title="需同时开启参数配置中的全局开关"><span>对象检测</span><select v-model="flagsEnabled"><option :value="false">关闭</option><option :value="true">开启</option></select></label>
             <button class="analyze-button" type="submit" :disabled="loading"><Settings v-if="loading" class="spinner" /><Search v-else />{{ loading ? '分析中…' : '开始分析' }}</button>
           </form>
           <div class="similarity-control">
@@ -483,6 +487,7 @@ onBeforeUnmount(() => {
         <span class="setup-summary-url" :title="inputUrl"><Video />{{ inputUrl || '尚未填写视频地址' }}</span>
         <span>采样 {{ sampleInterval }}s</span>
         <span>候选 {{ topK }}</span>
+        <span>对象检测 {{ flagsEnabled ? '开启' : '关闭' }}</span>
         <span>相似度 {{ Math.round(minSimilarity * 100) }}%</span>
         <strong v-if="rawResults != null">{{ markers.length }} 条标记</strong>
         <strong v-else>尚未加载结果</strong>

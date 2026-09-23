@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -122,6 +123,58 @@ def test_result_download_rejects_unfinished_task(monkeypatch):
     assert response.status_code == 409
 
 
+@pytest.mark.parametrize("flags_enabled", [False, True])
+def test_queued_review_submission_persists_strict_task_object_switch(monkeypatch, flags_enabled):
+    create = AsyncMock(return_value="task-switch")
+    monkeypatch.setattr(review_tasks, "settings", SimpleNamespace(cluster_enabled=True))
+    monkeypatch.setattr(review_tasks.review_task_store, "create", create)
+    monkeypatch.setattr(
+        review_tasks.review_task_store,
+        "get",
+        AsyncMock(return_value={"id": "task-switch", "status": "queued"}),
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/v1/review_tasks",
+            json={"url": "https://example.com/video.mp4", "flags_enabled": flags_enabled},
+        )
+
+    assert response.status_code == 202
+    create.assert_awaited_once_with(
+        "https://example.com/video.mp4",
+        {
+            "sample_interval": 1.0,
+            "top_k": 10,
+            "threshold": 0.5,
+            "flags_enabled": flags_enabled,
+        },
+    )
+
+
+def test_review_endpoints_reject_non_boolean_task_object_switch(monkeypatch):
+    monkeypatch.setattr(review_tasks, "settings", SimpleNamespace(cluster_enabled=True))
+    queued_create = AsyncMock()
+    legacy_create = AsyncMock()
+    monkeypatch.setattr(review_tasks.review_task_store, "create", queued_create)
+    monkeypatch.setattr(routes.review_task_store, "create", legacy_create)
+
+    with TestClient(create_app()) as client:
+        queued = client.post(
+            "/api/v1/review_tasks",
+            json={"url": "https://example.com/video.mp4", "flags_enabled": "true"},
+        )
+        legacy = client.post(
+            "/api/v1/analyze_media",
+            json={"url": "https://example.com/video.mp4", "flags_enabled": 1},
+        )
+
+    assert queued.status_code == 422
+    assert legacy.status_code == 422
+    queued_create.assert_not_awaited()
+    legacy_create.assert_not_awaited()
+
+
 @pytest.mark.parametrize("incomplete", [False, True])
 def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch, incomplete):
     results = [{"timestamp": "00:00:01.000", "category": "待复核", "description": "内容"}]
@@ -149,6 +202,7 @@ def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch, inco
                 "sample_interval": 2,
                 "top_k": 5,
                 "threshold": 0.4,
+                "flags_enabled": True,
             },
         )
 
@@ -157,8 +211,9 @@ def test_analyze_media_persists_task_and_keeps_legacy_response(monkeypatch, inco
     assert response.headers["x-review-task-id"] == "task-1"
     create.assert_awaited_once_with(
         "https://example.com/video.mp4",
-        {"sample_interval": 2.0, "top_k": 5, "threshold": 0.4},
+        {"sample_interval": 2.0, "top_k": 5, "threshold": 0.4, "flags_enabled": True},
     )
+    assert routes._process_analyze_media.await_args.kwargs["include_flags"] is True
     complete.assert_awaited_once_with("task-1", results, None)
 
 
@@ -186,7 +241,8 @@ def test_http_and_websocket_persist_measured_coverage_without_changing_results(
 ):
     results = [{"timestamp": 2, "stage": "ocr", "review_status": "incomplete"}]
 
-    async def analyze(url, interval, top_k, threshold, *, coverage, progress):
+    async def analyze(url, interval, top_k, threshold, *, include_flags, coverage, progress):
+        assert include_flags is False
         coverage.add(range(10))
         return results
 

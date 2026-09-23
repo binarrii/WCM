@@ -56,7 +56,7 @@ const concurrencyHint = computed(() => {
   if (key === 'visual_concurrency') {
     return '视觉描述与对象检测共用此集群并发额度；正数限制总并发，≤ 0 由模型服务端控制。';
   }
-  if (key === 'flags_enabled') return '控制综合审核中的对象检测，包括关注旗帜/徽标、明确裸露部位和地图核查；命中仅作为待复核发现。';
+  if (key === 'flags_enabled') return '对象检测全局总开关，默认关闭。只有此处和任务级 flags_enabled 同时开启，才检测关注旗帜/徽标、明确裸露部位和地图；命中仅作为待复核发现。';
   if (key === 'flags_positive_prompt') return '正向提示词：描述需要定位的旗帜、徽标和裸露部位，保留各类别的英文标识。';
   if (key === 'flags_negative_prompt') return '反向提示词：排除普通国家/组织标志、常见品牌、自然彩虹及无明确裸露的画面，减少误报。';
   if (key === 'flags_map_positive_prompt') return '地图正向提示词：关注中国地图区域缺失、独立或外国归属表示，以及指定地名缺少中文旧称。保留英文类别标识和可见依据要求。';

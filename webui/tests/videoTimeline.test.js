@@ -79,8 +79,15 @@ test('analysis request uses API field names and converts similarity to distance'
   assert.deepEqual(buildAnalyzePayload({
     url: 'http://example.com/video.mp4', sampleInterval: 2, topK: 5, minSimilarity: 0.7
   }), {
-    url: 'http://example.com/video.mp4', sample_interval: 2, top_k: 5, threshold: 0.3
+    url: 'http://example.com/video.mp4', sample_interval: 2, top_k: 5, threshold: 0.3,
+    flags_enabled: false
   });
+  assert.equal(buildAnalyzePayload({
+    url: 'http://example.com/video.mp4', flagsEnabled: true
+  }).flags_enabled, true);
+  assert.throws(() => buildAnalyzePayload({
+    url: 'http://example.com/video.mp4', flagsEnabled: 'true'
+  }));
   assert.throws(() => buildAnalyzePayload({ url: 'http://example.com/a.mp4', sampleInterval: 0 }));
   assert.throws(() => buildAnalyzePayload({ url: 'http://example.com/a.mp4', topK: 11 }));
 });

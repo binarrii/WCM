@@ -6,7 +6,7 @@ import re
 import zipfile
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from pydantic import AnyHttpUrl, BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field, StrictBool
 
 from wcm_facerec.config import DEFAULT_DISTANCE_THRESHOLD, settings
 
@@ -22,6 +22,7 @@ class ReviewTaskSubmission(BaseModel):
     sample_interval: float = Field(default=1.0, gt=0, allow_inf_nan=False)
     top_k: int = Field(default=10, ge=1, le=10)
     threshold: float = Field(default=DEFAULT_DISTANCE_THRESHOLD, ge=0, le=1, allow_inf_nan=False)
+    flags_enabled: StrictBool = False
 
 
 @review_tasks_bp.post("/review_tasks", status_code=202)

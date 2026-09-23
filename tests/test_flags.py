@@ -306,7 +306,13 @@ async def test_window_path_keeps_exact_frames_instances_and_cache_timestamps(mon
     coverage = ReviewCoverage()
     progress = ReviewProgress()
     rows = await handlers._process_analyze_media(
-        "https://fixture/video.mp4", 1, 5, 0.5, coverage=coverage, progress=progress
+        "https://fixture/video.mp4",
+        1,
+        5,
+        0.5,
+        include_flags=True,
+        coverage=coverage,
+        progress=progress,
     )
     assert detector.await_count == 3  # Exact repeated images reuse successful detections.
     found = [row for row in rows if row.get("source") == "flags"]
@@ -332,11 +338,20 @@ async def test_image_path_and_disabled_switch(monkeypatch, sample_image_bytes):
     monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=sample_image_bytes))
     detector = AsyncMock(return_value=flags.parse_detections(json.dumps([FLAG, LOGO])))
     monkeypatch.setattr(flags, "detect", detector)
-    rows = await handlers._process_analyze_media("https://fixture/img.jpg", 1, 5, 0.5)
+    rows = await handlers._process_analyze_media(
+        "https://fixture/img.jpg", 1, 5, 0.5, include_flags=True
+    )
     assert len(rows) == 2 and all(row["source"] == "flags" for row in rows)
     assert all(row["object_samples"][0]["time_ms"] == 0 for row in rows)
-    monkeypatch.setattr(settings, "flags_enabled", False)
     assert await handlers._process_analyze_media("https://fixture/img.jpg", 1, 5, 0.5) == []
+    assert detector.await_count == 1
+    monkeypatch.setattr(settings, "flags_enabled", False)
+    assert (
+        await handlers._process_analyze_media(
+            "https://fixture/img.jpg", 1, 5, 0.5, include_flags=True
+        )
+        == []
+    )
     assert detector.await_count == 1
 
 
@@ -369,7 +384,9 @@ async def test_target_path_preserves_pts_and_fixed_sample_selection(monkeypatch)
     monkeypatch.setattr(handlers, "_download_video_safe_async", AsyncMock())
     detector = AsyncMock(return_value=flags.parse_detections(json.dumps([FLAG])))
     monkeypatch.setattr(flags, "detect", detector)
-    rows = await handlers._process_analyze_media("https://fixture/video.mp4", 1, 5, 0.5)
+    rows = await handlers._process_analyze_media(
+        "https://fixture/video.mp4", 1, 5, 0.5, include_flags=True
+    )
     assert detector.await_count == 2
     assert [row["object_samples"][0]["pts_seconds"] for row in rows] == [0.0003, 2]
     assert rows[0]["object_samples"][0]["duration_seconds"] == 0.04
@@ -385,8 +402,8 @@ async def test_dedicated_visual_path_does_not_run_flags(monkeypatch):
     detector.assert_not_awaited()
 
 
-def test_flag_configuration_is_enabled_by_default_and_validated():
-    assert Settings(_env_file=None).flags_enabled is True
+def test_flag_configuration_is_disabled_by_default_and_validated():
+    assert Settings(_env_file=None).flags_enabled is False
     with pytest.raises(ValueError):
         Settings(_env_file=None, flags_max_tokens=0)
 
@@ -467,7 +484,9 @@ async def test_mixed_symbol_nudity_and_map_findings_survive_full_image_review(
     quiet_siblings(monkeypatch)
     monkeypatch.setattr(handlers, "_download_url_safe", AsyncMock(return_value=sample_image_bytes))
     install_detector(monkeypatch, content=json.dumps([FLAG, LOGO, NUDITY, MAP]))
-    rows = await handlers._process_analyze_media("https://fixture/img.jpg", 1, 5, 0.5)
+    rows = await handlers._process_analyze_media(
+        "https://fixture/img.jpg", 1, 5, 0.5, include_flags=True
+    )
     leaves = list(flatten_findings(consolidate_results(rows)))
     assert len(leaves) == 4
     assert {row["object_type"] for row in leaves} == {"flag", "logo", "nudity", "map"}

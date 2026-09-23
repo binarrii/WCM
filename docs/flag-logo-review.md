@@ -48,11 +48,13 @@
 ## 参数与执行
 
 在参数页“对象检测”中调整以下参数，新提交任务会冻结配置快照。旧分组元数据保持原值，
-仅调整界面显示，确保兼容仍运行旧代码的 face-sync 进程。
+仅调整界面显示，确保兼容仍运行旧代码的 face-sync 进程。对象检测采用双开关：参数页的
+全局 `flags_enabled` 与任务请求中的 `flags_enabled` 必须同时为 `true` 才执行。任务参数未传、
+旧任务中没有该参数或任一开关为 `false` 时，都不调用对象检测模型。审核页也提供任务级开关。
 
 | 参数 | 默认值/含义 |
 | --- | --- |
-| flags_enabled | true，控制整个对象检测分支 |
+| flags_enabled | false，全局控制整个对象检测分支 |
 | flags_model | WasuAI/Qwen3.8-27B-Abliterated |
 | flags_timeout_s | 50，每次请求的秒数期限 |
 | flags_max_tokens | 2048，最大输出 token 数 |

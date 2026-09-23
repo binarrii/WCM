@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     guard_timeout_s: float = Field(default=10.0, gt=0)
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = ""
-    flags_enabled: bool = True
+    flags_enabled: bool = False
     flags_model: str = Field(default="WasuAI/Qwen3.8-27B-Abliterated", min_length=1)
     flags_timeout_s: float = Field(default=50.0, gt=0)
     flags_max_tokens: int = Field(default=2048, ge=256, le=16384)
