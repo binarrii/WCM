@@ -1,7 +1,7 @@
 <script setup>
 import { can } from '../services/auth';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileJson, Play, Search, Settings, Video } from '@lucide/vue';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileJson, Play, Search, Settings, Video } from '@lucide/vue';
 import { mediaService } from '../services/mediaService';
 import { saveJson } from '../services/downloads';
 import { navigateTo, reviewTaskIdFromHash } from '../services/navigation';
@@ -88,7 +88,6 @@ let disposed = false;
 const setupExpanded = ref(true);
 const markers = ref([]);
 const category = ref('');
-const incompleteCount = computed(() => markers.value.reduce((count, marker) => count + marker.findings.filter(finding => finding.review_status === 'incomplete').length, 0));
 const currentSeconds = ref(0);
 const durationMs = ref(0);
 const pendingSeek = ref(null);
@@ -446,7 +445,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="video-review animate-fade-in">
-    <p v-if="incompleteCount" class="review-warning" role="status"><AlertCircle /><span>有 {{ incompleteCount }} 项审核未完成，已保留其他审核结果。请筛选“审核未完成”并逐一人工复核，不能视为安全通过。</span><button type="button" @click="category = '审核未完成'">查看未审核项</button></p>
     <section :class="['review-setup-card', { collapsed: !setupExpanded }]">
       <div class="setup-heading">
         <div><h2>{{ loadedTaskId ? '审核任务复核' : '创建视频复核时间轴' }}</h2><p v-if="loadedTaskId">已自动加载任务 {{ loadedTaskId }} 的参数与结果。<button class="task-back-link" type="button" @click="navigateTo('tasks')">返回任务列表</button></p><p v-else>输入可访问的视频地址，系统会识别人脸、文字、画面内容、关注旗帜/徽标、明确裸露部位及地图核查线索。</p></div>

@@ -117,10 +117,4 @@
 .sample-navigation button:disabled { opacity: .4; cursor: default; }
 .sample-navigation svg { width: 13px; height: 13px; }
 
-.review-warning { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid var(--status-yellow-border); border-radius: 12px; color: var(--status-yellow); background: var(--status-yellow-bg); font-size: .8rem; }
-.review-warning svg { width: 20px; flex-shrink: 0; }
-.review-warning span { flex: 1; }
-.review-warning button { flex-shrink: 0; padding: 6px 9px; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 7px; cursor: pointer; }
-@media (max-width: 560px) { .review-warning { flex-wrap: wrap; } }
-
 .pending-review { margin-left: 8px; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #9b5c00; background: #fff2cc; }
