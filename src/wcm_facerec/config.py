@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     video_prepare_timeout_seconds: int = Field(default=7200, ge=30)
     video_prepare_concurrency: int = Field(default=2, ge=1, le=16)
     video_min_free_disk_mb: int = Field(default=2048, ge=1)
-    video_retention_days: int = Field(default=7, ge=1, le=365)
+    video_retention_days: int = Field(default=180, ge=1, le=365)
     hls_max_height: int = Field(default=1080, ge=144, le=4320)
     hls_max_segments: int = Field(default=50000, ge=1, le=100000)
     review_media_dir: str = "/tmp/wcm-review-media"
