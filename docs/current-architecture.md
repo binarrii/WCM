@@ -1,7 +1,7 @@
 # WCM 当前部署架构
 
 拓扑核对时间：2026-09-15 11:17（UTC+8）。架构基线版本：`2a3cd68`，分支：`codex/cluster-architecture`。
-后续系统管理入口更新见文末；当前运行版本以服务器 `DEPLOYED_COMMIT` 为准。
+后续系统管理入口更新见文末；当前运行镜像标签以服务器 Compose 配置为准。
 
 本文记录 251 服务器上已经部署的架构。当前具备 API、审核执行和人脸检索的多实例能力；
 这些实例仍运行在同一台服务器上，尚未形成跨服务器高可用集群。
@@ -16,6 +16,7 @@ WebUI 独立构建和部署，内置的 Nginx 同时提供静态页面、API 负
 flowchart TB
     Browser["浏览器"]
     Models["外部模型接口<br/>OCR · visual · guard"]
+    Flags["对象检测模型接口<br/>Ornith-1.5-35B-A3B"]
     NFS[("共享 NFS 存储<br/>ptjszx_ai01/rustfs-dev/data")]
 
     subgraph Host["251 服务器 · 10.252.25.251"]
@@ -48,6 +49,7 @@ flowchart TB
     Worker -->|人脸检测 / 搜索| Face
     Sync -->|HTTP 同步到 A / B| Face
     Worker --> Models
+    Worker --> Flags
     API -->|单项接口| Models
 
     classDef app fill:#eaf2ff,stroke:#4066a5,color:#172b4d;
@@ -55,7 +57,7 @@ flowchart TB
     classDef model fill:#fff3df,stroke:#a77b32,color:#493615;
     class Web,API,Worker,Sync app;
     class DB,Redis,RustFS,NFS data;
-    class Face,Models model;
+    class Face,Models,Flags model;
 ```
 
 图中连线表示主要调用或数据流；响应沿原连接返回。InsightFace 服务组内的写入、同步和读路由见第 4 节。
@@ -76,6 +78,7 @@ API、审核 Worker、face-sync 共用后端镜像，通过不同启动命令承
 | InsightFace 副本 A / B | 2 | `insightface-a:8080` / `insightface-b:8080` | 不发布宿主机端口；使用原主节点的固定镜像 |
 | RustFS | 1 | S3：`10.252.25.251:9000`；控制台：`:9001` | 独立 Compose 项目，目录 `/opt/binarii/rustfs-dev` |
 | 外部模型接口 | 按配置调用 | `https://models.ai.wtvdev.com/v1/chat/completions` | OCR、visual、guard；其内部部署不在本项目管理范围内 |
+| 对象检测模型接口 | 按配置调用 | `http://10.252.25.217:8800/v1/chat/completions` | 独立的 `flags_api_base_url`、`flags_model`、`flags_api_key` 与 `flags_concurrency`；Ornith-1.5-35B-A3B 的 `flags_reasoning_effort` 默认 `none` |
 | 旧版备用 WCM | 1 | `http://10.252.25.251:8001` | `/home/aigc/wcm`，不参与新队列和同步协调 |
 
 旧版 8001 仍连接同一个 InsightFace 主节点，因此它不是一份独立的人物库快照。
@@ -101,7 +104,7 @@ sequenceDiagram
     W->>DB: 短事务领取任务，获取执行令牌和租约
     loop 执行期间
         W->>DB: 心跳续租 / 持久化进度
-        W->>M: 人脸、OCR、visual、guard 调用
+        W->>M: 人脸、OCR、visual、flags、guard 调用
         W->>R: 发布进度通知
         R-->>API: 跨进程投递
         API-->>UI: WebSocket 推送
@@ -121,6 +124,8 @@ sequenceDiagram
 核对时的有效配置：审核总并发 `4`、每个 Worker 并发 `2`、视频窗口并发 `6`；任务租约 `60 秒`、心跳 `5 秒`、最多尝试 `3 次`。
 模型请求的集群总上限分别为 InsightFace `4`、OCR `8`、visual `6`、guard `8`，由 MySQL 连接持有的全局名额协调。
 增加容器数量不会自动提高这些上限。业务参数在任务提交时保存快照，调度及模型准入上限使用实时配置。
+以上数值是 2026-09-15 的核对记录。2026-09-30 对象检测改用独立 Ornith 服务与 `flags` 名额，
+251 当日参数为 `flags_concurrency=6`、`visual_concurrency=0`（由视觉模型服务端控制）。
 
 ## 3. 图片与 RustFS 的映射
 

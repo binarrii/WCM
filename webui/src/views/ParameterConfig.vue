@@ -54,8 +54,12 @@ const form = ref({
 const concurrencyHint = computed(() => {
   const key = form.value.key;
   if (key === 'visual_concurrency') {
-    return '视觉描述与对象检测共用此集群并发额度；正数限制总并发，≤ 0 由模型服务端控制。';
+    return '视觉描述的集群并发额度；正数限制总并发，≤ 0 由模型服务端控制。';
   }
+  if (key === 'flags_api_base_url') return '对象检测专用 OpenAI 兼容服务的基础地址，例如 http://10.252.25.217:8800/v1。请求将发送至 /chat/completions。';
+  if (key === 'flags_api_key') return '对象检测服务的 Bearer API Key；服务无需认证时留空。';
+  if (key === 'flags_reasoning_effort') return '对象检测默认不生成推理内容，避免耗尽输出 token；优先使用 reasoning_effort，服务不支持时改用 enable_thinking。auto 表示两者都不传。';
+  if (key === 'flags_concurrency') return '对象检测独立的集群并发额度；正数限制总并发，≤ 0 由模型服务端控制。';
   if (key === 'flags_enabled') return '对象检测全局总开关，默认关闭。只有此处和任务级 flags_enabled 同时开启，才检测关注旗帜/徽标、明确裸露部位和地图；命中仅作为待复核发现。';
   if (key === 'flags_positive_prompt') return '正向提示词：描述需要定位的旗帜、徽标和裸露部位，保留各类别的英文标识。';
   if (key === 'flags_negative_prompt') return '反向提示词：排除普通国家/组织标志、常见品牌、自然彩虹及无明确裸露的画面，减少误报。';
@@ -65,7 +69,7 @@ const concurrencyHint = computed(() => {
   if (key === 'face_neighbor_concurrency') {
     return '填写整数：1～8 限制每个视频同时处理的补帧数；≤ 0 不限制补帧并发，由模型服务端控制。';
   }
-  if (['guard_concurrency', 'insightface_concurrency', 'ocr_concurrency', 'visual_concurrency'].includes(key)) {
+  if (['guard_concurrency', 'insightface_concurrency', 'ocr_concurrency', 'visual_concurrency', 'flags_concurrency'].includes(key)) {
     return '填写整数：正数限制集群内该模型的调用并发；≤ 0 不限制，由模型服务端控制。';
   }
   return '';

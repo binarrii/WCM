@@ -136,9 +136,12 @@ class Settings(BaseSettings):
     model_api_url: str = "https://models.ai.wtvdev.com/v1/chat/completions"
     model_api_key: str = ""
     flags_enabled: bool = False
-    flags_model: str = Field(default="WasuAI/Qwen3.8-27B-Abliterated", min_length=1)
+    flags_model: str = Field(default="Ornith-1.5-35B-A3B", min_length=1)
+    flags_api_base_url: str = Field(default="http://10.252.25.217:8800/v1", min_length=1)
+    flags_api_key: str = ""
     flags_timeout_s: float = Field(default=50.0, gt=0)
     flags_max_tokens: int = Field(default=2048, ge=256, le=16384)
+    flags_reasoning_effort: Literal["auto", "none", "low", "medium", "high"] = "none"
     flags_positive_prompt: str = Field(default=POSITIVE_PROMPT, min_length=1, max_length=16000)
     flags_negative_prompt: str = Field(default=NEGATIVE_PROMPT, min_length=1, max_length=16000)
     flags_map_positive_prompt: str = Field(
@@ -185,6 +188,7 @@ class Settings(BaseSettings):
     insightface_concurrency: int = 32
     ocr_concurrency: int = 32
     visual_concurrency: int = 6
+    flags_concurrency: int = 6
     guard_concurrency: int = 24
     image_storage: Literal["local", "s3"] = "local"
     s3_endpoint: str = ""
@@ -259,6 +263,7 @@ BUSINESS_PARAMETER_SPECS = {
     "insightface_concurrency": BusinessParameterSpec("number", "审核调度"),
     "ocr_concurrency": BusinessParameterSpec("number", "审核调度"),
     "visual_concurrency": BusinessParameterSpec("number", "审核调度"),
+    "flags_concurrency": BusinessParameterSpec("number", "审核调度"),
     "guard_concurrency": BusinessParameterSpec("number", "审核调度"),
     "jpeg_quality": BusinessParameterSpec("number", "审核调度"),
     "visual_timeout_s": BusinessParameterSpec("number", "审核调度"),
@@ -268,8 +273,13 @@ BUSINESS_PARAMETER_SPECS = {
     # The UI presents this existing group as object detection.
     "flags_enabled": BusinessParameterSpec("boolean", "旗帜与徽标"),
     "flags_model": BusinessParameterSpec("string", "旗帜与徽标"),
+    "flags_api_base_url": BusinessParameterSpec("string", "旗帜与徽标"),
+    "flags_api_key": BusinessParameterSpec("string", "旗帜与徽标", secret=True),
     "flags_timeout_s": BusinessParameterSpec("number", "旗帜与徽标"),
     "flags_max_tokens": BusinessParameterSpec("number", "旗帜与徽标"),
+    "flags_reasoning_effort": BusinessParameterSpec(
+        "enum", "旗帜与徽标", enum_values=("auto", "none", "low", "medium", "high")
+    ),
     "flags_positive_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
     "flags_negative_prompt": BusinessParameterSpec("string", "旗帜与徽标"),
     "flags_map_positive_prompt": BusinessParameterSpec("string", "旗帜与徽标"),

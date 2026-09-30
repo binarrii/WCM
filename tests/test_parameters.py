@@ -14,8 +14,11 @@ from wcm_facerec.config import BUSINESS_PARAMETER_SPECS, Settings, settings
 EXPECTED_BUSINESS_PARAMETERS = {
     "flags_enabled",
     "flags_model",
+    "flags_api_base_url",
+    "flags_api_key",
     "flags_timeout_s",
     "flags_max_tokens",
+    "flags_reasoning_effort",
     "flags_positive_prompt",
     "flags_negative_prompt",
     "flags_map_positive_prompt",
@@ -60,6 +63,7 @@ EXPECTED_BUSINESS_PARAMETERS = {
     "insightface_concurrency",
     "ocr_concurrency",
     "visual_concurrency",
+    "flags_concurrency",
     "guard_concurrency",
     "review_window_concurrency",
     "jpeg_quality",
@@ -237,6 +241,26 @@ def test_secret_parameters_are_masked_but_remain_available_to_server_code():
         parameter_store._install_snapshot([])
 
 
+def test_detector_endpoint_and_key_are_runtime_parameters():
+    group = BUSINESS_PARAMETER_SPECS["flags_model"].group
+    parameter_store._install_snapshot([
+        _row("flags_model", "custom-detector", "string", group),
+        _row("flags_api_base_url", "https://detector.example/v1", "string", group),
+        _row("flags_api_key", "detector-secret", "string", group),
+        _row("flags_reasoning_effort", '"none"', "enum", group,
+             '["auto","none","low","medium","high"]'),
+    ])
+    try:
+        assert settings.flags_model == "custom-detector"
+        assert settings.flags_api_base_url == "https://detector.example/v1"
+        assert settings.flags_api_key == "detector-secret"
+        assert settings.flags_reasoning_effort == "none"
+        public = {item["key"]: item for item in parameter_store.list_parameters()["items"]}
+        assert public["flags_api_key"]["value"] is None
+    finally:
+        parameter_store._install_snapshot([])
+
+
 @pytest.mark.parametrize(
     ("key", "value", "value_type", "group", "options"),
     [
@@ -259,6 +283,7 @@ def test_builtin_parameter_type_group_and_domain_validation(key, value, value_ty
         ("insightface_concurrency", 32),
         ("ocr_concurrency", 32),
         ("visual_concurrency", 6),
+        ("flags_concurrency", 6),
     ],
 )
 def test_optional_concurrency_defaults_and_parameter_round_trip(key, default):

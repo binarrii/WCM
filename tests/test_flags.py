@@ -140,7 +140,10 @@ def install_detector(monkeypatch, *, content=None, finish="stop"):
     calls, slots = [], []
 
     def respond(request):
-        calls.append(json.loads(request.content))
+        payload = json.loads(request.content)
+        payload["_request_url"] = str(request.url)
+        payload["_authorization"] = request.headers.get("authorization")
+        calls.append(payload)
         assert request.extensions["timeout"]["read"] == settings.flags_timeout_s
         return httpx.Response(
             200,
@@ -167,14 +170,73 @@ def install_detector(monkeypatch, *, content=None, finish="stop"):
 
 
 @pytest.mark.asyncio
-async def test_request_uses_visual_quota_and_one_image_and_configured_model(monkeypatch):
+async def test_request_uses_dedicated_endpoint_quota_and_configured_model(monkeypatch):
     monkeypatch.setattr(settings, "flags_timeout_s", 3)
     calls, slots = install_detector(monkeypatch)
     assert len(await flags.detect("image-data")) == 2
-    assert slots == ["visual"]
-    assert calls[0]["model"] == "WasuAI/Qwen3.8-27B-Abliterated"
+    assert slots == ["flags"]
+    assert calls[0]["model"] == "Ornith-1.5-35B-A3B"
+    assert calls[0]["_request_url"] == "http://10.252.25.217:8800/v1/chat/completions"
+    assert calls[0]["_authorization"] is None
     assert calls[0]["max_tokens"] == 2048
+    assert calls[0]["reasoning_effort"] == "none"
     assert [part["type"] for part in calls[0]["messages"][0]["content"]] == ["text", "image_url"]
+
+
+@pytest.mark.asyncio
+async def test_detector_base_url_and_key_are_independent_of_visual_service(monkeypatch):
+    monkeypatch.setattr(settings, "flags_api_base_url", "https://detector.example/v1/")
+    monkeypatch.setattr(settings, "flags_api_key", "detector-secret")
+    monkeypatch.setattr(settings, "model_api_url", "https://visual.example/v1/chat/completions")
+    monkeypatch.setattr(settings, "model_api_key", "visual-secret")
+    calls, slots = install_detector(monkeypatch, content="[]")
+    assert await flags.detect("image-data") == []
+    assert slots == ["flags"]
+    assert calls[0]["_request_url"] == "https://detector.example/v1/chat/completions"
+    assert calls[0]["_authorization"] == "Bearer detector-secret"
+
+
+@pytest.mark.asyncio
+async def test_detector_can_omit_reasoning_effort_for_other_services(monkeypatch):
+    monkeypatch.setattr(settings, "flags_reasoning_effort", "auto")
+    calls, _ = install_detector(monkeypatch, content="[]")
+    assert await flags.detect("image-data") == []
+    assert "reasoning_effort" not in calls[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("effort", "thinking"), [("none", False), ("low", True)])
+async def test_detector_falls_back_to_enable_thinking_when_effort_is_unsupported(
+    monkeypatch, effort, thinking
+):
+    monkeypatch.setattr(settings, "flags_reasoning_effort", effort)
+    requests, slots = [], []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(
+                400,
+                json={"error": {"code": "unsupported_parameter", "param": "reasoning_effort"}},
+            )
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": "[]"}}]},
+        )
+
+    @asynccontextmanager
+    async def client(model, timeout):
+        slots.append(model)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as connection:
+            yield connection
+
+    monkeypatch.setattr(flags, "model_client", client)
+    assert await flags.detect("image-data") == []
+    assert slots == ["flags"]
+    assert requests[0]["reasoning_effort"] == effort
+    assert "chat_template_kwargs" not in requests[0]
+    assert "reasoning_effort" not in requests[1]
+    assert requests[1]["chat_template_kwargs"] == {"enable_thinking": thinking}
 
 
 @pytest.mark.asyncio
@@ -198,7 +260,7 @@ async def test_organization_rules_reach_request_with_existing_stored_prompts(
         assert settings.flags_negative_prompt == legacy_negative
         assert settings.flags_organization_targets == organizations
 
-    assert len(calls) == 1 and slots == ["visual"]
+    assert len(calls) == 1 and slots == ["flags"]
     content = calls[0]["messages"][0]["content"]
     assert content[1]["image_url"]["url"].endswith("original-unannotated-frame")
     prompt = content[0]["text"]
@@ -404,8 +466,11 @@ async def test_dedicated_visual_path_does_not_run_flags(monkeypatch):
 
 def test_flag_configuration_is_disabled_by_default_and_validated():
     assert Settings(_env_file=None).flags_enabled is False
+    assert Settings(_env_file=None).flags_reasoning_effort == "none"
     with pytest.raises(ValueError):
         Settings(_env_file=None, flags_max_tokens=0)
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, flags_reasoning_effort="unsupported")
 
 
 def test_flag_parameters_remain_frozen_for_a_running_review(monkeypatch):

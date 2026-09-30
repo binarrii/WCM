@@ -39,7 +39,13 @@ MySQL 短事务在全局名额检查后通过 `FOR UPDATE SKIP LOCKED` 领取任
 本轮不实现窗口级断点续跑；下载缓存和解码临时文件属于 Worker 本地可丢弃数据。
 
 提交时保存业务参数快照，模型参数在任务及其线程中固定使用该快照。
-集群总并发和模型请求限额读取实时配置，分别控制 InsightFace、OCR、visual 和 guard。
+集群总并发和模型请求限额读取实时配置，分别控制 InsightFace、OCR、visual、flags 和 guard。
+对象检测使用 `flags_model` 指定模型、`flags_api_base_url` 指定 OpenAI 兼容服务基础地址，
+请求发送至该地址的 `/chat/completions`；可选 `flags_api_key` 用于单独认证，
+`flags_concurrency` 控制独立并发额度。visual 仍使用 `model_api_url` 和 `model_api_key`。
+Ornith 默认启用推理，复杂帧可能耗尽 `flags_max_tokens`。`flags_reasoning_effort` 默认 `none`，
+让检测直接输出 JSON；服务明确拒绝 `reasoning_effort` 时，客户端改用
+`chat_template_kwargs.enable_thinking` 重试一次。设为 `auto` 时两种参数都不发送。
 模型名额和人物写锁由 MySQL 连接持有，不依赖同一机器的文件锁。
 
 ## 事件和共享文件

@@ -68,6 +68,23 @@ def _error(code, reason):
     return ModelResponseError("flags", code, f"对象检测模型{reason}")
 
 
+def _reasoning_effort_unsupported(response):
+    if response.status_code not in (400, 422):
+        return False
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return False
+    if not isinstance(error, dict):
+        return False
+    if error.get("param") == "reasoning_effort":
+        return True
+    description = " ".join(str(error.get(key, "")) for key in ("code", "message")).lower()
+    return "reasoning_effort" in description and any(
+        marker in description for marker in ("unsupported", "not supported", "unknown", "unrecognized")
+    )
+
+
 def parse_detections(content):
     if not isinstance(content, str) or not content.strip():
         raise _error("empty_response", "返回空结果")
@@ -208,14 +225,32 @@ async def detect(b64_image):
         "temperature": 0,
         "max_tokens": settings.flags_max_tokens,
     }
-    # Object detection and visual descriptions share the Qwen service and quota.
-    async with model_client("visual", settings.flags_timeout_s) as client:
+    if settings.flags_reasoning_effort != "auto":
+        payload["reasoning_effort"] = settings.flags_reasoning_effort
+    headers = (
+        {"Authorization": f"Bearer {settings.flags_api_key}"}
+        if settings.flags_api_key
+        else {}
+    )
+    async with model_client("flags", settings.flags_timeout_s) as client:
+        endpoint = settings.flags_api_base_url.rstrip("/") + "/chat/completions"
         response = await client.post(
-            settings.model_api_url,
-            headers={"Authorization": f"Bearer {settings.model_api_key}"},
+            endpoint,
+            headers=headers,
             json=payload,
             timeout=settings.flags_timeout_s,
         )
+        if "reasoning_effort" in payload and _reasoning_effort_unsupported(response):
+            # OpenAI-compatible gateways differ: retry only when the first
+            # parameter is explicitly rejected, keeping the same model slot.
+            effort = payload.pop("reasoning_effort")
+            payload["chat_template_kwargs"] = {"enable_thinking": effort != "none"}
+            response = await client.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=settings.flags_timeout_s,
+            )
         response.raise_for_status()
         try:
             choice = response.json()["choices"][0]
